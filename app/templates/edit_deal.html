@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Fırsat Düzenle - CRM Sistemi{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-pencil"></i> Fırsat Düzenle</h2>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="title" class="form-label">Fırsat Adı *</label>
+                    <input type="text" class="form-control" id="title" name="title" value="{{ deal.title }}" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="customer_id" class="form-label">Müşteri *</label>
+                    <select class="form-select" id="customer_id" name="customer_id" required>
+                        {% for customer in customers %}
+                        <option value="{{ customer.id }}" {{ 'selected' if customer.id == deal.customer_id }}>
+                            {{ customer.first_name }} {{ customer.last_name }} - {{ customer.company or 'Bireysel' }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    <label for="value" class="form-label">Toplam Değer (₺) *</label>
+                    <input type="number" class="form-control" id="value" name="value" value="{{ deal.value }}" min="0" step="0.01" required>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label for="stage" class="form-label">Aşama</label>
+                    <select class="form-select" id="stage" name="stage">
+                        <option value="yeni" {{ 'selected' if deal.stage == 'yeni' }}>Yeni</option>
+                        <option value="iletisim" {{ 'selected' if deal.stage == 'iletisim' }}>İletişim</option>
+                        <option value="teklif" {{ 'selected' if deal.stage == 'teklif' }}>Teklif</option>
+                        <option value="muzakere" {{ 'selected' if deal.stage == 'muzakere' }}>Müzakere</option>
+                        <option value="kazanilan" {{ 'selected' if deal.stage == 'kazanilan' }}>Kazanılan</option>
+                        <option value="kaybedilen" {{ 'selected' if deal.stage == 'kaybedilen' }}>Kaybedilen</option>
+                        <option value="revize" {{ 'selected' if deal.stage == 'revize' }}>Revize</option>
+                    </select>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label for="expected_close" class="form-label">Beklenen Kapanış</label>
+                    <input type="date" class="form-control" id="expected_close" name="expected_close" value="{{ deal.expected_close.strftime('%Y-%m-%d') if deal.expected_close else '' }}">
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label for="valid_until" class="form-label">Geçerlilik Tarihi</label>
+                    <input type="date" class="form-control" id="valid_until" name="valid_until" value="{{ deal.valid_until.strftime('%Y-%m-%d') if deal.valid_until else '' }}">
+                </div>
+            </div>
+
+            <h5 class="mt-4 mb-3"><i class="bi bi-box"></i> Ürün / Hizmet Detayları</h5>
+            <div id="items-container">
+                {% for item in deal.items %}
+                <div class="row mb-2 item-row">
+                    <div class="col-md-4">
+                        <input type="text" class="form-control" name="desc_{{ loop.index0 }}" value="{{ item.description }}" placeholder="Açıklama" required>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="number" class="form-control" name="qty_{{ loop.index0 }}" value="{{ item.quantity }}" placeholder="Miktar" min="0" step="0.01" required>
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" name="unit_{{ loop.index0 }}">
+                            <option value="adet" {{ 'selected' if item.unit == 'adet' }}>Adet</option>
+                            <option value="kg" {{ 'selected' if item.unit == 'kg' }}>Kg</option>
+                            <option value="mt" {{ 'selected' if item.unit == 'mt' }}>Metre</option>
+                            <option value="lt" {{ 'selected' if item.unit == 'lt' }}>Litre</option>
+                            <option value="m2" {{ 'selected' if item.unit == 'm2' }}>m²</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="number" class="form-control" name="price_{{ loop.index0 }}" value="{{ item.unit_price }}" placeholder="Birim Fiyat (₺)" min="0" step="0.01" required>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <button type="button" class="btn btn-success btn-sm mb-3" id="add-item">
+                <i class="bi bi-plus"></i> Ürün Ekle
+            </button>
+
+            <div class="mb-3">
+                <label for="notes" class="form-label">Notlar</label>
+                <textarea class="form-control" id="notes" name="notes" rows="3">{{ deal.notes or '' }}</textarea>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Güncelle</button>
+                <a href="{{ url_for('deal_detail', id=deal.id) }}" class="btn btn-secondary"><i class="bi bi-x-lg"></i> İptal</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+let itemCount = {{ deal.items|length }};
+document.getElementById('add-item').addEventListener('click', function() {
+    const container = document.getElementById('items-container');
+    const row = document.createElement('div');
+    row.className = 'row mb-2 item-row';
+    row.innerHTML = `
+        <div class="col-md-4">
+            <input type="text" class="form-control" name="desc_${itemCount}" placeholder="Açıklama" required>
+        </div>
+        <div class="col-md-2">
+            <input type="number" class="form-control" name="qty_${itemCount}" placeholder="Miktar" min="0" step="0.01" required>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" name="unit_${itemCount}">
+                <option value="adet">Adet</option>
+                <option value="kg">Kg</option>
+                <option value="mt">Metre</option>
+                <option value="lt">Litre</option>
+                <option value="m2">m²</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <input type="number" class="form-control" name="price_${itemCount}" placeholder="Birim Fiyat (₺)" min="0" step="0.01" required>
+        </div>
+        <div class="col-md-2">
+            <button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button>
+        </div>
+    `;
+    container.appendChild(row);
+    itemCount++;
+});
+
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
+        e.target.closest('.item-row').remove();
+    }
+});
+</script>
+{% endblock %}

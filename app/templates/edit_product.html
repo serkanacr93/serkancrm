@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Ürün Düzenle{% endblock %}
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-pencil"></i> Ürün Düzenle</h2>
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-6 mb-3"><label class="form-label">Ürün Adı *</label><input type="text" class="form-control" name="name" value="{{ product.name }}" required></div>
+                        <div class="col-md-3 mb-3"><label class="form-label">SKU</label><input type="text" class="form-control" name="sku" value="{{ product.sku or '' }}"></div>
+                        <div class="col-md-3 mb-3"><label class="form-label">Kategori</label><input type="text" class="form-control" name="category" value="{{ product.category or '' }}"></div>
+                    </div>
+                    <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="description" rows="2">{{ product.description or '' }}</textarea></div>
+                    <div class="row">
+                        <div class="col-md-2 mb-3"><label class="form-label">Birim</label><select class="form-select" name="unit"><option value="adet" {{ 'selected' if product.unit == 'adet' }}>Adet</option><option value="kg" {{ 'selected' if product.unit == 'kg' }}>Kg</option><option value="mt" {{ 'selected' if product.unit == 'mt' }}>Metre</option><option value="lt" {{ 'selected' if product.unit == 'lt' }}>Litre</option><option value="m2" {{ 'selected' if product.unit == 'm2' }}>m²</option><option value="set" {{ 'selected' if product.unit == 'set' }}>Set</option></select></div>
+                        <div class="col-md-2 mb-3"><label class="form-label">Stok</label><input type="number" class="form-control" name="stock_quantity" value="{{ product.stock_quantity }}" step="0.01"></div>
+                        <div class="col-md-2 mb-3"><label class="form-label">Min. Stok</label><input type="number" class="form-control" name="min_stock" value="{{ product.min_stock }}" step="0.01"></div>
+                        <div class="col-md-3 mb-3"><label class="form-label">Maliyet (₺)</label><input type="number" class="form-control" name="cost_price" value="{{ product.cost_price }}" step="0.01"></div>
+                        <div class="col-md-3 mb-3"><label class="form-label">Satış (₺)</label><input type="number" class="form-control" name="sell_price" value="{{ product.sell_price }}" step="0.01"></div>
+                    </div>
+                    <div class="mb-3"><label class="form-label">Durum</label><select class="form-select" name="status"><option value="aktif" {{ 'selected' if product.status == 'aktif' }}>Aktif</option><option value="pasif" {{ 'selected' if product.status == 'pasif' }}>Pasif</option></select></div>
+                    <div class="d-flex gap-2"><button type="submit" class="btn btn-primary"><i class="bi bi-check"></i> Güncelle</button><a href="{{ url_for('product_detail', id=product.id) }}" class="btn btn-secondary">İptal</a></div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

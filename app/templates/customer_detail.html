@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block title %}{{ customer.first_name }} {{ customer.last_name }} - Müşteri Detayı{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>
+        {% if customer.company_name %}
+        <i class="bi bi-building"></i> {{ customer.company_name }}
+        <small class="text-muted fs-5">- {{ customer.first_name }} {{ customer.last_name }}</small>
+        {% else %}
+        <i class="bi bi-person"></i> {{ customer.first_name }} {{ customer.last_name }}
+        {% endif %}
+    </h2>
+    <div>
+        <a href="{{ url_for('customer_statement_pdf', id=customer.id) }}" class="btn btn-info" target="_blank">
+            <i class="bi bi-file-pdf"></i> Ekstre PDF
+        </a>
+        <a href="{{ url_for('add_payment') }}?customer_id={{ customer.id }}" class="btn btn-success">
+            <i class="bi bi-cash"></i> Ödeme Ekle
+        </a>
+        <a href="{{ url_for('edit_customer', id=customer.id) }}" class="btn btn-warning">
+            <i class="bi bi-pencil"></i> Düzenle
+        </a>
+        <a href="{{ url_for('customers') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Geri
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4">
+        {% if customer.company_name %}
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-building"></i> Firma Bilgileri
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr><th width="100">Firma:</th><td>{{ customer.company_name }}</td></tr>
+                    {% if customer.tax_office %}<tr><th>Vergi Dairesi:</th><td>{{ customer.tax_office }}</td></tr>{% endif %}
+                    {% if customer.tax_id %}<tr><th>Vergi No:</th><td>{{ customer.tax_id }}</td></tr>{% endif %}
+                    {% if customer.trade_registry %}<tr><th>Sicil No:</th><td>{{ customer.trade_registry }}</td></tr>{% endif %}
+                    {% if customer.company_phone %}<tr><th>Telefon:</th><td>{{ customer.company_phone }}</td></tr>{% endif %}
+                    {% if customer.company_email %}<tr><th>E-posta:</th><td>{{ customer.company_email }}</td></tr>{% endif %}
+                    {% if customer.company_website %}<tr><th>Web:</th><td><a href="{{ customer.company_website }}" target="_blank">{{ customer.company_website }}</a></td></tr>{% endif %}
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if customer.contact_person %}
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-person-badge"></i> Yetkili Kişi
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr><th width="100">Ad Soyad:</th><td>{{ customer.contact_person }}</td></tr>
+                    {% if customer.contact_title %}<tr><th>Unvan:</th><td>{{ customer.contact_title }}</td></tr>{% endif %}
+                    {% if customer.contact_phone %}<tr><th>Telefon:</th><td>{{ customer.contact_phone }}</td></tr>{% endif %}
+                    {% if customer.contact_email %}<tr><th>E-posta:</th><td>{{ customer.contact_email }}</td></tr>{% endif %}
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-info text-white">
+                <i class="bi bi-person"></i> Kişisel Bilgiler
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr><th width="100">Durum:</th><td><span class="badge bg-{{ 'success' if customer.status == 'aktif' else 'secondary' }}">{{ customer.status }}</span></td></tr>
+                    <tr><th>E-posta:</th><td>{{ customer.email or '-' }}</td></tr>
+                    <tr><th>Telefon:</th><td>{{ customer.phone or '-' }}</td></tr>
+                    <tr><th>Kayıt:</th><td>{{ customer.created_at.strftime('%d.%m.%Y') }}</td></tr>
+                </table>
+            </div>
+        </div>
+
+        {% if customer.address %}
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header"><i class="bi bi-geo-alt"></i> Adres</div>
+            <div class="card-body">{{ customer.address }}</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="col-md-8">
+        <ul class="nav nav-tabs mb-3">
+            <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#deals">
+                    <i class="bi bi-file-earmark-text"></i> Teklifler ({{ deals|length }})
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#statements">
+                    <i class="bi bi-cash-stack"></i> Ekstre ({{ statements|length }})
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#daily-reports">
+                    <i class="bi bi-journal-text"></i> Günlük Rapor ({{ daily_reports|length }})
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#payments">
+                    <i class="bi bi-cash-stack"></i> Ödemeler ({{ customer.payments|length }})
+                </a>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            <div class="tab-pane fade show active" id="deals">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        {% if deals %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Teklif No</th>
+                                        <th>Başlık</th>
+                                        <th>Ara Toplam</th>
+                                        <th>KDV</th>
+                                        <th>Toplam</th>
+                                        <th>Durum</th>
+                                        <th>Geçerlilik</th>
+                                        <th>İşlem</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for deal in deals %}
+                                    <tr class="{{ 'table-danger' if deal.is_expired else 'table-warning' if deal.is_expiring_soon else '' }}">
+                                        <td><small>TKL-{{ "%05d"|format(deal.id) }}</small></td>
+                                        <td><a href="{{ url_for('deal_detail', id=deal.id) }}">{{ deal.title }}</a></td>
+                                        <td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td>
+                                        <td><small>%{{ deal.vat_rate }}</small></td>
+                                        <td><strong>{{ "{:,.2f}".format(deal.value) }} ₺</strong></td>
+                                        <td><span class="badge bg-{{ 'success' if deal.stage == 'kazanilan' else 'danger' if deal.stage == 'kaybedilen' else 'warning' if deal.stage == 'revize' else 'info' }}">{{ deal.stage }}</span></td>
+                                        <td>
+                                            {% if deal.valid_until %}
+                                                {{ deal.valid_until.strftime('%d.%m.%Y') }}
+                                                {% if deal.is_expired %}
+                                                    <span class="badge bg-danger">Süresi Doldu</span>
+                                                {% elif deal.is_expiring_soon %}
+                                                    <span class="badge bg-warning">{{ deal.days_until_expire }} gün</span>
+                                                {% endif %}
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('deal_pdf', id=deal.id) }}" class="btn btn-sm btn-outline-info" target="_blank">
+                                                <i class="bi bi-file-pdf"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-4">Henüz teklif bulunmuyor.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="statements">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        {% if statements %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead class="table-dark">
+                                    <tr><th>Tarih</th><th>Tür</th><th>Açıklama</th><th>Tutar</th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for s in statements %}
+                                    <tr>
+                                        <td>{{ s.created_at.strftime('%d.%m.%Y') }}</td>
+                                        <td><span class="badge bg-{{ 'danger' if s.type == 'borc' else 'success' }}">{{ s.type|upper }}</span></td>
+                                        <td>{{ s.description or '-' }}</td>
+                                        <td>{{ "{:,.2f}".format(s.amount) }} ₺</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot class="table-light">
+                                    <tr><td colspan="3"><strong>Toplam Borç:</strong></td><td><strong class="text-danger">{{ "{:,.2f}".format(total_debit) }} ₺</strong></td></tr>
+                                    <tr><td colspan="3"><strong>Toplam Alacak:</strong></td><td><strong class="text-success">{{ "{:,.2f}".format(total_credit) }} ₺</strong></td></tr>
+                                    <tr class="table-warning"><td colspan="3"><strong>Bakiye:</strong></td><td><strong>{{ "{:,.2f}".format(total_debit - total_credit) }} ₺</strong></td></tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-4">Henüz ekstre kaydı bulunmuyor.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="daily-reports">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        {% if daily_reports %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th style="width: 10%;">Tarih</th>
+                                        <th style="width: 15%;">Müşteri</th>
+                                        <th style="width: 12%;">Telefon</th>
+                                        <th style="width: 40%;">Notlar</th>
+                                        <th style="width: 13%;">Ekleyen</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for report in daily_reports %}
+                                    <tr>
+                                        <td>{{ report.report_date.strftime('%d.%m.%Y') }}</td>
+                                        <td>{{ report.customer_name }}</td>
+                                        <td>{{ report.phone or '-' }}</td>
+                                        <td>{{ report.notes or '-' }}</td>
+                                        <td>{{ report.user.full_name or report.user.username }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-4">Henüz günlük rapor bulunmuyor.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="payments">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        {% if customer.payments %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Tarih</th>
+                                        <th>Tutar</th>
+                                        <th>Yöntem</th>
+                                        <th>Referans No</th>
+                                        <th>Durum</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for payment in customer.payments %}
+                                    <tr>
+                                        <td>{{ payment.payment_date.strftime('%d.%m.%Y') }}</td>
+                                        <td><strong>{{ "{:,.2f}".format(payment.amount) }} ₺</strong></td>
+                                        <td>{{ payment.payment_method or '-' }}</td>
+                                        <td>{{ payment.reference_no or '-' }}</td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if payment.status == 'odendi' else 'warning' if payment.status == 'beklemede' else 'danger' }}">
+                                                {{ payment.status }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-4">Henüz ödeme kaydı bulunmuyor.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

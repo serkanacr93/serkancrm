@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Sevkiyat Detayı - SVN-{{ "%05d"|format(shipment.id) }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2><i class="bi bi-truck"></i> Sevkiyat Detayı</h2>
+        <small class="text-muted">SVN-{{ "%05d"|format(shipment.id) }} | {{ shipment.ship_date.strftime('%d.%m.%Y') if shipment.ship_date else '-' }}</small>
+    </div>
+    <div>
+        <a href="{{ url_for('production_detail', id=shipment.production_id) }}" class="btn btn-outline-secondary">
+            <i class="bi bi-gear"></i> Üretime Dön
+        </a>
+        <a href="{{ url_for('shipment_list') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Geri
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-secondary text-white">
+                <i class="bi bi-info-circle"></i> Sevkiyat Bilgileri
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless">
+                    <tr><th>Durum:</th>
+                        <td><span class="badge bg-{{ 'success' if shipment.status == 'teslim_edildi' else 'warning' }}">{{ shipment.status }}</span>
+                        </td>
+                    </tr>
+                    <tr><th>Tarih:</th><td>{{ shipment.ship_date.strftime('%d.%m.%Y') if shipment.ship_date else '-' }}</td></tr>
+                    <tr><th>Takip No:</th><td>{{ shipment.tracking_number or '-' }}</td></tr>
+                    <tr><th>Taşıyıcı:</th><td>{{ shipment.carrier or '-' }}</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-warning text-dark">
+                <i class="bi bi-pencil"></i> Düzenle
+            </div>
+            <div class="card-body">
+                <a href="{{ url_for('edit_shipment', id=shipment.id) }}" class="btn btn-warning w-100">
+                    <i class="bi bi-pencil"></i> Sevkiyat Bilgilerini Düzenle
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

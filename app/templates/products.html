@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Ürünler - CRM Sistemi{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-box-seam"></i> Stok Yönetimi <span class="badge bg-secondary">{{ products|length }}</span></h2>
+    <div>
+        <a href="{{ url_for('products_export_excel') }}" class="btn btn-success btn-sm"><i class="bi bi-file-excel"></i> Excel</a>
+        <a href="{{ url_for('add_product') }}" class="btn btn-primary"><i class="bi bi-plus"></i> Yeni Ürün</a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3">
+            <div class="col-md-8">
+                <input type="text" class="form-control" name="search" value="{{ search }}" placeholder="Ürün adı, SKU veya kategori ara...">
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100"><i class="bi bi-search"></i> Ara</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if products %}
+<div class="row">
+    {% for product in products %}
+    <div class="col-md-4 mb-4">
+        <div class="card h-100 shadow-sm {{ 'border-danger' if product.is_low_stock else '' }}">
+            <div class="card-header d-flex justify-content-between align-items-center {{ 'bg-danger text-white' if product.is_low_stock else 'bg-light' }}">
+                <span><strong>{{ product.name }}</strong></span>
+                {% if product.is_low_stock %}<span class="badge bg-warning">Düşük Stok</span>{% endif %}
+            </div>
+            <div class="card-body">
+                <p class="mb-1"><small class="text-muted">SKU: {{ product.sku or '-' }} | {{ product.category or 'Kategorisiz' }}</small></p>
+                <h4 class="text-primary mb-2">{{ product.stock_quantity }} {{ product.unit }}</h4>
+                <p class="mb-1">Min Stok: {{ product.min_stock }} {{ product.unit }}</p>
+                <p class="mb-1">Maliyet: {{ "{:,.2f}".format(product.cost_price) }} ₺</p>
+                <p class="mb-0">Satış: <strong>{{ "{:,.2f}".format(product.sell_price) }} ₺</strong></p>
+            </div>
+            <div class="card-footer bg-white">
+                <a href="{{ url_for('product_detail', id=product.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a>
+                <a href="{{ url_for('edit_product', id=product.id) }}" class="btn btn-sm btn-outline-warning"><i class="bi bi-pencil"></i></a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info"><i class="bi bi-info-circle"></i> Ürün bulunmuyor.</div>
+{% endif %}
+{% endblock %}

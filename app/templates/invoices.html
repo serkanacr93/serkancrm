@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Fatura / İrsaliye Listesi - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-receipt"></i> Fatura / İrsaliyeler <span class="badge bg-secondary">{{ invoices|length }}</span></h2>
+</div>
+
+{% if invoices %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Belge No</th>
+                        <th>Tür</th>
+                        <th>Müşteri</th>
+                        <th>Tarih</th>
+                        <th>Ara Toplam</th>
+                        <th>KDV</th>
+                        <th>Toplam</th>
+                        <th>İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in invoices %}
+                    <tr>
+                        <td><strong>{{ inv.display_no }}</strong></td>
+                        <td><span class="badge bg-{{ 'primary' if inv.type == 'fatura' else 'info' }}">{{ inv.type }}</span></td>
+                        <td>{{ inv.customer.display_name }}</td>
+                        <td>{{ inv.date.strftime('%d.%m.%Y') }}</td>
+                        <td>{{ "{:,.2f}".format(inv.subtotal) }} ₺</td>
+                        <td>{{ "{:,.2f}".format(inv.vat_amount) }} ₺</td>
+                        <td><strong>{{ "{:,.2f}".format(inv.total) }} ₺</strong></td>
+                        <td>
+                            <a href="{{ url_for('invoice_detail', id=inv.id) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Henüz fatura veya irsaliye bulunmuyor. Onaylanmış bir tekliften fatura/irsaliye oluşturabilirsiniz.
+</div>
+{% endif %}
+{% endblock %}

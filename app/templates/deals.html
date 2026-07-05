@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Teklifler - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-file-earmark-text"></i> Teklifler <span class="badge bg-secondary">{{ deals|length }}</span></h2>
+    <a href="{{ url_for('add_deal') }}" class="btn btn-success">
+        <i class="bi bi-plus-circle"></i> Yeni Teklif
+    </a>
+</div>
+
+{% if deals %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Teklif No</th>
+                        <th>Başlık</th>
+                        <th>Müşteri</th>
+                        <th>Ara Toplam</th>
+                        <th>KDV</th>
+                        <th>Toplam</th>
+                        <th>Durum</th>
+                        <th>Geçerlilik</th>
+                        <th>İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for deal in deals %}
+                    <tr class="{{ 'table-danger' if deal.is_expired else 'table-warning' if deal.is_expiring_soon else '' }}">
+                        <td><small class="text-muted">TKL-{{ "%05d"|format(deal.id) }}</small></td>
+                        <td><a href="{{ url_for('deal_detail', id=deal.id) }}"><strong>{{ deal.title }}</strong></a></td>
+                        <td>
+                            {% if deal.customer.company_name %}
+                            {{ deal.customer.company_name }}
+                            {% else %}
+                            {{ deal.customer.first_name }} {{ deal.customer.last_name }}
+                            {% endif %}
+                        </td>
+                        <td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td>
+                        <td><small>%{{ deal.vat_rate }}</small></td>
+                        <td><strong class="text-success">{{ "{:,.2f}".format(deal.value) }} ₺</strong></td>
+                        <td><span class="badge bg-{{ 'success' if deal.stage == 'kazanilan' else 'danger' if deal.stage == 'kaybedilen' else 'warning' if deal.stage == 'revize' else 'info' }}">{{ deal.stage }}</span></td>
+                        <td>
+                            {% if deal.valid_until %}
+                            {{ deal.valid_until.strftime('%d.%m.%Y') }}
+                            {% if deal.is_expired %}
+                            <br><span class="badge bg-danger">Süresi Doldu</span>
+                            {% elif deal.is_expiring_soon %}
+                            <br><span class="badge bg-warning text-dark">{{ deal.days_until_expire }} gün kaldı</span>
+                            {% endif %}
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('deal_pdf', id=deal.id) }}" class="btn btn-sm btn-outline-info" target="_blank" title="PDF İndir">
+                                <i class="bi bi-file-pdf"></i>
+                            </a>
+                            <a href="{{ url_for('edit_deal', id=deal.id) }}" class="btn btn-sm btn-outline-warning" title="Düzenle">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <form method="POST" action="{{ url_for('delete_deal', id=deal.id) }}" style="display: inline;" onsubmit="return confirm('Bu teklifi ve tüm ilişkili verileri silmek istediğinize emin misiniz?')">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Sil">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Henüz teklif bulunmuyor. İlk teklifinizi oluşturun!
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Raporlar - CRM Sistemi{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-bar-chart"></i> Raporlar</h2>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-funnel"></i> Fırsat Aşamalarına Göre</div>
+            <div class="card-body">
+                {% if stage_stats %}
+                <table class="table table-striped">
+                    <thead><tr><th>Aşama</th><th>Adet</th><th>Toplam Değer</th></tr></thead>
+                    <tbody>
+                        {% for stage, count, value in stage_stats %}
+                        <tr>
+                            <td><span class="badge bg-info">{{ stage }}</span></td>
+                            <td>{{ count }}</td>
+                            <td>{{ "{:,.0f}".format(value or 0) }} ₺</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">Veri bulunmuyor.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-gear"></i> Üretim Durumlarına Göre</div>
+            <div class="card-body">
+                {% if production_stats %}
+                <table class="table table-striped">
+                    <thead><tr><th>Durum</th><th>Adet</th></tr></thead>
+                    <tbody>
+                        {% for status, count in production_stats %}
+                        <tr>
+                            <td><span class="badge bg-secondary">{{ status }}</span></td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">Veri bulunmuyor.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-clock-history"></i> Son Fırsatlar</div>
+            <div class="card-body">
+                {% if recent_deals %}
+                <div class="list-group list-group-flush">
+                    {% for deal in recent_deals %}
+                    <div class="list-group-item d-flex justify-content-between">
+                        <div>
+                            <a href="{{ url_for('deal_detail', id=deal.id) }}">{{ deal.title }}</a>
+                            <br><small class="text-muted">{{ deal.customer.first_name }} {{ deal.customer.last_name }}</small>
+                        </div>
+                        <div class="text-end">
+                            <span class="badge bg-info">{{ deal.stage }}</span>
+                            <div><strong>{{ "{:,.0f}".format(deal.value) }} ₺</strong></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted">Veri bulunmuyor.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-trophy"></i> En Değerli Müşteriler</div>
+            <div class="card-body">
+                {% if top_customers %}
+                <table class="table table-striped">
+                    <thead><tr><th>Müşteri</th><th>Fırsat</th><th>Toplam Değer</th></tr></thead>
+                    <tbody>
+                        {% for customer, deal_count, total_value in top_customers %}
+                        <tr>
+                            <td><a href="{{ url_for('customer_detail', id=customer.id) }}">{{ customer.first_name }} {{ customer.last_name }}</a></td>
+                            <td>{{ deal_count }}</td>
+                            <td><strong>{{ "{:,.0f}".format(total_value or 0) }} ₺</strong></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">Veri bulunmuyor.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

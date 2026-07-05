@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Hatırlatmalar - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-bell"></i> Hatırlatmalar</h2>
+</div>
+
+{% if reminders %}
+<div class="list-group">
+    {% for reminder in reminders %}
+    <div class="list-group-item list-group-item-{{ 'warning' if not reminder.is_read else 'light' }} d-flex justify-content-between align-items-start">
+        <div class="me-auto">
+            <div class="d-flex align-items-center mb-1">
+                {% if not reminder.is_read %}
+                <span class="badge bg-danger me-2">Yeni</span>
+                {% endif %}
+                <h6 class="mb-0">{{ reminder.title }}</h6>
+            </div>
+            <p class="mb-1">{{ reminder.message }}</p>
+            <small class="text-muted">
+                Hatırlatma Tarihi: {{ reminder.remind_date.strftime('%d.%m.%Y') }}
+                {% if reminder.customer %} | Müşteri: {{ reminder.customer.first_name }} {{ reminder.customer.last_name }}{% endif %}
+            </small>
+        </div>
+        <div>
+            {% if reminder.deal %}
+            <a href="{{ url_for('deal_detail', id=reminder.deal_id) }}" class="btn btn-sm btn-info me-1">
+                <i class="bi bi-eye"></i> Teklife Git
+            </a>
+            {% endif %}
+            {% if not reminder.is_read %}
+            <form method="POST" action="{{ url_for('mark_reminder_read', id=reminder.id) }}" class="d-inline">
+                <button type="submit" class="btn btn-sm btn-success">
+                    <i class="bi bi-check-lg"></i> Okundu
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-success">
+    <i class="bi bi-check-circle"></i> Hatırlatma bulunmuyor. Tüm teklifleriniz zamanında!
+</div>
+{% endif %}
+{% endblock %}

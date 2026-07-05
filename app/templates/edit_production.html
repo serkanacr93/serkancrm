@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Üretim Düzenle - CRM Sistemi{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-pencil"></i> Üretim Düzenle #{{ production.id }}</h2>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="status" class="form-label">Durum</label>
+                            <select class="form-select" id="status" name="status">
+                                <option value="beklemede" {{ 'selected' if production.status == 'beklemede' }}>Beklemede</option>
+                                <option value="uretimde" {{ 'selected' if production.status == 'uretimde' }}>Üretimde</option>
+                                <option value="tamamlandi" {{ 'selected' if production.status == 'tamamlandi' }}>Tamamlandı</option>
+                                <option value="iptal" {{ 'selected' if production.status == 'iptal' }}>İptal</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="start_date" class="form-label">Başlangıç Tarihi</label>
+                            <input type="date" class="form-control" id="start_date" name="start_date" value="{{ production.start_date.strftime('%Y-%m-%d') if production.start_date else '' }}">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="end_date" class="form-label">Bitiş Tarihi</label>
+                            <input type="date" class="form-control" id="end_date" name="end_date" value="{{ production.end_date.strftime('%Y-%m-%d') if production.end_date else '' }}">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="notes" class="form-label">Notlar</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="3">{{ production.notes or '' }}</textarea>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Güncelle</button>
+                        <a href="{{ url_for('production_detail', id=production.id) }}" class="btn btn-secondary"><i class="bi bi-x-lg"></i> İptal</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

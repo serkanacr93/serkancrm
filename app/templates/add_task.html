@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Yeni Görev{% endblock %}
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-plus-circle"></i> Yeni Görev</h2>
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3"><label class="form-label">Görev Başlığı *</label><input type="text" class="form-control" name="title" required></div>
+                    <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="description" rows="2"></textarea></div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3"><label class="form-label">Bitiş Tarihi</label><input type="date" class="form-control" name="due_date"></div>
+                        <div class="col-md-4 mb-3"><label class="form-label">Bitiş Saati</label><input type="time" class="form-control" name="due_time"></div>
+                        <div class="col-md-4 mb-3"><label class="form-label">Öncelik</label><select class="form-select" name="priority"><option value="dusuk">Düşük</option><option value="orta" selected>Orta</option><option value="yuksek">Yüksek</option></select></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3"><label class="form-label">Kategori</label><input type="text" class="form-control" name="category" placeholder="Örn: Takip"></div>
+                        <div class="col-md-4 mb-3"><label class="form-label">Müşteri</label><select class="form-select" name="customer_id"><option value="">Yok</option>{% for c in customers %}<option value="{{ c.id }}">{{ c.first_name }} {{ c.last_name }}</option>{% endfor %}</select></div>
+                        <div class="col-md-4 mb-3"><label class="form-label">Teklif</label><select class="form-select" name="deal_id"><option value="">Yok</option>{% for d in deals %}<option value="{{ d.id }}">{{ d.title }}</option>{% endfor %}</select></div>
+                    </div>
+                    <div class="d-flex gap-2"><button type="submit" class="btn btn-primary"><i class="bi bi-check"></i> Kaydet</button><a href="{{ url_for('tasks') }}" class="btn btn-secondary">İptal</a></div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

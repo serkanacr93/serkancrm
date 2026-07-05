@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}VCF Rehber İçe Aktar - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-phone"></i> Telefon Rehberi İçe Aktar (VCF)</h2>
+    <a href="{{ url_for('customers') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Geri</a>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-file-earmark-person"></i> VCF Dosyası Yükle
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="file" class="form-label">VCF Dosyası (.vcf)</label>
+                        <input type="file" class="form-control" id="file" name="file" accept=".vcf" required>
+                        <div class="form-text">
+                            Telefon rehberinizden aldığınız .vcf uzantılı dosyayı yükleyin.
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <h6><i class="bi bi-info-circle"></i> Nasıl VCF Dosyası Alınır?</h6>
+                        <p class="mb-2">Telefonunuzdan kişileri dışa aktararak VCF dosyası oluşturabilirsiniz:</p>
+                        <ul class="mb-0">
+                            <li><strong>Android:</strong> Kişiler → Menü → İçe/Dışa Aktar → VCF olarak paylaş</li>
+                            <li><strong>iPhone:</strong> Kişiler → Gruplar → Tümünü Seç → Paylaş → Mail ile gönder</li>
+                            <li><strong>Outlook:</strong> Kişiler → Dosya → Aç ve Dışa Aktar → vCards</li>
+                        </ul>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-upload"></i> Yükle ve İçe Aktar
+                    </button>
+                    <a href="{{ url_for('customers') }}" class="btn btn-secondary">
+                        <i class="bi bi-x"></i> İptal
+                    </a>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <i class="bi bi-question-circle"></i> Bilgi
+            </div>
+            <div class="card-body">
+                <p class="card-text">
+                    VCF (vCard) formatı, telefon rehberlerinde kullanılan standart bir formattır.
+                </p>
+                <hr>
+                <h6>İçe Aktarılacak Bilgiler:</h6>
+                <ul class="list-unstyled">
+                    <li>✓ Ad ve Soyad</li>
+                    <li>✓ Telefon Numarası</li>
+                    <li>✓ E-posta Adresi</li>
+                    <li>✓ Firma/Organizasyon</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

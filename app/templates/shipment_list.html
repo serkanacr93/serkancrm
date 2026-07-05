@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Sevkiyat Listesi - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-truck"></i> Sevkiyat Listesi</h2>
+</div>
+
+{% if shipments %}
+<div class="table-responsive">
+    <table class="table table-striped table-hover">
+        <thead class="table-dark">
+            <tr>
+                <th>#</th>
+                <th>Müşteri</th>
+                <th>Tarih</th>
+                <th>Durum</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in shipments %}
+            <tr>
+                <td>{{ s.id }}</td>
+                <td>{{ s.production.deal.customer.display_name }}</td>
+                <td>{{ s.ship_date.strftime('%d.%m.%Y') if s.ship_date else '-' }}</td>
+                <td>
+                    <span class="badge bg-{{ 'secondary' if s.status == 'hazirlaniyor' else 'info' if s.status == 'yolda' else 'success' if s.status == 'teslim_edildi' else 'warning' }}">
+                        {{ s.status }}
+                    </span>
+                </td>
+                <td>
+                    <a href="{{ url_for('shipment_detail', id=s.id) }}" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                    <a href="{{ url_for('edit_shipment', id=s.id) }}" class="btn btn-sm btn-warning">
+                        <i class="bi bi-pencil"></i>
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Henüz sevkiyat bulunmuyor.
+</div>
+{% endif %}
+{% endblock %}

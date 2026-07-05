@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Görevler - CRM Sistemi{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-check2-square"></i> Görev Yönetimi</h2>
+    <a href="{{ url_for('add_task') }}" class="btn btn-primary"><i class="bi bi-plus"></i> Yeni Görev</a>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <div class="btn-group" role="group">
+            <a href="{{ url_for('tasks') }}" class="btn {{ 'btn-primary' if not status_filter else 'btn-outline-primary' }}">Tümü</a>
+            <a href="{{ url_for('tasks', status='yapilacak') }}" class="btn {{ 'btn-warning' if status_filter == 'yapilacak' else 'btn-outline-warning' }}">Yapılacak</a>
+            <a href="{{ url_for('tasks', status='devam') }}" class="btn {{ 'btn-info' if status_filter == 'devam' else 'btn-outline-info' }}">Devam Ediyor</a>
+            <a href="{{ url_for('tasks', status='tamamlandi') }}" class="btn {{ 'btn-success' if status_filter == 'tamamlandi' else 'btn-outline-success' }}">Tamamlanan</a>
+        </div>
+    </div>
+</div>
+
+{% if tasks %}
+<div class="row">
+    {% for task in tasks %}
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm {{ 'border-danger' if task.priority == 'yuksek' else 'border-warning' if task.priority == 'orta' else 'border-info' }} {{ 'opacity-50' if task.status == 'tamamlandi' }}">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h6 class="mb-1 {{ 'text-decoration-line-through' if task.status == 'tamamlandi' }}">{{ task.title }}</h6>
+                        {% if task.description %}<small class="text-muted">{{ task.description[:100] }}...</small>{% endif %}
+                    </div>
+                    <span class="badge bg-{{ 'danger' if task.priority == 'yuksek' else 'warning' if task.priority == 'orta' else 'info' }}">{{ task.priority }}</span>
+                </div>
+                <div class="mt-2">
+                    {% if task.due_date %}<small><i class="bi bi-calendar"></i> {{ task.due_date.strftime('%d.%m.%Y') }}{% if task.due_time %} {{ task.due_time.strftime('%H:%M') }}{% endif %}</small>{% endif %}
+                    {% if task.category %}<span class="badge bg-secondary ms-2">{{ task.category }}</span>{% endif %}
+                    {% if task.customer %}<span class="badge bg-light text-dark ms-1">{{ task.customer.first_name }} {{ task.customer.last_name }}</span>{% endif %}
+                </div>
+                <div class="mt-2">
+                    {% if task.status != 'tamamlandi' %}
+                    <form method="POST" action="{{ url_for('complete_task', id=task.id) }}" class="d-inline">
+                        <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Tamamla</button>
+                    </form>
+                    {% endif %}
+                    <form method="POST" action="{{ url_for('delete_task', id=task.id) }}" class="d-inline" onsubmit="return confirm('Silinsin mi?')">
+                        <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info"><i class="bi bi-info-circle"></i> Görev bulunmuyor.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Ana Sayfa - CRM Sistemi{% endblock %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="bi bi-speedometer2"></i> Dashboard</h2>
+    </div>
+</div>
+
+{% if expired_deals %}
+<div class="alert alert-danger d-flex align-items-center mb-4">
+    <i class="bi bi-exclamation-triangle-fill me-2 fs-4"></i>
+    <div><strong>{{ expired_deals|length }} teklifinizin süresi dolmuş!</strong></div>
+</div>
+{% endif %}
+
+{% if expiring_deals %}
+<div class="alert alert-warning d-flex align-items-center mb-4">
+    <i class="bi bi-clock-history me-2 fs-4"></i>
+    <div><strong>{{ expiring_deals|length }} teklifinizin süresi dolmak üzere!</strong></div>
+</div>
+{% endif %}
+
+<div class="row mb-4">
+    <div class="col-md-2"><div class="card border-primary h-100 shadow-sm"><div class="card-body text-center"><div class="text-primary"><i class="bi bi-people fs-1"></i></div><h3 class="mt-2 mb-0">{{ customers }}</h3><small class="text-muted">Müşteri</small></div></div></div>
+    <div class="col-md-2"><div class="card border-success h-100 shadow-sm"><div class="card-body text-center"><div class="text-success"><i class="bi bi-file-earmark-text fs-1"></i></div><h3 class="mt-2 mb-0">{{ deals }}</h3><small class="text-muted">Teklif</small></div></div></div>
+    <div class="col-md-2"><div class="card border-warning h-100 shadow-sm"><div class="card-body text-center"><div class="text-warning"><i class="bi bi-clock-history fs-1"></i></div><h3 class="mt-2 mb-0">{{ active_deals }}</h3><small class="text-muted">Aktif</small></div></div></div>
+    <div class="col-md-2"><div class="card border-info h-100 shadow-sm"><div class="card-body text-center"><div class="text-info"><i class="bi bi-currency-exchange fs-1"></i></div><h3 class="mt-2 mb-0">{{ "{:,.0f}".format(total_value) }}</h3><small class="text-muted">Toplam ₺</small></div></div></div>
+    <div class="col-md-2"><div class="card border-secondary h-100 shadow-sm"><div class="card-body text-center"><div class="text-secondary"><i class="bi bi-box-seam fs-1"></i></div><h3 class="mt-2 mb-0">{{ product_count }}</h3><small class="text-muted">Ürün{% if low_stock > 0 %} <span class="badge bg-danger">{{ low_stock }}</span>{% endif %}</small></div></div></div>
+    <div class="col-md-2"><div class="card border-danger h-100 shadow-sm"><div class="card-body text-center"><div class="text-danger"><i class="bi bi-truck fs-1"></i></div><h3 class="mt-2 mb-0">{{ pending_shipments }}</h3><small class="text-muted">Sevkiyat</small></div></div></div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-primary text-white"><i class="bi bi-graph-up"></i> Satış Grafiği</div>
+            <div class="card-body">
+                <canvas id="salesChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-success text-white"><i class="bi bi-pie-chart"></i> Teklif Dağılımı</div>
+            <div class="card-body">
+                <canvas id="stageChart" height="150"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-dark text-white"><i class="bi bi-lightning"></i> Hızlı İşlemler</div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('add_customer') }}" class="btn btn-outline-primary"><i class="bi bi-person-plus"></i> Yeni Müşteri</a>
+                    <a href="{{ url_for('add_deal') }}" class="btn btn-outline-success"><i class="bi bi-plus-circle"></i> Yeni Teklif</a>
+                    <a href="{{ url_for('add_task') }}" class="btn btn-outline-warning"><i class="bi bi-check2-square"></i> Yeni Görev</a>
+                    <a href="{{ url_for('add_product') }}" class="btn btn-outline-info"><i class="bi bi-box-seam"></i> Yeni Ürün</a>
+                    <a href="{{ url_for('calendar') }}" class="btn btn-outline-secondary"><i class="bi bi-calendar3"></i> Takvim</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-warning text-dark"><i class="bi bi-clock-history"></i> Son Teklifler</div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                    {% for deal in recent_deals %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <a href="{{ url_for('deal_detail', id=deal.id) }}">{{ deal.title[:30] }}</a>
+                        <span class="badge bg-{{ 'success' if deal.stage == 'kazanilan' else 'info' }}">{{ "{:,.0f}".format(deal.value) }} ₺</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-info text-white"><i class="bi bi-person"></i> Son Müşteriler</div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                    {% for customer in recent_customers %}
+                    <li class="list-group-item">
+                        <a href="{{ url_for('customer_detail', id=customer.id) }}">
+                            {% if customer.company_name %}<small>{{ customer.company_name }}</small><br>{% endif %}
+                            {{ customer.first_name }} {{ customer.last_name }}
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-secondary text-white"><i class="bi bi-check2-square"></i> Bugünkü Görevler ({{ today_tasks|length }})</div>
+            <div class="card-body p-0">
+                {% if today_tasks %}
+                <ul class="list-group list-group-flush">
+                    {% for task in today_tasks %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-circle text-{{ 'danger' if task.priority == 'yuksek' else 'warning' if task.priority == 'orta' else 'info' }}"></i> {{ task.title }}</span>
+                        <form method="POST" action="{{ url_for('complete_task', id=task.id) }}" class="d-inline">
+                            <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check"></i></button>
+                        </form>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted text-center py-3 mb-0">Bugün görev yok.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white"><i class="bi bi-calendar-check"></i> Yaklaşan Görevler ({{ upcoming_tasks|length }})</div>
+            <div class="card-body p-0">
+                {% if upcoming_tasks %}
+                <ul class="list-group list-group-flush">
+                    {% for task in upcoming_tasks %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span>{{ task.title }}</span>
+                        <small class="text-muted">{{ task.due_date.strftime('%d.%m.%Y') }}</small>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted text-center py-3 mb-0">Yaklaşan görev yok.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+fetch('/api/chart-data')
+    .then(r => r.json())
+    .then(data => {
+        const stageColors = ['#3498db', '#2ecc71', '#f39c12', '#e74c3c', '#9b59b6', '#1abc9c'];
+        new Chart(document.getElementById('stageChart'), {
+            type: 'doughnut',
+            data: {
+                labels: data.stages.map(s => s.stage),
+                datasets: [{ data: data.stages.map(s => s.count), backgroundColor: stageColors }]
+            },
+            options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+        });
+
+        new Chart(document.getElementById('salesChart'), {
+            type: 'bar',
+            data: {
+                labels: data.sales.map(s => s.month),
+                datasets: [{ label: 'Satış (₺)', data: data.sales.map(s => s.total), backgroundColor: '#2ecc71' }]
+            },
+            options: { responsive: true, scales: { y: { beginAtZero: true } } }
+        });
+    });
+</script>
+{% endblock %}

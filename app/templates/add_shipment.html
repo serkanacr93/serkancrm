@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Sevkiyat Ekle - CRM Sistemi{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-truck"></i> Sevkiyat Ekle</h2>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                Üretim #{{ production.id }} - {{ production.deal.title }}
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="quantity" class="form-label">Miktar *</label>
+                            <input type="number" class="form-control" id="quantity" name="quantity" min="0" step="0.01" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="unit" class="form-label">Birim</label>
+                            <select class="form-select" id="unit" name="unit">
+                                <option value="adet">Adet</option>
+                                <option value="kg">Kg</option>
+                                <option value="mt">Metre</option>
+                                <option value="lt">Litre</option>
+                                <option value="m2">m²</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="weight_kg" class="form-label">Kilo (kg)</label>
+                            <input type="number" class="form-control" id="weight_kg" name="weight_kg" min="0" step="0.01">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="ship_date" class="form-label">Sevkiyat Tarihi</label>
+                            <input type="date" class="form-control" id="ship_date" name="ship_date">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="carrier" class="form-label">Kargo Firması</label>
+                            <input type="text" class="form-control" id="carrier" name="carrier" placeholder="Örn: Aras Kargo">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="tracking_number" class="form-label">Takip Numarası</label>
+                            <input type="text" class="form-control" id="tracking_number" name="tracking_number">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="status" class="form-label">Durum</label>
+                        <select class="form-select" id="status" name="status">
+                            <option value="hazirlaniyor">Hazırlanıyor</option>
+                            <option value="yolda">Yolda</option>
+                            <option value="teslim_edildi">Teslim Edildi</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="notes" class="form-label">Notlar</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="2"></textarea>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> Kaydet</button>
+                        <a href="{{ url_for('production_detail', id=production.id) }}" class="btn btn-secondary"><i class="bi bi-x-lg"></i> İptal</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

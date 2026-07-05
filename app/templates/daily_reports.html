@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Günlük Raporlar{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-journal-text"></i> Günlük Raporlar</h2>
+    <a href="{{ url_for('add_daily_report') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Yeni Rapor Ekle
+    </a>
+</div>
+
+{% if reports %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width: 10%;">Tarih</th>
+                        <th style="width: 15%;">Müşteri Adı</th>
+                        <th style="width: 12%;">Telefon</th>
+                        <th style="width: 40%;">Notlar</th>
+                        <th style="width: 13%;">Ekleyen</th>
+                        <th style="width: 10%;">İşlemler</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for report in reports %}
+                    <tr>
+                        <td>{{ report.report_date.strftime('%d.%m.%Y') }}</td>
+                        <td>{{ report.customer_name }}</td>
+                        <td>{{ report.phone or '-' }}</td>
+                        <td>{{ report.notes or '-' }}</td>
+                        <td>{{ report.user.full_name or report.user.username }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('delete_daily_report', id=report.id) }}" 
+                                  style="display: inline;" 
+                                  onsubmit="return confirm('Bu raporu silmek istediğinize emin misiniz?')">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-trash"></i> Sil
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info shadow-sm">
+    <i class="bi bi-info-circle me-2"></i>
+    Henüz günlük rapor bulunmuyor. Yeni rapor eklemek için "Yeni Rapor Ekle" butonunu kullanın.
+</div>
+{% endif %}
+{% endblock %}

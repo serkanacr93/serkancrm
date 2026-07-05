@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Yeni Ödeme{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0"><i class="bi bi-cash"></i> Yeni Ödeme</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="customer_id" class="form-label">Müşteri <span class="text-danger">*</span></label>
+                        <select class="form-select" id="customer_id" name="customer_id" required>
+                            <option value="">Müşteri Seçin</option>
+                            {% for customer in customers %}
+                            <option value="{{ customer.id }}">{{ customer.display_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="invoice_id" class="form-label">Fatura (Opsiyonel)</label>
+                        <select class="form-select" id="invoice_id" name="invoice_id">
+                            <option value="">Fatura Seçin</option>
+                            {% for invoice in invoices %}
+                            <option value="{{ invoice.id }}">{{ invoice.display_no }} - {{ invoice.customer.display_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="amount" class="form-label">Tutar (₺) <span class="text-danger">*</span></label>
+                            <input type="number" step="0.01" class="form-control" id="amount" name="amount" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="payment_date" class="form-label">Ödeme Tarihi</label>
+                            <input type="date" class="form-control" id="payment_date" name="payment_date" value="{{ today.strftime('%Y-%m-%d') }}" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="payment_method" class="form-label">Ödeme Yöntemi</label>
+                            <select class="form-select" id="payment_method" name="payment_method">
+                                <option value="">Seçin</option>
+                                <option value="nakit">Nakit</option>
+                                <option value="kredi_karti">Kredi Kartı</option>
+                                <option value="havale">Havale</option>
+                                <option value="cek">Çek</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="reference_no" class="form-label">Referans No</label>
+                            <input type="text" class="form-control" id="reference_no" name="reference_no" placeholder="Örn: Fiş no, Havale no">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="status" class="form-label">Durum</label>
+                        <select class="form-select" id="status" name="status">
+                            <option value="odendi">Ödendi</option>
+                            <option value="beklemede">Beklemede</option>
+                            <option value="iptal">İptal</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="notes" class="form-label">Notlar</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Ödeme ile ilgili notlar"></textarea>
+                    </div>
+                    
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <a href="{{ url_for('payments') }}" class="btn btn-secondary me-md-2">
+                            <i class="bi bi-x-circle"></i> İptal
+                        </a>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-check-circle"></i> Kaydet
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

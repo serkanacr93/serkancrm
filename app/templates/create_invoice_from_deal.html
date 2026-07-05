@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}Fatura/İrsaliye Oluştur - {{ deal.display_no }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-receipt"></i> Fatura / İrsaliye Oluştur</h2>
+    <a href="{{ url_for('deal_detail', id=deal.id) }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Teklife Dön</a>
+</div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> 
+    <strong>{{ deal.display_no }}</strong> teklifinden fatura/irsaliye oluşturuluyor. 
+    Aşağıdaki miktar ve birim fiyatları tekliften otomatik geldi, ihtiyaca göre düzenleyebilirsiniz.
+</div>
+
+<form method="POST">
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <i class="bi bi-box"></i> Kalemler
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="items-table">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Açıklama</th>
+                                    <th style="width:120px">Miktar (kg/adet)</th>
+                                    <th style="width:100px">Birim</th>
+                                    <th style="width:150px">Birim Fiyat</th>
+                                    <th style="width:150px">Toplam</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in deal.items %}
+                                <tr>
+                                    <td>
+                                        <input type="text" class="form-control" name="desc_{{ loop.index0 }}" value="{{ item.description }}" readonly>
+                                    </td>
+                                    <td>
+                                        <input type="number" step="0.001" class="form-control qty-input" name="qty_{{ loop.index0 }}" value="{{ item.quantity }}" required>
+                                    </td>
+                                    <td>
+                                        <input type="text" class="form-control" name="unit_{{ loop.index0 }}" value="{{ item.unit }}" readonly>
+                                    </td>
+                                    <td>
+                                        <input type="number" step="0.01" class="form-control price-input" name="price_{{ loop.index0 }}" value="{{ item.unit_price }}" required>
+                                    </td>
+                                    <td>
+                                        <span class="row-total fw-bold">{{ "{:,.2f}".format(item.total_price) }} ₺</span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end"><strong>Ara Toplam:</strong></td>
+                                    <td><span id="subtotal">{{ "{:,.2f}".format(deal.subtotal) }} ₺</span></td>
+                                </tr>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end">KDV (%{{ deal.vat_rate }}):</td>
+                                    <td><span id="vat_amount">{{ "{:,.2f}".format(deal.vat_amount) }} ₺</span></td>
+                                </tr>
+                                <tr class="table-success">
+                                    <td colspan="4" class="text-end"><strong>TOPLAM:</strong></td>
+                                    <td><span id="total" class="fw-bold">{{ "{:,.2f}".format(deal.value) }} ₺</span></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header bg-success text-white">
+                    <i class="bi bi-gear"></i> Belge Bilgileri
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Belge Türü</label>
+                        <select class="form-select" name="type" required>
+                            <option value="fatura">Fatura</option>
+                            <option value="irsaliye">İrsaliye</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Müşteri</label>
+                        <input type="text" class="form-control" value="{{ deal.customer.display_name }}" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notlar</label>
+                        <textarea class="form-control" name="notes" rows="3" placeholder="İsteğe bağlı not..."></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-check-lg"></i> Oluştur
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<script>
+var VAT_RATE = {{ deal.vat_rate|safe }};
+function fmt(n) { return n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' ₺'; }
+document.addEventListener('DOMContentLoaded', function() {
+    var qtyInputs = document.querySelectorAll('.qty-input');
+    var priceInputs = document.querySelectorAll('.price-input');
+    function calcRow(r) {
+        var q = parseFloat(r.querySelector('.qty-input').value) || 0;
+        var p = parseFloat(r.querySelector('.price-input').value) || 0;
+        var t = q * p;
+        r.querySelector('.row-total').textContent = fmt(t);
+        return t;
+    }
+    function calcAll() {
+        var rows = document.querySelectorAll('#items-table tbody tr');
+        var sub = 0;
+        for (var i = 0; i < rows.length; i++) { sub += calcRow(rows[i]); }
+        var v = sub * VAT_RATE / 100;
+        var tot = sub + v;
+        document.getElementById('subtotal').textContent = fmt(sub);
+        document.getElementById('vat_amount').textContent = fmt(v);
+        document.getElementById('total').textContent = fmt(tot);
+    }
+    for (var i = 0; i < qtyInputs.length; i++) { qtyInputs[i].addEventListener('input', calcAll); }
+    for (var i = 0; i < priceInputs.length; i++) { priceInputs[i].addEventListener('input', calcAll); }
+});
+</script>
+{% endblock %}

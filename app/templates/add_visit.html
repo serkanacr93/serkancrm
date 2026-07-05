@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Yeni Ziyaret Ekle - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-calendar-plus"></i> Yeni Ziyaret Ekle</h2>
+    <a href="{{ url_for('visits') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Geri</a>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-info-circle"></i> Ziyaret Bilgileri
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="customer_id" class="form-label">Müşteri *</label>
+                        <select class="form-select" id="customer_id" name="customer_id" required>
+                            <option value="">Müşteri seçin...</option>
+                            {% for customer in customers %}
+                            <option value="{{ customer.id }}" {% if customer.id == customer.id %}selected{% endif %}>
+                                {% if customer.company_name %}{{ customer.company_name }} - {% endif %}
+                                {{ customer.first_name }} {{ customer.last_name }} 
+                                {% if customer.phone %}({{ customer.phone }}){% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="visit_date" class="form-label">Ziyaret Tarihi *</label>
+                            <input type="date" class="form-control" id="visit_date" name="visit_date" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="visit_type" class="form-label">Ziyaret Türü *</label>
+                            <select class="form-select" id="visit_type" name="visit_type" required>
+                                <option value="ziyaret">Ziyaret</option>
+                                <option value="gorisme">Görüşme</option>
+                                <option value="telefon">Telefon</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="notes" class="form-label">Notlar</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="4" placeholder="Ziyaretle ilgili notlarınızı buraya yazın..."></textarea>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Kaydet
+                    </button>
+                    <a href="{{ url_for('visits') }}" class="btn btn-secondary">
+                        <i class="bi bi-x-lg"></i> İptal
+                    </a>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <i class="bi bi-info-circle"></i> Bilgi
+            </div>
+            <div class="card-body">
+                <p class="card-text">
+                    Müşteri ziyaretlerinizi kaydederek takip edebilirsiniz.
+                </p>
+                <hr>
+                <h6>Ziyaret Türleri:</h6>
+                <ul class="mb-0">
+                    <li><strong>Ziyaret:</strong> Yüz yüze görüşme</li>
+                    <li><strong>Görüşme:</strong> Online/telefon görüşme</li>
+                    <li><strong>Telefon:</strong> Telefon görüşmesi</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Üretim Detayı - {{ production.deal.display_no }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2><i class="bi bi-gear"></i> Üretim Detayı</h2>
+        <small class="text-muted">{{ production.deal.display_no }} - {{ production.deal.title }}</small>
+    </div>
+    <div>
+        <a href="{{ url_for('deal_detail', id=production.deal.id) }}" class="btn btn-outline-info">
+            <i class="bi bi-file-earmark-text"></i> Teklif Detayı
+        </a>
+        <a href="{{ url_for('production_list') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Geri
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-box"></i> Üretim Kalemleri</span>
+                <span class="badge bg-{{ 'success' if production.all_items_produced else 'warning' }}">
+                    {{ production.produced_items_count }}/{{ production.total_items_count }} üretildi
+                </span>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('update_production_items', id=production.id) }}">
+                    <div class="table-responsive">
+                        <table class="table table-bordered">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Açıklama</th>
+                                    <th>Planlanan</th>
+                                    <th>Üretilen</th>
+                                    <th>Birim</th>
+                                    <th>Durum</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in production.items %}
+                                <tr class="{{ 'table-success' if item.is_produced else '' }}">
+                                    <td>{{ item.description }}</td>
+                                    <td>{{ item.planned_quantity }}</td>
+                                    <td>
+                                        <input type="number" step="0.001" class="form-control form-control-sm" 
+                                               name="produced_{{ item.id }}" value="{{ item.produced_quantity }}" 
+                                               style="width:120px" min="0">
+                                    </td>
+                                    <td>{{ item.unit }}</td>
+                                    <td>
+                                        {% if item.is_produced %}
+                                        <span class="badge bg-success">Üretildi</span>
+                                        {% else %}
+                                        <span class="badge bg-warning text-dark">Bekleniyor</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save"></i> Üretim Miktarlarını Güncelle
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% if production.all_items_produced %}
+        <div class="alert alert-success">
+            <i class="bi bi-check-circle"></i> 
+            <strong>Tüm ürünler üretildi!</strong> 
+            <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success btn-sm ms-3">
+                <i class="bi bi-truck"></i> Sevkiyata Aktar
+            </a>
+        </div>
+        {% endif %}
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header"><i class="bi bi-truck"></i> Sevkiyatlar</div>
+            <div class="card-body">
+                {% if shipments %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Tarih</th>
+                                <th>Durum</th>
+                                <th>İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for s in shipments %}
+                            <tr>
+                                <td>{{ s.id }}</td>
+                                <td>{{ s.ship_date.strftime('%d.%m.%Y') if s.ship_date else '-' }}</td>
+                                <td><span class="badge bg-{{ 'success' if s.status == 'teslim_edildi' else 'warning' }}">{{ s.status }}</span></td>
+                                <td>
+                                    <a href="{{ url_for('shipment_detail', id=s.id) }}" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">Henüz sevkiyat yapılmamış.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-secondary text-white">
+                <i class="bi bi-info-circle"></i> Üretim Bilgileri
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless">
+                    <tr><th>Durum:</th>
+                        <td>
+                            <span class="badge bg-{{ 'success' if production.status == 'tamamlandi' else 'warning' if production.status == 'uretimde' else 'secondary' }}">
+                                {{ production.status }}
+                            </span>
+                        </td>
+                    </tr>
+                    <tr><th>Başlangıç:</th><td>{{ production.start_date.strftime('%d.%m.%Y') if production.start_date else '-' }}</td></tr>
+                    <tr><th>Bitiş:</th><td>{{ production.end_date.strftime('%d.%m.%Y') if production.end_date else '-' }}</td></tr>
+                    <tr><th>Toplam Kalem:</th><td>{{ production.total_items_count }}</td></tr>
+                    <tr><th>Üretilen:</th><td>{{ production.produced_items_count }}</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-warning text-dark">
+                <i class="bi bi-pencil"></i> Üretim Düzenle
+            </div>
+            <div class="card-body">
+                <a href="{{ url_for('edit_production', id=production.id) }}" class="btn btn-warning w-100">
+                    <i class="bi bi-pencil"></i> Üretim Bilgilerini Düzenle
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

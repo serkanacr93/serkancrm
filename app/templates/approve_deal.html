@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Teklif Onayı - {{ deal.title }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-check-circle"></i> Teklifi Onayla</h2>
+    <a href="{{ url_for('deal_detail', id=deal.id) }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Geri
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-md-7">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-file-earmark-text"></i> {{ deal.title }}
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless mb-0">
+                    <tr><th>Müşteri:</th><td>
+                        {% if deal.customer.company_name %}{{ deal.customer.company_name }} - {% endif %}{{ deal.customer.first_name }} {{ deal.customer.last_name }}
+                    </td></tr>
+                    <tr><th>Ara Toplam:</th><td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td></tr>
+                    <tr><th>KDV (%{{ deal.vat_rate }}):</th><td>{{ "{:,.2f}".format(deal.vat_amount) }} ₺</td></tr>
+                    <tr><th>Genel Toplam:</th><td><strong>{{ "{:,.2f}".format(deal.value) }} ₺</strong></td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-5">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-percent"></i> Prim Oranı
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('approve_deal', id=deal.id) }}"
+                      onsubmit="return confirm('Bu teklifi onaylayıp üretime aktarmak istediğinize emin misiniz?')">
+                    <div class="mb-3">
+                        <label class="form-label">Prim Oranı Seçin</label>
+                        <select class="form-select" name="commission_rate" required>
+                            <option value="1" {{ 'selected' if suggested_rate == 1.0 }}>%1 (Mevcut Müşteri)</option>
+                            <option value="1.5" {{ 'selected' if suggested_rate == 1.5 }}>%1,5 (Yeni Müşteri)</option>
+                        </select>
+                        <small class="text-muted">
+                            Önerilen oran: %{{ suggested_rate }}
+                            ({{ 'yeni müşteri' if suggested_rate == 1.5 else 'mevcut müşteri' }}) — gerekirse değiştirebilirsiniz.
+                        </small>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-check-circle"></i> Onayla ve Üretime Aktar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

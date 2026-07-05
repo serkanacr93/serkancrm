@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Ödemeler{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-cash-stack"></i> Ödemeler</h2>
+    <a href="{{ url_for('add_payment') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Yeni Ödeme
+    </a>
+</div>
+
+<div class="card mb-4 shadow-sm">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('payments') }}" class="row g-3">
+            <div class="col-md-4">
+                <input type="text" class="form-control" name="customer_search" placeholder="Müşteri ara..." value="{{ customer_search }}">
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" name="status">
+                    <option value="">Tüm Durumlar</option>
+                    <option value="odendi" {% if status_filter == 'odendi' %}selected{% endif %}>Ödendi</option>
+                    <option value="beklemede" {% if status_filter == 'beklemede' %}selected{% endif %}>Beklemede</option>
+                    <option value="iptal" {% if status_filter == 'iptal' %}selected{% endif %}>İptal</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search"></i> Filtrele
+                </button>
+            </div>
+            {% if customer_search or status_filter %}
+            <div class="col-md-2">
+                <a href="{{ url_for('payments') }}" class="btn btn-secondary w-100">
+                    <i class="bi bi-x-circle"></i> Temizle
+                </a>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+{% if payments %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Tarih</th>
+                        <th>Müşteri</th>
+                        <th>Fatura</th>
+                        <th>Tutar</th>
+                        <th>Ödeme Yöntemi</th>
+                        <th>Referans No</th>
+                        <th>Durum</th>
+                        <th>İşlemler</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in payments %}
+                    <tr>
+                        <td>{{ payment.payment_date.strftime('%d.%m.%Y') }}</td>
+                        <td>
+                            <a href="{{ url_for('customer_detail', id=payment.customer_id) }}">
+                                {{ payment.customer.display_name }}
+                            </a>
+                        </td>
+                        <td>{{ payment.invoice.display_no if payment.invoice else '-' }}</td>
+                        <td><strong>{{ "{:,.2f}".format(payment.amount) }} ₺</strong></td>
+                        <td>{{ payment.payment_method or '-' }}</td>
+                        <td>{{ payment.reference_no or '-' }}</td>
+                        <td>
+                            <span class="badge bg-{{ 'success' if payment.status == 'odendi' else 'warning' if payment.status == 'beklemede' else 'danger' }}">
+                                {{ payment.status }}
+                            </span>
+                        </td>
+                        <td>
+                            <form method="POST" action="{{ url_for('delete_payment', id=payment.id) }}" 
+                                  style="display: inline;" 
+                                  onsubmit="return confirm('Bu ödeme kaydını silmek istediğinize emin misiniz?')">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-trash"></i> Sil
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info shadow-sm">
+    <i class="bi bi-info-circle me-2"></i>
+    Henüz ödeme kaydı bulunmuyor. Yeni ödeme eklemek için "Yeni Ödeme" butonunu kullanın.
+</div>
+{% endif %}
+{% endblock %}

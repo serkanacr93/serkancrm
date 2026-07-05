@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}{{ deal.title }} - Teklif Detayı{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>
+            <i class="bi bi-file-earmark-text"></i> {{ deal.title }}
+            <span class="badge bg-{{ 'success' if deal.stage == 'kazanilan' else 'danger' if deal.stage == 'kaybedilen' else 'warning' if deal.stage == 'revize' else 'info' }} fs-6">{{ deal.stage }}</span>
+        </h2>
+        <small class="text-muted">TKL-{{ "%05d"|format(deal.id) }} | Oluşturma: {{ deal.deal_date.strftime('%d.%m.%Y') if deal.deal_date else deal.created_at.strftime('%d.%m.%Y') }}</small>
+    </div>
+    <div>
+        <a href="{{ url_for('deal_pdf', id=deal.id) }}" class="btn btn-info" target="_blank">
+            <i class="bi bi-file-pdf"></i> PDF İndir
+        </a>
+        <a href="{{ url_for('edit_deal', id=deal.id) }}" class="btn btn-warning">
+            <i class="bi bi-pencil"></i> Düzenle
+        </a>
+        <a href="{{ url_for('deals') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Geri
+        </a>
+    </div>
+</div>
+
+{% if deal.is_expired %}
+<div class="alert alert-danger d-flex align-items-center">
+    <i class="bi bi-exclamation-triangle-fill me-2 fs-4"></i>
+    <div>
+        <strong>Bu teklifin süresi dolmuştur!</strong>
+        Geçerlilik tarihi: {{ deal.valid_until.strftime('%d.%m.%Y') }}
+    </div>
+</div>
+{% elif deal.is_expiring_soon %}
+<div class="alert alert-warning d-flex align-items-center">
+    <i class="bi bi-clock-history me-2 fs-4"></i>
+    <div>
+        <strong>Bu teklifin süresi dolmak üzere!</strong>
+        Kalan süre: {{ deal.days_until_expire }} gün
+    </div>
+</div>
+{% endif %}
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-calculator"></i> Teklif Özeti
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <table class="table table-borderless">
+                            <tr><th>Teklif No:</th><td>TKL-{{ "%05d"|format(deal.id) }}</td></tr>
+                            <tr><th>Teklif Tarihi:</th><td>{{ deal.deal_date.strftime('%d.%m.%Y') if deal.deal_date else '-' }}</td></tr>
+                            <tr><th>Geçerlilik:</th><td>
+                                {{ deal.valid_until.strftime('%d.%m.%Y') if deal.valid_until else '-' }}
+                                {% if deal.days_until_expire is not none and deal.days_until_expire >= 0 %}
+                                <span class="badge bg-{{ 'danger' if deal.days_until_expire <= 2 else 'warning' if deal.days_until_expire <= 5 else 'success' }}">{{ deal.days_until_expire }} gün</span>
+                                {% endif %}
+                            </td></tr>
+                            <tr><th>Olasılık:</th><td>%{{ deal.probability }}</td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-1">Ara Toplam</h6>
+                                <h4 class="text-primary">{{ "{:,.2f}".format(deal.subtotal) }} ₺</h4>
+                                <h6 class="text-muted mb-1">KDV (%{{ deal.vat_rate }})</h6>
+                                <h5 class="text-warning">{{ "{:,.2f}".format(deal.vat_amount) }} ₺</h5>
+                                <hr>
+                                <h6 class="text-muted mb-1">GENEL TOPLAM</h6>
+                                <h3 class="text-success">{{ "{:,.2f}".format(deal.value) }} ₺</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-box"></i> Ürün / Hizmet Detayları</span>
+                <span class="badge bg-secondary">{{ deal.items|length }} ürün</span>
+            </div>
+            <div class="card-body">
+                {% if deal.items %}
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>#</th>
+                                <th>Açıklama</th>
+                                <th>Miktar</th>
+                                <th>Birim</th>
+                                <th>Birim Fiyat</th>
+                                <th>Toplam</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in deal.items %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>{{ item.description }}</td>
+                                <td>{{ item.quantity }}</td>
+                                <td>{{ item.unit }}</td>
+                                <td>{{ "{:,.2f}".format(item.unit_price) }} ₺</td>
+                                <td><strong>{{ "{:,.2f}".format(item.total_price) }} ₺</strong></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot class="table-light">
+                            <tr><td colspan="5" class="text-end">Ara Toplam:</td><td><strong>{{ "{:,.2f}".format(deal.subtotal) }} ₺</strong></td></tr>
+                            <tr><td colspan="5" class="text-end">KDV (%{{ deal.vat_rate }}):</td><td><strong>{{ "{:,.2f}".format(deal.vat_amount) }} ₺</strong></td></tr>
+                            <tr class="table-success"><td colspan="5" class="text-end"><strong>TOPLAM:</strong></td><td><strong>{{ "{:,.2f}".format(deal.value) }} ₺</strong></td></tr>
+                        </tfoot>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted text-center py-3">Henüz ürün eklenmemiş.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if deal.notes %}
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header"><i class="bi bi-journal-text"></i> Notlar</div>
+            <div class="card-body">{{ deal.notes }}</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="col-md-4">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-person"></i> Müşteri Bilgileri
+            </div>
+            <div class="card-body">
+                <h6>
+                    <a href="{{ url_for('customer_detail', id=deal.customer.id) }}">
+                        {% if deal.customer.company_name %}
+                        <i class="bi bi-building"></i> {{ deal.customer.company_name }}<br>
+                        <small class="text-muted">{{ deal.customer.first_name }} {{ deal.customer.last_name }}</small>
+                        {% else %}
+                        {{ deal.customer.first_name }} {{ deal.customer.last_name }}
+                        {% endif %}
+                    </a>
+                </h6>
+                <small class="text-muted">{{ deal.customer.email }}</small>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-warning text-dark">
+                <i class="bi bi-lightning"></i> İşlemler
+            </div>
+            <div class="card-body">
+                {% if deal.stage not in ['kazanilan', 'kaybedilen', 'revize'] %}
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('approve_deal', id=deal.id) }}" class="btn btn-success w-100">
+                        <i class="bi bi-check-circle"></i> Onayla & Üretime Aktar
+                    </a>
+                    <form method="POST" action="{{ url_for('revise_deal', id=deal.id) }}">
+                        <button type="submit" class="btn btn-warning w-100" onclick="return confirm('Yeni bir revize teklif oluşturmak istediğinize emin misiniz?')">
+                            <i class="bi bi-arrow-repeat"></i> Revize Et
+                        </button>
+                    </form>
+                </div>
+                {% endif %}
+                {% if deal.stage == 'kazanilan' %}
+                <hr>
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('create_invoice_from_deal', id=deal.id) }}" class="btn btn-outline-primary">
+                        <i class="bi bi-receipt"></i> Fatura / İrsaliye Oluştur
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if deal.production %}
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between">
+                <span><i class="bi bi-gear"></i> Üretim</span>
+                <a href="{{ url_for('production_detail', id=deal.production.id) }}" class="btn btn-sm btn-light">Detay</a>
+            </div>
+            <div class="card-body">
+                <span class="badge bg-{{ 'warning' if deal.production.status == 'beklemede' else 'info' if deal.production.status == 'uretimde' else 'success' if deal.production.status == 'tamamlandi' else 'secondary' }} fs-6">
+                    {{ deal.production.status }}
+                </span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
