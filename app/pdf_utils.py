@@ -10,13 +10,15 @@ import os
 from datetime import datetime
 
 def register_fonts():
-    font_paths = [
-        ("DejaVuSans", "C:/Windows/Fonts/arial.ttf"),
-        ("DejaVuSans-Bold", "C:/Windows/Fonts/arialbd.ttf"),
-    ]
-    for font_name, font_path in font_paths:
-        if os.path.exists(font_path):
-            pdfmetrics.registerFont(TTFont(font_name, font_path))
+    font_dir = os.path.join(os.path.dirname(__file__), 'static', 'fonts')
+    pdfmetrics.registerFont(TTFont('Vera', os.path.join(font_dir, 'Vera.ttf')))
+    pdfmetrics.registerFont(TTFont('Vera-Bold', os.path.join(font_dir, 'VeraBd.ttf')))
+    pdfmetrics.registerFont(TTFont('Vera-Italic', os.path.join(font_dir, 'VeraIt.ttf')))
+    pdfmetrics.registerFont(TTFont('Vera-BoldItalic', os.path.join(font_dir, 'VeraBI.ttf')))
+    pdfmetrics.registerFontFamily(
+        'Vera', normal='Vera', bold='Vera-Bold',
+        italic='Vera-Italic', boldItalic='Vera-BoldItalic',
+    )
 
 register_fonts()
 
@@ -25,9 +27,9 @@ def generate_deal_pdf(deal):
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
     
     styles = getSampleStyleSheet()
-    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='DejaVuSans', fontSize=9)
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='DejaVuSans-Bold', fontSize=18)
-    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontName='DejaVuSans-Bold', fontSize=11, spaceAfter=5)
+    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=9)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Vera-Bold', fontSize=18)
+    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontName='Vera-Bold', fontSize=11, spaceAfter=5)
     
     elements = []
     
@@ -76,24 +78,24 @@ def generate_deal_pdf(deal):
                 Paragraph(item.description, turkish_style),
                 f"{item.quantity:.2f}",
                 item.unit,
-                f"{item.unit_price:,.2f} ₺",
-                f"{item.total_price:,.2f} ₺"
+                f"{item.unit_price:,.2f} TL",
+                f"{item.total_price:,.2f} TL"
             ])
         
-        data.append(['', '', '', '', 'Ara Toplam:', f"{deal.subtotal:,.2f} ₺"])
-        data.append(['', '', '', '', f'KDV (%{deal.vat_rate:.0f}):', f"{deal.vat_amount:,.2f} ₺"])
-        data.append(['', '', '', '', 'TOPLAM:', f"{deal.value:,.2f} ₺"])
+        data.append(['', '', '', '', 'Ara Toplam:', f"{deal.subtotal:,.2f} TL"])
+        data.append(['', '', '', '', f'KDV (%{deal.vat_rate:.0f}):', f"{deal.vat_amount:,.2f} TL"])
+        data.append(['', '', '', '', 'TOPLAM:', f"{deal.value:,.2f} TL"])
         
         table = Table(data, colWidths=[1*cm, 5.5*cm, 2*cm, 1.5*cm, 3*cm, 3*cm])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'DejaVuSans-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('BACKGROUND', (-1, -3), (-1, -1), colors.HexColor('#e8f4f8')),
-            ('FONTNAME', (-1, -3), (-1, -1), 'DejaVuSans-Bold'),
+            ('FONTNAME', (-1, -3), (-1, -1), 'Vera-Bold'),
             ('ROWBACKGROUNDS', (0, 1), (-1, -4), [colors.white, colors.HexColor('#f8f9fa')]),
             ('ALIGN', (-1, 0), (-1, -1), 'RIGHT'),
             ('ALIGN', (-2, 0), (-2, -1), 'RIGHT'),
@@ -121,7 +123,7 @@ def generate_deal_pdf(deal):
     ]
     signature_table = Table(signature_data, colWidths=[5*cm, 4*cm, 5*cm])
     signature_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (-1, -1), 'DejaVuSans'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Vera'),
         ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('LINEBELOW', (0, 2), (0, 2), 1, colors.black),
@@ -138,9 +140,9 @@ def generate_statement_pdf(customer, statements, total_debit, total_credit):
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
     
     styles = getSampleStyleSheet()
-    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='DejaVuSans', fontSize=9)
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='DejaVuSans-Bold', fontSize=16)
-    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontName='DejaVuSans-Bold', fontSize=11)
+    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=9)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Vera-Bold', fontSize=16)
+    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontName='Vera-Bold', fontSize=11)
     
     elements = []
     
@@ -163,23 +165,23 @@ def generate_statement_pdf(customer, statements, total_debit, total_credit):
                 s.created_at.strftime('%d.%m.%Y'),
                 s.type.upper(),
                 Paragraph(s.description or '-', turkish_style),
-                f"{s.amount:,.2f} ₺"
+                f"{s.amount:,.2f} TL"
             ])
         
-        data.append(['', '', 'TOPLAM BORÇ:', f"{total_debit:,.2f} ₺"])
-        data.append(['', '', 'TOPLAM ALACAK:', f"{total_credit:,.2f} ₺"])
-        data.append(['', '', 'BAKİYE:', f"{total_debit - total_credit:,.2f} ₺"])
+        data.append(['', '', 'TOPLAM BORÇ:', f"{total_debit:,.2f} TL"])
+        data.append(['', '', 'TOPLAM ALACAK:', f"{total_credit:,.2f} TL"])
+        data.append(['', '', 'BAKİYE:', f"{total_debit - total_credit:,.2f} TL"])
         
         table = Table(data, colWidths=[2.5*cm, 2*cm, 7.5*cm, 3.5*cm])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'DejaVuSans-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('BACKGROUND', (-1, -3), (-1, -1), colors.HexColor('#e8f4f8')),
-            ('FONTNAME', (-1, -3), (-1, -1), 'DejaVuSans-Bold'),
+            ('FONTNAME', (-1, -3), (-1, -1), 'Vera-Bold'),
             ('ROWBACKGROUNDS', (0, 1), (-1, -4), [colors.white, colors.HexColor('#f8f9fa')]),
             ('ALIGN', (-1, 0), (-1, -1), 'RIGHT'),
         ]))
