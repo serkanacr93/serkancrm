@@ -2,6 +2,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
+from flask_wtf import CSRFProtect
 import os
 from dotenv import load_dotenv
 
@@ -10,6 +11,7 @@ load_dotenv()
 db = SQLAlchemy()
 login_manager = LoginManager()
 migrate = Migrate()
+csrf = CSRFProtect()
 app = None
 
 
@@ -47,6 +49,7 @@ def create_app():
     db.init_app(app)
     login_manager.init_app(app)
     migrate.init_app(app, db)
+    csrf.init_app(app)
     login_manager.login_view = 'login'
     login_manager.login_message = 'Lütfen giriş yapın.'
 
@@ -58,7 +61,7 @@ def create_app():
         from app.models import User
         if not User.query.first():
             admin = User(username='admin', email='admin@crm.com', full_name='Yönetici', role='admin')
-            admin.set_password('1234')
+            admin.set_password('serkan2255')
             db.session.add(admin)
             db.session.commit()
 

@@ -7,7 +7,23 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from io import BytesIO
 import os
+import re
 from datetime import datetime
+
+# PDF ciktilarinda temizlenecek samimi/gundelik hitaplar (Bey/Usta/Hoca
+# bilincli olarak HARIC tutuldu - bunlar Turkce'de resmi/saygi ifadesi
+# sayilir ve is belgesinde kullanilmasi uygundur).
+_INFORMAL_ADDRESS_RE = re.compile(r'\b(abi|amca|abla|baba|day[ıi])\b', re.IGNORECASE)
+
+
+def _clean_for_pdf(text):
+    """Musteri adi/firma adindan sadece PDF gorunumu icin samimi hitaplari
+    temizler. Veritabanindaki gercek kayda dokunmaz."""
+    if not text:
+        return text
+    cleaned = _INFORMAL_ADDRESS_RE.sub('', text)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned or text
 
 def register_fonts():
     font_dir = os.path.join(os.path.dirname(__file__), 'static', 'fonts')
@@ -50,8 +66,8 @@ def generate_deal_pdf(deal):
     
     elements.append(Paragraph("MÜŞTERİ BİLGİLERİ", heading_style))
     if deal.customer.company_name:
-        elements.append(Paragraph(f"<b>Firma:</b> {deal.customer.company_name}", turkish_style))
-    elements.append(Paragraph(f"<b>Ad Soyad:</b> {deal.customer.first_name} {deal.customer.last_name}", turkish_style))
+        elements.append(Paragraph(f"<b>Firma:</b> {_clean_for_pdf(deal.customer.company_name)}", turkish_style))
+    elements.append(Paragraph(f"<b>Ad Soyad:</b> {_clean_for_pdf(deal.customer.first_name)} {_clean_for_pdf(deal.customer.last_name)}", turkish_style))
     if deal.customer.contact_person:
         elements.append(Paragraph(f"<b>Yetkili Kişi:</b> {deal.customer.contact_person} ({deal.customer.contact_title or ''})", turkish_style))
     if deal.customer.tax_id:
@@ -150,8 +166,8 @@ def generate_statement_pdf(customer, statements, total_debit, total_credit):
     elements.append(Spacer(1, 8*mm))
     
     if customer.company_name:
-        elements.append(Paragraph(f"<b>Firma:</b> {customer.company_name}", turkish_style))
-    elements.append(Paragraph(f"<b>Müşteri:</b> {customer.first_name} {customer.last_name}", turkish_style))
+        elements.append(Paragraph(f"<b>Firma:</b> {_clean_for_pdf(customer.company_name)}", turkish_style))
+    elements.append(Paragraph(f"<b>Müşteri:</b> {_clean_for_pdf(customer.first_name)} {_clean_for_pdf(customer.last_name)}", turkish_style))
     if customer.contact_person:
         elements.append(Paragraph(f"<b>Yetkili:</b> {customer.contact_person}", turkish_style))
     elements.append(Paragraph(f"<b>E-posta:</b> {customer.email}", turkish_style))

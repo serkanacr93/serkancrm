@@ -358,6 +358,7 @@ class DailyReport(db.Model):
     customer_name = db.Column(db.String(100), nullable=False)
     phone = db.Column(db.String(20))
     notes = db.Column(db.Text)
+    status = db.Column(db.String(20), default='takip_edilecek')  # tamamlandi, fiyat_verilecek, takip_edilecek
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)

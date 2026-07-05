@@ -32,6 +32,7 @@
             {% endif %}
             {% if not reminder.is_read %}
             <form method="POST" action="{{ url_for('mark_reminder_read', id=reminder.id) }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-sm btn-success">
                     <i class="bi bi-check-lg"></i> Okundu
                 </button>

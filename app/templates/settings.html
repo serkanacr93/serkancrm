@@ -37,7 +37,7 @@
                     </tr>
                     <tr>
                         <th>Konum</th>
-                        <td><code>instance/crm.db</code></td>
+                        <td><code>Neon PostgreSQL</code></td>
                     </tr>
                 </table>
             </div>
@@ -47,71 +47,22 @@
     <div class="col-md-6">
         <div class="card mb-4">
             <div class="card-header bg-success text-white">
-                <i class="bi bi-download"></i> Yedek Al
+                <i class="bi bi-shield-check"></i> Otomatik Yedekleme
             </div>
             <div class="card-body">
-                <p class="text-muted">Tüm verilerinizi (müşteriler, teklifler, üretim, sevkiyat vb.) tek dosya olarak indirin.</p>
-                <a href="{{ url_for('backup_download') }}" class="btn btn-success btn-lg w-100">
-                    <i class="bi bi-download"></i> Yedek İndir (.db)
-                </a>
-                <p class="small text-muted mt-2">
-                    <i class="bi bi-info-circle"></i> Bu dosyayı USB belleğe veya buluta kopyalayın. 
-                    Diğer bilgisayarda <strong>Yedek Yükle</strong> ile geri yükleyin.
+                <p class="text-muted">
+                    Veritabanı artık Neon (bulut PostgreSQL) üzerinde çalışıyor.
+                    Tüm veriler her gece <strong>03:00</strong>'te
+                    <code>scripts/backup_neon.py</code> ile otomatik olarak
+                    JSON formatında yedekleniyor ve 30 günden eski yedekler
+                    otomatik siliniyor.
                 </p>
-            </div>
-        </div>
-
-        <div class="card mb-4">
-            <div class="card-header bg-warning text-dark">
-                <i class="bi bi-upload"></i> Yedek Yükle (Geri Yükle)
-            </div>
-            <div class="card-body">
-                <p class="text-muted">Daha önce aldığınız yedek dosyasını yükleyerek verileri geri getirin.</p>
-                <form method="POST" action="{{ url_for('backup_upload') }}" enctype="multipart/form-data">
-                    <div class="mb-3">
-                        <label for="backup_file" class="form-label">Yedek Dosyası Seçin (.db)</label>
-                        <input type="file" class="form-control" id="backup_file" name="backup_file" accept=".db" required>
-                    </div>
-                    <button type="submit" class="btn btn-warning w-100">
-                        <i class="bi bi-upload"></i> Yedek Yükle ve Geri Yükle
-                    </button>
-                </form>
-                <div class="alert alert-danger mt-3">
-                    <i class="bi bi-exclamation-triangle"></i> 
-                    <strong>Dikkat:</strong> Yedek yüklemek mevcut tüm verilerinizi siler ve yedekteki verilerle değiştirir. 
-                    Güncel verilerinizin yedeğini almayı unutmayın.
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header bg-info text-white">
-                <i class="bi bi-arrows-move"></i> Bilgisayarlar Arası Veri Taşıma
-            </div>
-            <div class="card-body">
-                <ol class="list-group list-group-numbered">
-                    <li class="list-group-item">
-                        <strong>Kaynak Bilgisayar:</strong> Ayarlar > <strong>Yedek İndir</strong> butonuna tıklayın.
-                    </li>
-                    <li class="list-group-item">
-                        İndirilen <code>.db</code> dosyasını USB bellek, e-posta veya bulut depolama ile hedef bilgisayara kopyalayın.
-                    </li>
-                    <li class="list-group-item">
-                        <strong>Hedef Bilgisayar:</strong> Ayarlar > <strong>Yedek Yükle</strong> ile dosyayı seçip yükleyin.
-                    </li>
-                    <li class="list-group-item">
-                        Sistem sizi otomatik olarak çıkış yapacak, tekrar giriş yaptığınızda tüm verileriniz hazır!
-                    </li>
-                </ol>
-                <div class="alert alert-success mt-3">
-                    <i class="bi bi-lightbulb"></i> 
-                    <strong>Öneri:</strong> Düzenli olarak yedek almayı alışkanlık haline getirin. 
-                    Her gün sonunda yedek alıp USB belleğinize kopyalayabilirsiniz.
-                </div>
+                <p class="small text-muted mb-0">
+                    <i class="bi bi-info-circle"></i>
+                    Manuel indirme/yükleme artık gerekmiyor — eski yerel
+                    dosya tabanlı yedekleme (.db indir/yükle) bulut
+                    veritabanına geçişle birlikte kaldırıldı.
+                </p>
             </div>
         </div>
     </div>

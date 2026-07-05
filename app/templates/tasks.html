@@ -38,10 +38,12 @@
                 <div class="mt-2">
                     {% if task.status != 'tamamlandi' %}
                     <form method="POST" action="{{ url_for('complete_task', id=task.id) }}" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Tamamla</button>
                     </form>
                     {% endif %}
                     <form method="POST" action="{{ url_for('delete_task', id=task.id) }}" class="d-inline" onsubmit="return confirm('Silinsin mi?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
                     </form>
                 </div>

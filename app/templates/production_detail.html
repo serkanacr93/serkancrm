@@ -29,6 +29,7 @@
             </div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('update_production_items', id=production.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="table-responsive">
                         <table class="table table-bordered">
                             <thead class="table-dark">

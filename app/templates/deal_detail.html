@@ -163,6 +163,7 @@
                         <i class="bi bi-check-circle"></i> Onayla & Üretime Aktar
                     </a>
                     <form method="POST" action="{{ url_for('revise_deal', id=deal.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-warning w-100" onclick="return confirm('Yeni bir revize teklif oluşturmak istediğinize emin misiniz?')">
                             <i class="bi bi-arrow-repeat"></i> Revize Et
                         </button>

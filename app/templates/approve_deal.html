@@ -37,6 +37,7 @@
             <div class="card-body">
                 <form method="POST" action="{{ url_for('approve_deal', id=deal.id) }}"
                       onsubmit="return confirm('Bu teklifi onaylayıp üretime aktarmak istediğinize emin misiniz?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label class="form-label">Prim Oranı Seçin</label>
                         <select class="form-select" name="commission_rate" required>

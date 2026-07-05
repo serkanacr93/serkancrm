@@ -7,6 +7,7 @@
         <div class="card shadow-sm">
             <div class="card-body">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3"><label class="form-label">Görev Başlığı *</label><input type="text" class="form-control" name="title" required></div>
                     <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="description" rows="2"></textarea></div>
                     <div class="row">

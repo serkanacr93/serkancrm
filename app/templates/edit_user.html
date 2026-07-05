@@ -7,6 +7,7 @@
         <div class="card shadow-sm">
             <div class="card-body">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3"><label class="form-label">Kullanıcı Adı *</label><input type="text" class="form-control" name="username" value="{{ user.username }}" required></div>
                     <div class="mb-3"><label class="form-label">E-posta *</label><input type="email" class="form-control" name="email" value="{{ user.email }}" required></div>
                     <div class="mb-3"><label class="form-label">Ad Soyad</label><input type="text" class="form-control" name="full_name" value="{{ user.full_name or '' }}"></div>

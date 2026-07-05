@@ -1,54 +1,97 @@
 {% extends "base.html" %}
 
-{% block title %}Günlük Raporlar{% endblock %}
+{% block title %}Günlük Rapor{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-journal-text"></i> Günlük Raporlar</h2>
+    <h2><i class="bi bi-journal-text"></i> Günlük Rapor</h2>
     <a href="{{ url_for('add_daily_report') }}" class="btn btn-primary">
         <i class="bi bi-plus-circle"></i> Yeni Rapor Ekle
     </a>
 </div>
 
-{% if reports %}
-<div class="card shadow-sm">
+{% if day_cards %}
+{% for card in day_cards %}
+<div class="card shadow-sm mb-3" id="gun-{{ card.date.strftime('%Y%m%d') }}">
+    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+        <strong><i class="bi bi-calendar-date"></i> {{ card.date.strftime('%d.%m.%Y') }}</strong>
+        <span class="badge bg-secondary">{{ card.reports|length }} görüşme</span>
+    </div>
     <div class="card-body">
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead class="table-dark">
-                    <tr>
-                        <th style="width: 10%;">Tarih</th>
-                        <th style="width: 15%;">Müşteri Adı</th>
-                        <th style="width: 12%;">Telefon</th>
-                        <th style="width: 40%;">Notlar</th>
-                        <th style="width: 13%;">Ekleyen</th>
-                        <th style="width: 10%;">İşlemler</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for report in reports %}
-                    <tr>
-                        <td>{{ report.report_date.strftime('%d.%m.%Y') }}</td>
-                        <td>{{ report.customer_name }}</td>
-                        <td>{{ report.phone or '-' }}</td>
-                        <td>{{ report.notes or '-' }}</td>
-                        <td>{{ report.user.full_name or report.user.username }}</td>
-                        <td>
-                            <form method="POST" action="{{ url_for('delete_daily_report', id=report.id) }}" 
-                                  style="display: inline;" 
-                                  onsubmit="return confirm('Bu raporu silmek istediğinize emin misiniz?')">
-                                <button type="submit" class="btn btn-sm btn-outline-danger">
-                                    <i class="bi bi-trash"></i> Sil
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div class="row text-center g-3 mb-2">
+            <div class="col-6 col-md-2">
+                <div class="fs-4 fw-bold text-success">{{ card.deal_count }}</div>
+                <small class="text-muted">Teklif Verildi</small>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="fs-4 fw-bold text-warning">{{ card.pending_price_count }}</div>
+                <small class="text-muted">Fiyat Verilecek</small>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="fs-4 fw-bold text-info">{{ card.shipment_count }}</div>
+                <small class="text-muted">Sevkiyat</small>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="fs-4 fw-bold text-primary">{{ card.payment_count }}</div>
+                <small class="text-muted">Ödeme ({{ "{:,.0f}".format(card.payment_total) }} TL)</small>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="fs-5 fw-bold">{{ "{:,.0f}".format(card.avg_deal_value) }} TL</div>
+                <small class="text-muted">Ort. Teklif Değeri</small>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="fs-6 fw-bold text-truncate" title="{{ card.top_customer or '-' }}">{{ card.top_customer or '-' }}</div>
+                <small class="text-muted">En Çok Teklif Alan</small>
+            </div>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
+                data-bs-target="#detay-{{ card.date.strftime('%Y%m%d') }}">
+            <i class="bi bi-chevron-down"></i> Detayları göster
+        </button>
+        <div class="collapse mt-3" id="detay-{{ card.date.strftime('%Y%m%d') }}">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Müşteri</th>
+                            <th>Telefon</th>
+                            <th>Notlar</th>
+                            <th>Durum</th>
+                            <th>Ekleyen</th>
+                            <th>İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for report in card.reports %}
+                        <tr>
+                            <td>{{ report.customer_name }}</td>
+                            <td>{{ report.phone or '-' }}</td>
+                            <td>{{ report.notes or '-' }}</td>
+                            <td>
+                                <span class="badge bg-{{ 'success' if report.status == 'tamamlandi' else 'warning text-dark' if report.status == 'fiyat_verilecek' else 'secondary' }}">
+                                    {{ 'Tamamlandı' if report.status == 'tamamlandi' else 'Fiyat Verilecek' if report.status == 'fiyat_verilecek' else 'Takip Edilecek' }}
+                                </span>
+                            </td>
+                            <td><small>{{ report.user.full_name or report.user.username }}</small></td>
+                            <td>
+                                <form method="POST" action="{{ url_for('delete_daily_report', id=report.id) }}"
+                                      style="display: inline;"
+                                      onsubmit="return confirm('Bu görüşme kaydını silmek istediğinize emin misiniz?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>
+{% endfor %}
 {% else %}
 <div class="alert alert-info shadow-sm">
     <i class="bi bi-info-circle me-2"></i>

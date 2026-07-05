@@ -79,6 +79,7 @@
                             <form method="POST" action="{{ url_for('delete_payment', id=payment.id) }}" 
                                   style="display: inline;" 
                                   onsubmit="return confirm('Bu ödeme kaydını silmek istediğinize emin misiniz?')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger">
                                     <i class="bi bi-trash"></i> Sil
                                 </button>

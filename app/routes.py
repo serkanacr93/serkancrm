@@ -97,8 +97,12 @@ def register_routes(app):
         production_count = Production.query.count()
         pending_shipments = Shipment.query.filter(Shipment.status.notin_(['teslim_edildi'])).count()
         product_count = Product.query.count()
-        low_stock = Product.query.filter(Product.stock_quantity <= Product.min_stock).count()
-        
+        low_stock_products = Product.query.filter(Product.stock_quantity <= Product.min_stock).order_by(Product.stock_quantity).all()
+        low_stock = len(low_stock_products)
+
+        pending_price_reports = DailyReport.query.filter_by(status='fiyat_verilecek').order_by(DailyReport.report_date.asc()).all()
+        pending_price_list = [(r, (today - r.report_date).days) for r in pending_price_reports]
+
         expiring_deals = Deal.query.filter(
             Deal.valid_until <= today + timedelta(days=2),
             Deal.valid_until >= today,
@@ -164,6 +168,9 @@ def register_routes(app):
                              pending_shipments=pending_shipments,
                              product_count=product_count,
                              low_stock=low_stock,
+                             low_stock_products=low_stock_products,
+                             pending_price_reports=pending_price_reports,
+                             pending_price_list=pending_price_list,
                              expiring_deals=expiring_deals,
                              expired_deals=expired_deals,
                              unread_reminders=unread_reminders,
@@ -199,19 +206,22 @@ def register_routes(app):
     @login_required
     def customers():
         search = request.args.get('search', '')
+        page = request.args.get('page', 1, type=int)
+        query = Customer.query
         if search:
-            customers = Customer.query.filter(
+            query = query.filter(
                 db.or_(
                     Customer.first_name.ilike(f'%{search}%'),
                     Customer.last_name.ilike(f'%{search}%'),
                     Customer.company_name.ilike(f'%{search}%'),
                     Customer.email.ilike(f'%{search}%'),
-                    Customer.tax_id.ilike(f'%{search}%')
+                    Customer.tax_id.ilike(f'%{search}%'),
+                    Customer.phone.ilike(f'%{search}%')
                 )
-            ).order_by(Customer.created_at.desc()).all()
-        else:
-            customers = Customer.query.order_by(Customer.created_at.desc()).all()
-        return render_template('customers.html', customers=customers, search=search)
+            )
+        pagination = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
+        customers = pagination.items
+        return render_template('customers.html', customers=customers, search=search, pagination=pagination)
 
     @app.route('/customers/add', methods=['GET', 'POST'])
     @login_required
@@ -474,17 +484,22 @@ def register_routes(app):
     def deals():
         search = request.args.get('search', '')
         stage_filter = request.args.get('stage', '')
+        page = request.args.get('page', 1, type=int)
         query = Deal.query
+        if not current_user.is_admin:
+            query = query.filter(Deal.user_id == current_user.id)
         if search:
             query = query.filter(db.or_(
                 Deal.title.ilike(f'%{search}%'),
                 Customer.first_name.ilike(f'%{search}%'),
-                Customer.last_name.ilike(f'%{search}%')
+                Customer.last_name.ilike(f'%{search}%'),
+                Customer.company_name.ilike(f'%{search}%')
             )).join(Customer)
         if stage_filter:
             query = query.filter(Deal.stage == stage_filter)
-        deals = query.order_by(Deal.created_at.desc()).all()
-        return render_template('deals.html', deals=deals, search=search, stage_filter=stage_filter)
+        pagination = query.order_by(Deal.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
+        deals = pagination.items
+        return render_template('deals.html', deals=deals, search=search, stage_filter=stage_filter, pagination=pagination)
 
     @app.route('/deals/add', methods=['GET', 'POST'])
     @login_required
@@ -497,13 +512,10 @@ def register_routes(app):
             
             title = request.form.get('title', '').strip()
             if not title:
-                # Müşteri adına göre otomatik başlık oluştur
+                # Müşteri adına göre otomatik başlık oluştur: "05.07.2026 - Lema Ambalaj"
                 customer = Customer.query.get(int(request.form['customer_id']))
-                if customer:
-                    name_part = (customer.company_name or f"{customer.first_name}{customer.last_name}")[:6].upper()
-                else:
-                    name_part = "MUSTERI"
-                title = f"{name_part}-{today.strftime('%d.%m')}-{next_no:03d}"
+                customer_name = customer.display_name if customer else "Müşteri"
+                title = f"{today.strftime('%d.%m.%Y')} - {customer_name}"
             
             deal = Deal(
                 deal_no=next_no,
@@ -558,12 +570,18 @@ def register_routes(app):
     @login_required
     def deal_detail(id):
         deal = Deal.query.get_or_404(id)
+        if not current_user.is_admin and deal.user_id != current_user.id:
+            flash('Bu teklifi görüntüleme yetkiniz yok.', 'danger')
+            return redirect(url_for('deals'))
         return render_template('deal_detail.html', deal=deal)
 
     @app.route('/deals/<int:id>/edit', methods=['GET', 'POST'])
     @login_required
     def edit_deal(id):
         deal = Deal.query.get_or_404(id)
+        if not current_user.is_admin and deal.user_id != current_user.id:
+            flash('Bu teklifi düzenleme yetkiniz yok.', 'danger')
+            return redirect(url_for('deals'))
         if deal.stage == 'kazanilan':
             flash('Bu teklif onaylanmış ve üretime aktarılmış, kalemleri artık düzenlenemez.', 'danger')
             return redirect(url_for('deal_detail', id=id))
@@ -598,6 +616,9 @@ def register_routes(app):
     @login_required
     def delete_deal(id):
         deal = Deal.query.get_or_404(id)
+        if not current_user.is_admin and deal.user_id != current_user.id:
+            flash('Bu teklifi silme yetkiniz yok.', 'danger')
+            return redirect(url_for('deals'))
         db.session.delete(deal)
         db.session.commit()
         flash('Teklif silindi!', 'success')
@@ -608,6 +629,9 @@ def register_routes(app):
     def deal_pdf(id):
         import os
         deal = Deal.query.get_or_404(id)
+        if not current_user.is_admin and deal.user_id != current_user.id:
+            flash('Bu teklifin PDF\'ini görüntüleme yetkiniz yok.', 'danger')
+            return redirect(url_for('deals'))
         pdf = generate_deal_pdf(deal)
         
         # Teklifler klasörünü oluştur (yoksa)
@@ -631,12 +655,16 @@ def register_routes(app):
     @login_required
     def revise_deal(id):
         deal = Deal.query.get_or_404(id)
+        if not current_user.is_admin and deal.user_id != current_user.id:
+            flash('Bu teklifi revize etme yetkiniz yok.', 'danger')
+            return redirect(url_for('deals'))
         today = datetime.now().date()
         revize_count = Deal.query.filter(Deal.title.like(f'%{deal.title}%')).count()
         new_deal = Deal(
             title=f"{deal.title} (Revize {revize_count})", stage='teklif', probability=deal.probability,
             deal_date=today, expected_close=deal.expected_close, valid_until=today + timedelta(days=7),
-            vat_rate=deal.vat_rate, notes=f"Revize. Orijinal: {deal.notes or ''}", customer_id=deal.customer_id
+            vat_rate=deal.vat_rate, notes=f"Revize. Orijinal: {deal.notes or ''}", customer_id=deal.customer_id,
+            user_id=deal.user_id
         )
         db.session.add(new_deal)
         db.session.flush()
@@ -654,7 +682,10 @@ def register_routes(app):
     @login_required
     def approve_deal(id):
         deal = Deal.query.get_or_404(id)
-        
+        if not current_user.is_admin and deal.user_id != current_user.id:
+            flash('Bu teklifi onaylama yetkiniz yok.', 'danger')
+            return redirect(url_for('deals'))
+
         if request.method == 'POST':
             deal.stage = 'kazanilan'
             deal.user_id = current_user.id
@@ -1158,61 +1189,14 @@ def register_routes(app):
         flash('Tüm ödenmemiş primler ödendi olarak işaretlendi.', 'success')
         return redirect(url_for('commissions'))
 
-    @app.route('/backup/download')
-    @login_required
-    def backup_download():
-        import shutil
-        import os
-        
-        instance_dir = os.path.join(app.root_path, '..', 'instance')
-        db_path = os.path.join(instance_dir, 'crm.db')
-        
-        # Geçici bir kopya al (kilitlenme olmaması için)
-        backup_path = os.path.join(instance_dir, 'crm_backup.db')
-        shutil.copy2(db_path, backup_path)
-        
-        return send_file(backup_path, as_attachment=True, download_name=f'crm_yedek_{datetime.now().strftime("%Y%m%d_%H%M")}.db')
-
-    @app.route('/backup/upload', methods=['POST'])
-    @login_required
-    def backup_upload():
-        import os
-        
-        file = request.files.get('backup_file')
-        if not file or file.filename == '':
-            flash('Lütfen bir yedek dosyası seçin.', 'danger')
-            return redirect(url_for('settings'))
-        
-        if not file.filename.endswith('.db'):
-            flash('Yalnızca .db dosyaları yüklenebilir.', 'danger')
-            return redirect(url_for('settings'))
-        
-        instance_dir = os.path.join(app.root_path, '..', 'instance')
-        db_path = os.path.join(instance_dir, 'crm.db')
-        
-        # Mevcut veritabanını yedekle
-        import shutil
-        if os.path.exists(db_path):
-            old_backup = os.path.join(instance_dir, 'crm_onceki.db')
-            shutil.copy2(db_path, old_backup)
-        
-        # Yeni dosyayı kaydet
-        file.save(db_path)
-        
-        flash('Yedek başarıyla yüklendi! Uygulama yeniden başlatılıyor...', 'success')
-        return redirect(url_for('logout'))
-
     @app.route('/settings')
     @login_required
     def settings():
-        import os
-        instance_dir = os.path.join(app.root_path, '..', 'instance')
-        db_path = os.path.join(instance_dir, 'crm.db')
-        db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
-        
+        db_size = db.session.execute(db.text("SELECT pg_database_size(current_database())")).scalar()
+
         customer_count = Customer.query.count()
         deal_count = Deal.query.count()
-        
+
         return render_template('settings.html', db_size=db_size, customer_count=customer_count, deal_count=deal_count)
 
     @app.route('/users/<int:id>/commissions')
@@ -1234,8 +1218,21 @@ def register_routes(app):
     @app.route('/invoices')
     @login_required
     def invoices():
-        invoices = Invoice.query.order_by(Invoice.created_at.desc()).all()
-        return render_template('invoices.html', invoices=invoices)
+        search = request.args.get('search', '')
+        type_filter = request.args.get('type', '')
+        page = request.args.get('page', 1, type=int)
+        query = Invoice.query
+        if search:
+            query = query.join(Customer).filter(db.or_(
+                Customer.first_name.ilike(f'%{search}%'),
+                Customer.last_name.ilike(f'%{search}%'),
+                Customer.company_name.ilike(f'%{search}%')
+            ))
+        if type_filter:
+            query = query.filter(Invoice.type == type_filter)
+        pagination = query.order_by(Invoice.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
+        invoices = pagination.items
+        return render_template('invoices.html', invoices=invoices, search=search, type_filter=type_filter, pagination=pagination)
 
     @app.route('/invoices/<int:id>')
     @login_required
@@ -1247,7 +1244,10 @@ def register_routes(app):
     @login_required
     def create_invoice_from_deal(id):
         deal = Deal.query.get_or_404(id)
-        
+        if not current_user.is_admin and deal.user_id != current_user.id:
+            flash('Bu teklif için fatura oluşturma yetkiniz yok.', 'danger')
+            return redirect(url_for('deals'))
+
         if request.method == 'POST':
             inv_type = request.form.get('type', 'fatura')
             
@@ -1423,8 +1423,46 @@ def register_routes(app):
     @app.route('/daily-reports')
     @login_required
     def daily_reports():
-        reports = DailyReport.query.order_by(DailyReport.report_date.desc()).all()
-        return render_template('daily_reports.html', reports=reports)
+        reports = DailyReport.query.order_by(DailyReport.report_date.desc(), DailyReport.created_at.desc()).all()
+
+        dates = sorted({r.report_date for r in reports}, reverse=True)
+        day_cards = []
+        for d in dates:
+            day_reports = [r for r in reports if r.report_date == d]
+
+            deal_count = Deal.query.filter(Deal.deal_date == d).count()
+            avg_deal_value = db.session.query(db.func.avg(Deal.value)).filter(Deal.deal_date == d).scalar() or 0
+            shipment_count = Shipment.query.filter(Shipment.ship_date == d).count()
+
+            payments_day = Payment.query.filter(Payment.payment_date == d).all()
+            payment_count = len(payments_day)
+            payment_total = sum(p.amount for p in payments_day)
+
+            pending_price_count = sum(1 for r in day_reports if r.status == 'fiyat_verilecek')
+
+            top_customer_row = db.session.query(
+                Customer.first_name, Customer.last_name, Customer.company_name,
+                db.func.count(Deal.id).label('cnt')
+            ).join(Deal, Deal.customer_id == Customer.id).filter(Deal.deal_date == d) \
+             .group_by(Customer.id, Customer.first_name, Customer.last_name, Customer.company_name) \
+             .order_by(db.text('cnt DESC')).first()
+            top_customer = None
+            if top_customer_row:
+                top_customer = top_customer_row.company_name or f"{top_customer_row.first_name} {top_customer_row.last_name}"
+
+            day_cards.append({
+                'date': d,
+                'reports': day_reports,
+                'deal_count': deal_count,
+                'avg_deal_value': avg_deal_value,
+                'shipment_count': shipment_count,
+                'payment_count': payment_count,
+                'payment_total': payment_total,
+                'pending_price_count': pending_price_count,
+                'top_customer': top_customer,
+            })
+
+        return render_template('daily_reports.html', day_cards=day_cards)
 
     @app.route('/daily-reports/add', methods=['GET', 'POST'])
     @login_required
@@ -1452,7 +1490,9 @@ def register_routes(app):
                 
                 phone = phones[i].strip() if i < len(phones) else ''
                 notes = notes_list[i].strip() if i < len(notes_list) else ''
-                
+                statuses = request.form.getlist('status[]')
+                status = statuses[i].strip() if i < len(statuses) and statuses[i] else 'takip_edilecek'
+
                 # Önce formdan gelen customer_id'yi kontrol et
                 customer_ids = request.form.getlist('customer_id[]')
                 customer_id = int(customer_ids[i]) if i < len(customer_ids) and customer_ids[i] else None
@@ -1489,6 +1529,7 @@ def register_routes(app):
                     customer_name=customer_name,
                     phone=phone or None,
                     notes=notes,
+                    status=status,
                     user_id=current_user.id,
                     customer_id=customer_id
                 )
@@ -1535,11 +1576,9 @@ def register_routes(app):
     def daily_reports_by_date(date_str):
         try:
             target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-        except:
+        except ValueError:
             target_date = datetime.now().date()
-        
-        reports = DailyReport.query.filter_by(report_date=target_date).order_by(DailyReport.created_at.desc()).all()
-        return render_template('daily_reports.html', reports=reports, selected_date=target_date)
+        return redirect(url_for('daily_reports') + f'#gun-{target_date.strftime("%Y%m%d")}')
 
     @app.route('/daily-reports/<int:id>/delete', methods=['POST'])
     @login_required

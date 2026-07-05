@@ -11,6 +11,7 @@
             <div class="card-header"><i class="bi bi-funnel"></i> Fırsat Aşamalarına Göre</div>
             <div class="card-body">
                 {% if stage_stats %}
+                <div class="table-responsive">
                 <table class="table table-striped">
                     <thead><tr><th>Aşama</th><th>Adet</th><th>Toplam Değer</th></tr></thead>
                     <tbody>
@@ -23,6 +24,7 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
                 {% else %}
                 <p class="text-muted">Veri bulunmuyor.</p>
                 {% endif %}
@@ -35,6 +37,7 @@
             <div class="card-header"><i class="bi bi-gear"></i> Üretim Durumlarına Göre</div>
             <div class="card-body">
                 {% if production_stats %}
+                <div class="table-responsive">
                 <table class="table table-striped">
                     <thead><tr><th>Durum</th><th>Adet</th></tr></thead>
                     <tbody>
@@ -46,6 +49,7 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
                 {% else %}
                 <p class="text-muted">Veri bulunmuyor.</p>
                 {% endif %}
@@ -86,6 +90,7 @@
             <div class="card-header"><i class="bi bi-trophy"></i> En Değerli Müşteriler</div>
             <div class="card-body">
                 {% if top_customers %}
+                <div class="table-responsive">
                 <table class="table table-striped">
                     <thead><tr><th>Müşteri</th><th>Fırsat</th><th>Toplam Değer</th></tr></thead>
                     <tbody>
@@ -98,6 +103,7 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
                 {% else %}
                 <p class="text-muted">Veri bulunmuyor.</p>
                 {% endif %}
