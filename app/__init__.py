@@ -60,8 +60,8 @@ def create_app():
         db.create_all()
         from app.models import User
         if not User.query.first():
-            admin = User(username='admin', email='admin@crm.com', full_name='Yönetici', role='admin')
-            admin.set_password('serkan2255')
+            admin = User(username='serkan', email='admin@crm.com', full_name='Yönetici', role='admin')
+            admin.set_password('2255')
             db.session.add(admin)
             db.session.commit()
 
