@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, Shipment, ShipmentItem, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, Shipment, ShipmentItem, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf
 from app import db
 from datetime import datetime, timedelta, date
@@ -1703,3 +1703,118 @@ def register_routes(app):
                 'invoice_no': p.invoice.display_no if p.invoice else '-'
             })
         return jsonify(result)
+
+    @app.route('/potential-customers')
+    @login_required
+    def potential_customers():
+        search = request.args.get('search', '')
+        status_filter = request.args.get('status', '')
+        city_filter = request.args.get('city', '')
+        sector_filter = request.args.get('sector', '')
+        product_filter = request.args.get('product', '')
+        page = request.args.get('page', 1, type=int)
+
+        query = PotentialCustomer.query
+        if search:
+            query = query.filter(db.or_(
+                PotentialCustomer.company_name.ilike(f'%{search}%'),
+                PotentialCustomer.phone.ilike(f'%{search}%')
+            ))
+        if status_filter:
+            query = query.filter(PotentialCustomer.status == status_filter)
+        if city_filter:
+            query = query.filter(PotentialCustomer.city == city_filter)
+        if sector_filter:
+            query = query.filter(PotentialCustomer.sector == sector_filter)
+        if product_filter:
+            query = query.filter(PotentialCustomer.interested_products.ilike(f'%{product_filter}%'))
+
+        pagination = query.order_by(PotentialCustomer.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
+        potentials = pagination.items
+
+        cities = [c[0] for c in db.session.query(PotentialCustomer.city).filter(
+            PotentialCustomer.city.isnot(None), PotentialCustomer.city != ''
+        ).distinct().order_by(PotentialCustomer.city).all()]
+
+        return render_template('potential_customers.html', potentials=potentials, pagination=pagination,
+                                search=search, status_filter=status_filter, city_filter=city_filter,
+                                sector_filter=sector_filter, product_filter=product_filter, cities=cities,
+                                sectors=PotentialCustomer.SECTORS, products=PotentialCustomer.PRODUCTS,
+                                statuses=PotentialCustomer.STATUSES)
+
+    @app.route('/potential-customers/add', methods=['GET', 'POST'])
+    @login_required
+    def add_potential_customer():
+        if request.method == 'POST':
+            pc = PotentialCustomer(
+                company_name=request.form.get('company_name', '').strip(),
+                phone=request.form.get('phone'),
+                address=request.form.get('address'),
+                city=request.form.get('city'),
+                sector=request.form.get('sector'),
+                interested_products=','.join(request.form.getlist('products')),
+                source=request.form.get('source', 'Elle'),
+                status=request.form.get('status', 'Aranacak'),
+                notes=request.form.get('notes'),
+            )
+            db.session.add(pc)
+            db.session.commit()
+            flash('Potansiyel müşteri eklendi!', 'success')
+            return redirect(url_for('potential_customers'))
+        return render_template('add_potential_customer.html', potential=None,
+                                sectors=PotentialCustomer.SECTORS, products=PotentialCustomer.PRODUCTS,
+                                sources=PotentialCustomer.SOURCES, statuses=PotentialCustomer.STATUSES)
+
+    @app.route('/potential-customers/<int:id>/edit', methods=['GET', 'POST'])
+    @login_required
+    def edit_potential_customer(id):
+        pc = PotentialCustomer.query.get_or_404(id)
+        if request.method == 'POST':
+            pc.company_name = request.form.get('company_name', '').strip()
+            pc.phone = request.form.get('phone')
+            pc.address = request.form.get('address')
+            pc.city = request.form.get('city')
+            pc.sector = request.form.get('sector')
+            pc.interested_products = ','.join(request.form.getlist('products'))
+            pc.source = request.form.get('source', 'Elle')
+            pc.status = request.form.get('status', 'Aranacak')
+            pc.notes = request.form.get('notes')
+            db.session.commit()
+            flash('Potansiyel müşteri güncellendi!', 'success')
+            return redirect(url_for('potential_customers'))
+        return render_template('add_potential_customer.html', potential=pc,
+                                sectors=PotentialCustomer.SECTORS, products=PotentialCustomer.PRODUCTS,
+                                sources=PotentialCustomer.SOURCES, statuses=PotentialCustomer.STATUSES)
+
+    @app.route('/potential-customers/<int:id>/delete', methods=['POST'])
+    @login_required
+    def delete_potential_customer(id):
+        pc = PotentialCustomer.query.get_or_404(id)
+        db.session.delete(pc)
+        db.session.commit()
+        flash('Potansiyel müşteri silindi!', 'success')
+        return redirect(url_for('potential_customers'))
+
+    @app.route('/potential-customers/<int:id>/convert', methods=['POST'])
+    @login_required
+    def convert_potential_customer(id):
+        pc = PotentialCustomer.query.get_or_404(id)
+        if pc.converted_customer_id:
+            flash('Bu potansiyel müşteri zaten dönüştürülmüş.', 'warning')
+            return redirect(url_for('potential_customers'))
+
+        customer = Customer(
+            company_name=pc.company_name,
+            phone=pc.phone,
+            address=pc.address,
+            notes=f'Potansiyel müşteriden dönüştürüldü. {pc.notes or ""}'.strip(),
+            status='aktif',
+        )
+        db.session.add(customer)
+        db.session.flush()
+
+        pc.converted_customer_id = customer.id
+        pc.status = 'Müşteriye Dönüştürüldü'
+        db.session.commit()
+        flash(f'"{pc.company_name}" müşteriye dönüştürüldü!', 'success')
+        return redirect(url_for('potential_customers'))

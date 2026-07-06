@@ -22,7 +22,8 @@
                 {% set secondary_active = request.endpoint in ['production_list','shipment_list','products','commissions','invoices','reports','daily_reports','payments','users'] or 'production' in request.endpoint or 'shipment' in request.endpoint or 'product' in request.endpoint or 'commission' in request.endpoint or 'invoice' in request.endpoint or 'daily_report' in request.endpoint or 'payment' in request.endpoint or 'user' in request.endpoint %}
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item"><a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}"><i class="bi bi-house"></i></a></li>
-                    <li class="nav-item"><a class="nav-link {% if 'customer' in request.endpoint %}active{% endif %}" href="{{ url_for('customers') }}"><i class="bi bi-people"></i> Müşteriler</a></li>
+                    <li class="nav-item"><a class="nav-link {% if 'customer' in request.endpoint and 'potential' not in request.endpoint %}active{% endif %}" href="{{ url_for('customers') }}"><i class="bi bi-people"></i> Müşteriler</a></li>
+                    <li class="nav-item"><a class="nav-link {% if 'potential' in request.endpoint %}active{% endif %}" href="{{ url_for('potential_customers') }}"><i class="bi bi-person-lines-fill"></i> Potansiyel Müşteriler</a></li>
                     <li class="nav-item"><a class="nav-link {% if 'deal' in request.endpoint %}active{% endif %}" href="{{ url_for('deals') }}"><i class="bi bi-file-earmark-text"></i> Teklifler</a></li>
                     <li class="nav-item"><a class="nav-link {% if 'task' in request.endpoint %}active{% endif %}" href="{{ url_for('tasks') }}"><i class="bi bi-check2-square"></i> Görevler</a></li>
                     <li class="nav-item"><a class="nav-link {% if 'calendar' in request.endpoint %}active{% endif %}" href="{{ url_for('calendar') }}"><i class="bi bi-calendar3"></i> Takvim</a></li>

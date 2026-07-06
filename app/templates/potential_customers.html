@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Potansiyel Müşteriler - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-person-lines-fill"></i> Potansiyel Müşteriler <span class="badge bg-secondary">{{ pagination.total }}</span></h2>
+    <a href="{{ url_for('add_potential_customer') }}" class="btn btn-primary">
+        <i class="bi bi-person-plus"></i> Yeni Ekle
+    </a>
+</div>
+
+<div class="card mb-4 shadow-sm">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('potential_customers') }}" class="row g-3">
+            <div class="col-md-4">
+                <input type="text" class="form-control" name="search" placeholder="Firma adı veya telefon ara..." value="{{ search }}">
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" name="status">
+                    <option value="">Tüm Durumlar</option>
+                    {% for s in statuses %}
+                    <option value="{{ s }}" {{ 'selected' if status_filter == s }}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" name="city">
+                    <option value="">Tüm Şehirler</option>
+                    {% for c in cities %}
+                    <option value="{{ c }}" {{ 'selected' if city_filter == c }}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" name="sector">
+                    <option value="">Tüm Sektörler</option>
+                    {% for s in sectors %}
+                    <option value="{{ s }}" {{ 'selected' if sector_filter == s }}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" name="product">
+                    <option value="">Tüm Ürünler</option>
+                    {% for p in products %}
+                    <option value="{{ p }}" {{ 'selected' if product_filter == p }}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search"></i> Filtrele
+                </button>
+            </div>
+            {% if search or status_filter or city_filter or sector_filter or product_filter %}
+            <div class="col-md-2">
+                <a href="{{ url_for('potential_customers') }}" class="btn btn-secondary w-100">
+                    <i class="bi bi-x-circle"></i> Temizle
+                </a>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+{% if potentials %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Firma</th>
+                        <th>Telefon</th>
+                        <th>Şehir</th>
+                        <th>Sektör</th>
+                        <th>İlgilendiği Ürünler</th>
+                        <th>Kaynak</th>
+                        <th>Durum</th>
+                        <th>Tarih</th>
+                        <th>İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pc in potentials %}
+                    <tr>
+                        <td><strong>{{ pc.company_name }}</strong></td>
+                        <td>{{ pc.phone or '-' }}</td>
+                        <td>{{ pc.city or '-' }}</td>
+                        <td>{{ pc.sector or '-' }}</td>
+                        <td>
+                            {% for prod in pc.product_list %}
+                            <span class="badge bg-info text-dark">{{ prod }}</span>
+                            {% endfor %}
+                        </td>
+                        <td><span class="badge bg-secondary">{{ pc.source }}</span></td>
+                        <td>
+                            <span class="badge bg-{{ 'success' if pc.status == 'Müşteriye Dönüştürüldü' else 'warning' if pc.status == 'Arandı-Fiyat İstedi' else 'danger' if pc.status == 'Arandı-İlgilenmedi' else 'info' }}">
+                                {{ pc.status }}
+                            </span>
+                        </td>
+                        <td>{{ pc.created_at.strftime('%d.%m.%Y') }}</td>
+                        <td>
+                            {% if not pc.converted_customer_id %}
+                            <form method="POST" action="{{ url_for('convert_potential_customer', id=pc.id) }}" style="display: inline;" onsubmit="return confirm('Bu potansiyel müşteriyi gerçek müşteriye dönüştürmek istediğinize emin misiniz?')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-success" title="Müşteriye Dönüştür">
+                                    <i class="bi bi-arrow-right-circle"></i> Dönüştür
+                                </button>
+                            </form>
+                            {% else %}
+                            <a href="{{ url_for('customer_detail', id=pc.converted_customer_id) }}" class="btn btn-sm btn-outline-secondary" title="Dönüştürülen Müşteri">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                            {% endif %}
+                            <a href="{{ url_for('edit_potential_customer', id=pc.id) }}" class="btn btn-sm btn-outline-warning" title="Düzenle">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <form method="POST" action="{{ url_for('delete_potential_customer', id=pc.id) }}" style="display: inline;" onsubmit="return confirm('Bu potansiyel müşteriyi silmek istediğinize emin misiniz?')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Sil">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination justify-content-center">
+        <li class="page-item {{ 'disabled' if not pagination.has_prev }}">
+            <a class="page-link" href="{{ url_for('potential_customers', page=pagination.prev_num, search=search, status=status_filter, city=city_filter, sector=sector_filter, product=product_filter) }}">Önceki</a>
+        </li>
+        {% for p in pagination.iter_pages() %}
+            {% if p %}
+            <li class="page-item {{ 'active' if p == pagination.page }}">
+                <a class="page-link" href="{{ url_for('potential_customers', page=p, search=search, status=status_filter, city=city_filter, sector=sector_filter, product=product_filter) }}">{{ p }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+        {% endfor %}
+        <li class="page-item {{ 'disabled' if not pagination.has_next }}">
+            <a class="page-link" href="{{ url_for('potential_customers', page=pagination.next_num, search=search, status=status_filter, city=city_filter, sector=sector_filter, product=product_filter) }}">Sonraki</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Henüz potansiyel müşteri bulunmuyor. İlk kaydı ekleyin!
+</div>
+{% endif %}
+{% endblock %}

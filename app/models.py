@@ -388,3 +388,33 @@ class Payment(db.Model):
 
     def __repr__(self):
         return f'<Payment {self.amount} ₺ - {self.customer.display_name}>'
+
+class PotentialCustomer(db.Model):
+    SECTORS = ['Dönerci', 'Restoran', 'Market', 'Bakkal', 'Kuruyemişçi', 'Burgerci',
+               'Tekstil', 'Çay-Kahve', 'Fırın-Pastane', 'Baharatçı', 'Şekerci', 'Diğer']
+    PRODUCTS = ['Kare Dipli Kese Kağıdı', 'Dürüm-Sarma Kağıdı', 'Tepsi Altı Ambalaj Kağıdı',
+                'Taşıma Çantası', 'Baskılı Atlet Poşet', 'Market Poşeti', 'Baskılı Doypack']
+    SOURCES = ['Elle', 'Otomatik']
+    STATUSES = ['Aranacak', 'Arandı-İlgilenmedi', 'Arandı-Fiyat İstedi', 'Müşteriye Dönüştürüldü']
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_name = db.Column(db.String(200), nullable=False)
+    phone = db.Column(db.String(20))
+    address = db.Column(db.Text)
+    city = db.Column(db.String(100))
+    sector = db.Column(db.String(50))
+    interested_products = db.Column(db.String(500))  # virgulle ayrilmis liste
+    source = db.Column(db.String(20), default='Elle')
+    status = db.Column(db.String(30), default='Aranacak')
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    converted_customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)
+
+    converted_customer = db.relationship('Customer', backref='converted_from')
+
+    @property
+    def product_list(self):
+        return [p for p in (self.interested_products or '').split(',') if p]
+
+    def __repr__(self):
+        return f'<PotentialCustomer {self.company_name}>'

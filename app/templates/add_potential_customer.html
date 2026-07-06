@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Potansiyel Müşteri Düzenle' if potential else 'Yeni Potansiyel Müşteri' }} - CRM Sistemi{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-person-lines-fill"></i> {{ 'Potansiyel Müşteri Düzenle' if potential else 'Yeni Potansiyel Müşteri' }}</h2>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('edit_potential_customer', id=potential.id) if potential else url_for('add_potential_customer') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Firma Adı *</label>
+                    <input type="text" class="form-control" name="company_name" required value="{{ potential.company_name if potential else '' }}">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Telefon</label>
+                    <input type="text" class="form-control" name="phone" value="{{ potential.phone if potential else '' }}">
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Şehir</label>
+                    <input type="text" class="form-control" name="city" value="{{ potential.city if potential else '' }}">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Adres</label>
+                    <input type="text" class="form-control" name="address" value="{{ potential.address if potential else '' }}">
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Sektör</label>
+                    <select class="form-select" name="sector">
+                        <option value="">Seçiniz</option>
+                        {% for s in sectors %}
+                        <option value="{{ s }}" {{ 'selected' if potential and potential.sector == s }}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Kaynak</label>
+                    <select class="form-select" name="source">
+                        {% for s in sources %}
+                        <option value="{{ s }}" {{ 'selected' if potential and potential.source == s }}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Durum</label>
+                    <select class="form-select" name="status">
+                        {% for s in statuses %}
+                        <option value="{{ s }}" {{ 'selected' if potential and potential.status == s }}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-12">
+                    <label class="form-label">İlgilenebileceği Ürünler</label>
+                    <div class="row">
+                        {% set selected_products = potential.product_list if potential else [] %}
+                        {% for p in products %}
+                        <div class="col-md-4 form-check mb-1">
+                            <input type="checkbox" class="form-check-input" name="products" value="{{ p }}" id="prod_{{ loop.index }}"
+                                   {{ 'checked' if p in selected_products }}>
+                            <label class="form-check-label" for="prod_{{ loop.index }}">{{ p }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="col-md-12">
+                    <label class="form-label">Not (görüşme detayları)</label>
+                    <textarea class="form-control" name="notes" rows="3">{{ potential.notes if potential else '' }}</textarea>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 mt-4">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check"></i> Kaydet</button>
+                <a href="{{ url_for('potential_customers') }}" class="btn btn-secondary">İptal</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
