@@ -20,8 +20,20 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-BACKUP_DIR = Path(r"D:\CRM_Yedekler")
+BACKUP_DIR = Path(r"C:\CRM_Yedekler")
 RETENTION_DAYS = 30
+MIN_HOURS_BETWEEN_BACKUPS = 20
+
+
+def latest_backup_age_hours():
+    """En son yedek dosyasinin kac saat once olusturuldugunu dondurur.
+    Hic yedek yoksa None doner."""
+    existing = sorted(BACKUP_DIR.glob("neon_backup_*.json"))
+    if not existing:
+        return None
+    latest = existing[-1]
+    age_seconds = datetime.now().timestamp() - latest.stat().st_mtime
+    return age_seconds / 3600
 
 TABLES = [
     "user", "customer", "product", "deal", "deal_item", "commission",
@@ -44,6 +56,12 @@ def main():
         sys.exit(1)
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+    age_hours = latest_backup_age_hours()
+    if age_hours is not None and age_hours < MIN_HOURS_BETWEEN_BACKUPS:
+        print(f"Zaten guncel: en son yedek {age_hours:.1f} saat once alinmis "
+              f"({MIN_HOURS_BETWEEN_BACKUPS} saatten az). Yeni yedek alinmadi.")
+        return
 
     conn = psycopg2.connect(database_url)
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
