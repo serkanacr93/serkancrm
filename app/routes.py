@@ -484,10 +484,30 @@ def register_routes(app):
     def deals():
         search = request.args.get('search', '')
         stage_filter = request.args.get('stage', '')
+        tab = request.args.get('tab', 'aktif')
         page = request.args.get('page', 1, type=int)
-        query = Deal.query
+
+        base_query = Deal.query
         if not current_user.is_admin:
-            query = query.filter(Deal.user_id == current_user.id)
+            base_query = base_query.filter(Deal.user_id == current_user.id)
+
+        RESOLVED_STAGES = ('kazanilan', 'kaybedilen', 'revize')
+
+        def apply_tab(q, t):
+            if t == 'aktif':
+                return q.filter(~Deal.stage.in_(RESOLVED_STAGES))
+            if t == 'kazanilan':
+                return q.filter(Deal.stage == 'kazanilan')
+            if t == 'kaybedilen':
+                return q.filter(Deal.stage == 'kaybedilen')
+            return q  # 'tumu'
+
+        tab_counts = {
+            t: apply_tab(base_query, t).count()
+            for t in ('aktif', 'kazanilan', 'kaybedilen', 'tumu')
+        }
+
+        query = apply_tab(base_query, tab)
         if search:
             query = query.filter(db.or_(
                 Deal.title.ilike(f'%{search}%'),
@@ -499,7 +519,8 @@ def register_routes(app):
             query = query.filter(Deal.stage == stage_filter)
         pagination = query.order_by(Deal.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
         deals = pagination.items
-        return render_template('deals.html', deals=deals, search=search, stage_filter=stage_filter, pagination=pagination)
+        return render_template('deals.html', deals=deals, search=search, stage_filter=stage_filter,
+                                tab=tab, tab_counts=tab_counts, pagination=pagination)
 
     @app.route('/deals/add', methods=['GET', 'POST'])
     @login_required
@@ -619,6 +640,26 @@ def register_routes(app):
         if not current_user.is_admin and deal.user_id != current_user.id:
             flash('Bu teklifi silme yetkiniz yok.', 'danger')
             return redirect(url_for('deals'))
+
+        blockers = []
+        if deal.production:
+            blockers.append('üretim')
+        if Commission.query.filter_by(deal_id=id).first():
+            blockers.append('prim')
+        if deal.invoices:
+            blockers.append('fatura')
+        if deal.statements:
+            blockers.append('cari ekstre')
+
+        if blockers:
+            flash(
+                'Bu teklife bağlı ' + ', '.join(blockers) + ' kaydı var, '
+                'önce onları silin veya bu teklifi silemezsiniz.', 'danger'
+            )
+            return redirect(url_for('deal_detail', id=id))
+
+        Reminder.query.filter_by(deal_id=id).delete()
+        Task.query.filter_by(deal_id=id).delete()
         db.session.delete(deal)
         db.session.commit()
         flash('Teklif silindi!', 'success')
