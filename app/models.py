@@ -418,3 +418,25 @@ class PotentialCustomer(db.Model):
 
     def __repr__(self):
         return f'<PotentialCustomer {self.company_name}>'
+
+class PlacesSearchConfig(db.Model):
+    """Tekil satir (id=1) - Google Places otomatik arama ayarlari."""
+    id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, default=False, nullable=False)
+    last_combo_index = db.Column(db.Integer, default=0, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class PlacesSearchLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    run_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    city = db.Column(db.String(100))
+    sector = db.Column(db.String(50))
+    search_query = db.Column(db.String(300))
+    request_count = db.Column(db.Integer, default=0)
+    results_found = db.Column(db.Integer, default=0)
+    new_companies = db.Column(db.Integer, default=0)
+    triggered_by = db.Column(db.String(20), default='otomatik')  # otomatik / manuel
+    error = db.Column(db.String(500))
+
+    def __repr__(self):
+        return f'<PlacesSearchLog {self.city}/{self.sector} - {self.run_at}>'

@@ -11,6 +11,79 @@
 </div>
 
 <div class="card mb-4 shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-robot"></i> Google Places Otomatik Arama</span>
+        {% if places_stats.status == 'aktif' %}
+        <span class="badge bg-success fs-6">Aktif - Mesai Saati</span>
+        {% elif places_stats.status == 'pasif' %}
+        <span class="badge bg-secondary fs-6">Pasif - Mesai Dışı</span>
+        {% else %}
+        <span class="badge bg-danger fs-6">Kapatıldı</span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div class="row g-4">
+            <div class="col-md-3">
+                <small class="text-muted">Bugünkü İstek (TR günü)</small>
+                <div class="progress my-1" style="height: 22px;">
+                    <div class="progress-bar bg-info" style="width: {{ (places_stats.today_used / places_stats.today_limit * 100) | round(1) }}%">
+                        {{ places_stats.today_used }}/{{ places_stats.today_limit }}
+                    </div>
+                </div>
+                <small class="text-success">Bugün bulunan yeni firma: <strong>{{ places_stats.today_new }}</strong></small>
+            </div>
+            <div class="col-md-3">
+                <small class="text-muted">Bu Ay</small>
+                <h5 class="mb-0">{{ places_stats.month.requests }} istek</h5>
+                <small class="text-muted">≈ ${{ "%.2f"|format(places_stats.month.cost) }}</small>
+            </div>
+            <div class="col-md-3">
+                <small class="text-muted">90 Günlük Maliyet / ${{ "%.0f"|format(places_stats.last_90_days.budget) }} Bütçe</small>
+                <div class="progress my-1" style="height: 22px;">
+                    <div class="progress-bar {{ 'bg-danger' if places_stats.last_90_days.percent > 80 else 'bg-warning' if places_stats.last_90_days.percent > 50 else 'bg-success' }}"
+                         style="width: {{ places_stats.last_90_days.percent }}%">
+                        ${{ "%.2f"|format(places_stats.last_90_days.cost) }}
+                    </div>
+                </div>
+                <small class="text-muted">{{ places_stats.last_90_days.requests }} istek (%{{ places_stats.last_90_days.percent }})</small>
+            </div>
+            <div class="col-md-3 d-flex align-items-center justify-content-end">
+                <form method="POST" action="{{ url_for('search_places_now') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Şimdi Ara
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% if places_stats.recent_logs %}
+        <hr>
+        <small class="text-muted d-block mb-2">Son 5 Arama</small>
+        <div class="table-responsive">
+            <table class="table table-sm mb-0">
+                <thead>
+                    <tr><th>Saat</th><th>Şehir/Sektör</th><th>Sonuç</th><th>Yeni Firma</th><th>İstek</th><th>Tetikleyen</th></tr>
+                </thead>
+                <tbody>
+                    {% for log in places_stats.recent_logs %}
+                    <tr class="{{ 'table-danger' if log.error }}">
+                        <td>{{ log.run_at.strftime('%d.%m %H:%M') }}</td>
+                        <td>{{ log.city }} / {{ log.sector }}</td>
+                        <td>{{ log.results_found }}</td>
+                        <td>{{ log.new_companies }}</td>
+                        <td>{{ log.request_count }}</td>
+                        <td><span class="badge bg-{{ 'primary' if log.triggered_by == 'manuel' else 'secondary' }}">{{ log.triggered_by }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-4 shadow-sm">
     <div class="card-body">
         <form method="GET" action="{{ url_for('potential_customers') }}" class="row g-3">
             <div class="col-md-4">

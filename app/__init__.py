@@ -65,4 +65,11 @@ def create_app():
             db.session.add(admin)
             db.session.commit()
 
+    # Debug reloader'da 2 surec olustugu icin (izleyici + gercek worker),
+    # zamanlayiciyi sadece gercek worker surecinde (ya da production'da,
+    # reloader hic yokken) baslat - aksi halde saatlik is 2 kez tetiklenir.
+    if not app.config['DEBUG'] or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        from app.scheduler import start_scheduler
+        start_scheduler(app)
+
     return app

@@ -52,9 +52,10 @@
             <div class="card-body">
                 <p class="text-muted">
                     Veritabanı artık Neon (bulut PostgreSQL) üzerinde çalışıyor.
-                    Tüm veriler her gece <strong>03:00</strong>'te
+                    Tüm veriler bilgisayarda <strong>oturum açıldığında</strong>
                     <code>scripts/backup_neon.py</code> ile otomatik olarak
-                    JSON formatında yedekleniyor ve 30 günden eski yedekler
+                    JSON formatında yedekleniyor (son yedek 20 saatten
+                    yeniyse tekrar alınmıyor) ve 30 günden eski yedekler
                     otomatik siliniyor.
                 </p>
                 <p class="small text-muted mb-0">
@@ -63,6 +64,42 @@
                     dosya tabanlı yedekleme (.db indir/yükle) bulut
                     veritabanına geçişle birlikte kaldırıldı.
                 </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header bg-{{ 'success' if places_config.enabled else 'secondary' }} text-white">
+                <i class="bi bi-geo-alt"></i> Otomatik Müşteri Arama (Google Places)
+            </div>
+            <div class="card-body">
+                <p>
+                    Durum:
+                    <span class="badge bg-{{ 'success' if places_config.enabled else 'secondary' }} fs-6">
+                        {{ 'Aktif' if places_config.enabled else 'Pasif' }}
+                    </span>
+                </p>
+                <p class="text-muted small">
+                    Aktifken Pazartesi-Cuma 09:00-18:00 (TR saati) arası her saat başı
+                    otomatik arama yapılır, günlük en fazla 75 istek kullanılır.
+                    Kapalıyken hiç arama yapılmaz.
+                </p>
+                <form method="POST" action="{{ url_for('toggle_places_search') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-{{ 'outline-danger' if places_config.enabled else 'success' }}">
+                        {% if places_config.enabled %}
+                        <i class="bi bi-pause-circle"></i> Pasif Yap
+                        {% else %}
+                        <i class="bi bi-play-circle"></i> Aktif Yap
+                        {% endif %}
+                    </button>
+                    <a href="{{ url_for('potential_customers') }}" class="btn btn-outline-primary">
+                        <i class="bi bi-graph-up"></i> Takip Panelini Gör
+                    </a>
+                </form>
             </div>
         </div>
     </div>

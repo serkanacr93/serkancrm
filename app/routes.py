@@ -1,8 +1,8 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, Shipment, ShipmentItem, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, Shipment, ShipmentItem, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf
-from app import db
+from app import db, places_search
 from datetime import datetime, timedelta, date
 from functools import wraps
 from io import BytesIO
@@ -1237,8 +1237,19 @@ def register_routes(app):
 
         customer_count = Customer.query.count()
         deal_count = Deal.query.count()
+        places_config = places_search.get_config()
 
-        return render_template('settings.html', db_size=db_size, customer_count=customer_count, deal_count=deal_count)
+        return render_template('settings.html', db_size=db_size, customer_count=customer_count,
+                                deal_count=deal_count, places_config=places_config)
+
+    @app.route('/settings/places-toggle', methods=['POST'])
+    @login_required
+    def toggle_places_search():
+        config = places_search.get_config()
+        config.enabled = not config.enabled
+        db.session.commit()
+        flash(f"Otomatik müşteri arama {'aktif' if config.enabled else 'pasif'} edildi.", 'success')
+        return redirect(url_for('settings'))
 
     @app.route('/users/<int:id>/commissions')
     @login_required
@@ -1736,11 +1747,38 @@ def register_routes(app):
             PotentialCustomer.city.isnot(None), PotentialCustomer.city != ''
         ).distinct().order_by(PotentialCustomer.city).all()]
 
+        places_config = places_search.get_config()
+        places_stats = {
+            'status': places_search.get_status(places_config),
+            'today_used': places_search.todays_request_count(),
+            'today_limit': places_search.DAILY_REQUEST_LIMIT,
+            'today_new': places_search.todays_new_companies(),
+            'month': places_search.month_stats(),
+            'last_90_days': places_search.last_90_days_stats(),
+            'recent_logs': PlacesSearchLog.query.order_by(PlacesSearchLog.run_at.desc()).limit(5).all(),
+        }
+
         return render_template('potential_customers.html', potentials=potentials, pagination=pagination,
                                 search=search, status_filter=status_filter, city_filter=city_filter,
                                 sector_filter=sector_filter, product_filter=product_filter, cities=cities,
                                 sectors=PotentialCustomer.SECTORS, products=PotentialCustomer.PRODUCTS,
-                                statuses=PotentialCustomer.STATUSES)
+                                statuses=PotentialCustomer.STATUSES, places_stats=places_stats)
+
+    @app.route('/potential-customers/search-now', methods=['POST'])
+    @login_required
+    def search_places_now():
+        result = places_search.run_search(triggered_by='manuel')
+        if result.get('skipped'):
+            flash(result.get('reason', 'Arama yapılamadı.'), 'warning')
+        elif result.get('error'):
+            flash(f"Arama sırasında hata oluştu: {result['error']}", 'danger')
+        else:
+            flash(
+                f"Arama tamamlandı: {result['sector']} / {result['city']} — "
+                f"{result['results_found']} sonuç bulundu, {result['new_companies']} yeni firma eklendi "
+                f"({result['request_count']} istek kullanıldı).", 'success'
+            )
+        return redirect(url_for('potential_customers'))
 
     @app.route('/potential-customers/add', methods=['GET', 'POST'])
     @login_required

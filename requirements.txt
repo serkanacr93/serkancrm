@@ -11,3 +11,4 @@ psycopg2-binary==2.9.12
 python-dotenv==1.0.0
 gunicorn==23.0.0
 googlemaps==4.10.0
+APScheduler==3.11.3
