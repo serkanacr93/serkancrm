@@ -23,7 +23,7 @@
     </div>
     <div class="card-body">
         <div class="row g-4">
-            <div class="col-md-3">
+            <div class="col-md-4">
                 <small class="text-muted">Bugünkü İstek (TR günü)</small>
                 <div class="progress my-1" style="height: 22px;">
                     <div class="progress-bar bg-info" style="width: {{ (places_stats.today_used / places_stats.today_limit * 100) | round(1) }}%">
@@ -32,12 +32,12 @@
                 </div>
                 <small class="text-success">Bugün bulunan yeni firma: <strong>{{ places_stats.today_new }}</strong></small>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4">
                 <small class="text-muted">Bu Ay</small>
                 <h5 class="mb-0">{{ places_stats.month.requests }} istek</h5>
                 <small class="text-muted">≈ ${{ "%.2f"|format(places_stats.month.cost) }}</small>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4">
                 <small class="text-muted">90 Günlük Maliyet / ${{ "%.0f"|format(places_stats.last_90_days.budget) }} Bütçe</small>
                 <div class="progress my-1" style="height: 22px;">
                     <div class="progress-bar {{ 'bg-danger' if places_stats.last_90_days.percent > 80 else 'bg-warning' if places_stats.last_90_days.percent > 50 else 'bg-success' }}"
@@ -46,14 +46,6 @@
                     </div>
                 </div>
                 <small class="text-muted">{{ places_stats.last_90_days.requests }} istek (%{{ places_stats.last_90_days.percent }})</small>
-            </div>
-            <div class="col-md-3 d-flex align-items-center justify-content-end">
-                <form method="POST" action="{{ url_for('search_places_now') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-search"></i> Şimdi Ara
-                    </button>
-                </form>
             </div>
         </div>
 
@@ -82,6 +74,54 @@
         {% endif %}
     </div>
 </div>
+
+<div class="card mb-4 shadow-sm">
+    <div class="card-header"><i class="bi bi-search"></i> Yeni Arama Başlat (Manuel)</div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('search_places_now') }}" onsubmit="return confirmPlacesSearch()">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">İl(ler) <small class="text-muted">(Ctrl/Cmd tuşuyla çoklu seçim yapabilirsiniz)</small></label>
+                    <select class="form-select" name="cities" id="placesCitiesSelect" multiple size="8">
+                        {% for c in all_cities %}
+                        <option value="{{ c }}">{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Sektör(ler)</label>
+                    <div class="row">
+                        {% for s in search_sectors %}
+                        <div class="col-md-6 form-check mb-1">
+                            <input type="checkbox" class="form-check-input places-sector-cb" name="sectors" value="{{ s }}" id="places_sector_{{ loop.index }}">
+                            <label class="form-check-label" for="places_sector_{{ loop.index }}">{{ s }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary mt-3">
+                <i class="bi bi-search"></i> Ara ve Havuza Ekle
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+function confirmPlacesSearch() {
+    var citiesSelect = document.getElementById('placesCitiesSelect');
+    var citiesCount = citiesSelect.selectedOptions.length;
+    var sectorsCount = document.querySelectorAll('.places-sector-cb:checked').length;
+    var total = citiesCount * sectorsCount;
+    if (total === 0) {
+        alert('En az bir il ve bir sektör seçmelisiniz.');
+        return false;
+    }
+    var cost = (total * 0.035).toFixed(2);
+    return confirm('Bu arama yaklaşık ' + total + ' istek yapacak (~$' + cost + '), onaylıyor musunuz?');
+}
+</script>
 
 <div class="card mb-4 shadow-sm">
     <div class="card-body">

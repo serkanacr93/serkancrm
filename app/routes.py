@@ -1762,22 +1762,27 @@ def register_routes(app):
                                 search=search, status_filter=status_filter, city_filter=city_filter,
                                 sector_filter=sector_filter, product_filter=product_filter, cities=cities,
                                 sectors=PotentialCustomer.SECTORS, products=PotentialCustomer.PRODUCTS,
-                                statuses=PotentialCustomer.STATUSES, places_stats=places_stats)
+                                statuses=PotentialCustomer.STATUSES, places_stats=places_stats,
+                                all_cities=places_search.ALL_CITIES, search_sectors=places_search.SEARCH_SECTORS)
 
     @app.route('/potential-customers/search-now', methods=['POST'])
     @login_required
     def search_places_now():
-        result = places_search.run_search(triggered_by='manuel')
+        selected_cities = request.form.getlist('cities')
+        selected_sectors = request.form.getlist('sectors')
+        result = places_search.run_batch_search(selected_cities, selected_sectors, triggered_by='manuel')
+
         if result.get('skipped'):
             flash(result.get('reason', 'Arama yapılamadı.'), 'warning')
-        elif result.get('error'):
-            flash(f"Arama sırasında hata oluştu: {result['error']}", 'danger')
         else:
-            flash(
-                f"Arama tamamlandı: {result['sector']} / {result['city']} — "
-                f"{result['results_found']} sonuç bulundu, {result['new_companies']} yeni firma eklendi "
-                f"({result['request_count']} istek kullanıldı).", 'success'
-            )
+            msg = (f"Arama tamamlandı: {result['combos_run']} kombinasyon tarandı, "
+                   f"{result['total_results']} sonuç bulundu, {result['total_new']} yeni firma eklendi "
+                   f"({result['total_requests']} istek kullanıldı).")
+            if result['combos_skipped']:
+                msg += f" {result['combos_skipped']} kombinasyon günlük kota nedeniyle atlandı."
+            if result['errors']:
+                msg += f" {len(result['errors'])} kombinasyonda hata oluştu."
+            flash(msg, 'warning' if result['errors'] or result['combos_skipped'] else 'success')
         return redirect(url_for('potential_customers'))
 
     @app.route('/potential-customers/add', methods=['GET', 'POST'])

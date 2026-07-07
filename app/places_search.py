@@ -1,18 +1,20 @@
 """
-Google Places API ile otomatik potansiyel musteri arama motoru.
+Google Places API (New) ile potansiyel musteri arama motoru.
 
-Maliyet kontrolu icin:
-- Metin arama (places()) ile aday firmalar bulunur (Basic Data, ucretsize yakin).
-- Her aday icin place() (Place Details) cagrisi SADECE gerekli alanlarla
-  yapilir (name, formatted_address, formatted_phone_number, website,
-  international_phone_number) - rating/review gibi Atmosphere Data
-  istenmez, maliyeti artirmaz.
+places:searchText endpoint'i, istenen alan maskesiyle (FieldMask)
+tek bir cagrida hem temel bilgileri (isim, adres) hem de iletisim
+bilgilerini (telefon, website) dondurur - bu yuzden eski (legacy)
+API'nin aksine, sonuc basina ayrica "Place Details" cagrisi gerekmez:
+her il x sektor kombinasyonu = tam olarak 1 istek.
+
+rating/review gibi Atmosphere Data alanlari FieldMask'e hic
+eklenmez, maliyeti artirmaz.
 """
 import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import googlemaps
+import requests
 
 from app import db
 from app.models import PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
@@ -22,24 +24,35 @@ UTC_TZ = ZoneInfo('UTC')
 
 DAILY_REQUEST_LIMIT = 75
 COST_PER_REQUEST = 0.035
-MAX_RESULTS_PER_RUN = 5
 COST_90_DAY_BUDGET = 250.0
 
-# Konya once aranir, sonra diger buyuk iller.
-CITIES = ['Konya', 'İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya',
-          'Adana', 'Gaziantep', 'Kayseri', 'Mersin']
-# 'Diger' aranabilir bir sektor terimi olmadigi icin rotasyona dahil edilmez.
+SEARCH_URL = 'https://places.googleapis.com/v1/places:searchText'
+FIELD_MASK = ('places.displayName,places.formattedAddress,'
+              'places.nationalPhoneNumber,places.internationalPhoneNumber,'
+              'places.websiteUri')
+
+# Manuel arama formunda gosterilen 81 ilin tamami (plaka sirasi).
+ALL_CITIES = [
+    'Adana', 'Adıyaman', 'Afyonkarahisar', 'Ağrı', 'Amasya', 'Ankara', 'Antalya',
+    'Artvin', 'Aydın', 'Balıkesir', 'Bilecik', 'Bingöl', 'Bitlis', 'Bolu', 'Burdur',
+    'Bursa', 'Çanakkale', 'Çankırı', 'Çorum', 'Denizli', 'Diyarbakır', 'Edirne',
+    'Elazığ', 'Erzincan', 'Erzurum', 'Eskişehir', 'Gaziantep', 'Giresun', 'Gümüşhane',
+    'Hakkari', 'Hatay', 'Isparta', 'Mersin', 'İstanbul', 'İzmir', 'Kars', 'Kastamonu',
+    'Kayseri', 'Kırklareli', 'Kırşehir', 'Kocaeli', 'Konya', 'Kütahya', 'Malatya',
+    'Manisa', 'Kahramanmaraş', 'Mardin', 'Muğla', 'Muş', 'Nevşehir', 'Niğde', 'Ordu',
+    'Rize', 'Sakarya', 'Samsun', 'Siirt', 'Sinop', 'Sivas', 'Tekirdağ', 'Tokat',
+    'Trabzon', 'Tunceli', 'Şanlıurfa', 'Uşak', 'Van', 'Yozgat', 'Zonguldak', 'Aksaray',
+    'Bayburt', 'Karaman', 'Kırıkkale', 'Batman', 'Şırnak', 'Bartın', 'Ardahan', 'Iğdır',
+    'Yalova', 'Karabük', 'Kilis', 'Osmaniye', 'Düzce',
+]
+
+# Otomatik (zamanlanmis) rotasyon icin kucuk, oncelikli sehir listesi -
+# manuel aramada kullanici ALL_CITIES icinden istedigini secer.
+AUTO_ROTATION_CITIES = ['Konya', 'İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya',
+                         'Adana', 'Gaziantep', 'Kayseri', 'Mersin']
+
+# 'Diger' aranabilir bir sektor terimi olmadigi icin arama listesine girmez.
 SEARCH_SECTORS = [s for s in PotentialCustomer.SECTORS if s != 'Diğer']
-
-PLACE_DETAIL_FIELDS = ['name', 'formatted_address', 'formatted_phone_number',
-                        'website', 'international_phone_number']
-
-
-def _get_client():
-    api_key = os.environ.get('GOOGLE_PLACES_API_KEY')
-    if not api_key:
-        raise RuntimeError('GOOGLE_PLACES_API_KEY ortam degiskeni tanimli degil.')
-    return googlemaps.Client(key=api_key)
 
 
 def get_config():
@@ -120,92 +133,139 @@ def get_status(config=None):
     return 'pasif'
 
 
-def _next_combo(config):
-    combos = [(c, s) for c in CITIES for s in SEARCH_SECTORS]
+def _next_auto_combo(config):
+    combos = [(c, s) for c in AUTO_ROTATION_CITIES for s in SEARCH_SECTORS]
     idx = config.last_combo_index % len(combos)
     config.last_combo_index = idx + 1
     db.session.commit()
     return combos[idx]
 
 
+def _search_text(query, api_key):
+    headers = {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': api_key,
+        'X-Goog-FieldMask': FIELD_MASK,
+    }
+    body = {'textQuery': query, 'languageCode': 'tr'}
+    resp = requests.post(SEARCH_URL, json=body, headers=headers, timeout=15)
+    data = resp.json() if resp.content else {}
+    if resp.status_code != 200:
+        message = data.get('error', {}).get('message', resp.text[:300])
+        raise RuntimeError(f'{resp.status_code}: {message}')
+    return data.get('places', [])
+
+
+def _run_one_combo(city, sector, triggered_by):
+    """Tek bir il x sektor icin arama yapar, sonuclari havuza ekler,
+    bir PlacesSearchLog kaydi olusturur. Her cagri = 1 istek."""
+    query = f"{sector} {city}"
+    api_key = os.environ.get('GOOGLE_PLACES_API_KEY')
+
+    if not api_key:
+        log = PlacesSearchLog(city=city, sector=sector, search_query=query, request_count=0,
+                               results_found=0, new_companies=0, triggered_by=triggered_by,
+                               error='GOOGLE_PLACES_API_KEY tanimli degil.')
+        db.session.add(log)
+        db.session.commit()
+        return {'city': city, 'sector': sector, 'query': query, 'request_count': 0,
+                'results_found': 0, 'new_companies': 0, 'error': log.error}
+
+    try:
+        places = _search_text(query, api_key)
+    except Exception as e:
+        log = PlacesSearchLog(city=city, sector=sector, search_query=query, request_count=1,
+                               results_found=0, new_companies=0, triggered_by=triggered_by,
+                               error=str(e)[:500])
+        db.session.add(log)
+        db.session.commit()
+        return {'city': city, 'sector': sector, 'query': query, 'request_count': 1,
+                'results_found': 0, 'new_companies': 0, 'error': str(e)}
+
+    results_found = len(places)
+    new_companies = 0
+    for place in places:
+        name = (place.get('displayName') or {}).get('text')
+        if not name:
+            continue
+        phone = place.get('nationalPhoneNumber') or place.get('internationalPhoneNumber')
+
+        if phone and PotentialCustomer.query.filter_by(phone=phone).first():
+            continue  # telefon numarasina gore tekrar kontrolu
+
+        pc = PotentialCustomer(
+            company_name=name,
+            phone=phone,
+            address=place.get('formattedAddress'),
+            city=city,
+            sector=sector,
+            source='Otomatik',
+            status='Aranacak',
+            notes=f"Google Places ile bulundu. Website: {place.get('websiteUri') or '-'}",
+        )
+        db.session.add(pc)
+        new_companies += 1
+
+    db.session.commit()
+
+    log = PlacesSearchLog(city=city, sector=sector, search_query=query, request_count=1,
+                           results_found=results_found, new_companies=new_companies,
+                           triggered_by=triggered_by)
+    db.session.add(log)
+    db.session.commit()
+
+    return {'city': city, 'sector': sector, 'query': query, 'request_count': 1,
+            'results_found': results_found, 'new_companies': new_companies, 'error': None}
+
+
 def run_search(triggered_by='otomatik'):
-    """Bir arama turu calistirir. Kapaliysa veya gunluk kota dolmussa
-    hicbir API cagrisi yapmadan durumu dondurur."""
+    """Zamanlayici tarafindan cagrilir: rotasyondaki bir sonraki il x
+    sektor kombinasyonuyla TEK bir arama yapar."""
     config = get_config()
     if not config.enabled:
         return {'skipped': True, 'reason': 'Sistem pasif (kapali).'}
 
     used_today = todays_request_count()
     if used_today >= DAILY_REQUEST_LIMIT:
-        return {'skipped': True, 'reason': f'Gunluk kota doldu ({used_today}/{DAILY_REQUEST_LIMIT}).'}
+        return {'skipped': True, 'reason': f'Günlük kota doldu ({used_today}/{DAILY_REQUEST_LIMIT}).'}
 
-    city, sector = _next_combo(config)
-    query = f"{sector} {city}"
-    request_count = 0
-    results_found = 0
-    new_companies = 0
+    city, sector = _next_auto_combo(config)
+    result = _run_one_combo(city, sector, triggered_by)
+    return {'skipped': False, **result}
 
-    try:
-        gmaps = _get_client()
-        search_result = gmaps.places(query=query, language='tr')
-        request_count += 1
-        candidates = search_result.get('results', [])[:MAX_RESULTS_PER_RUN]
-        results_found = len(candidates)
 
-        remaining_quota = DAILY_REQUEST_LIMIT - used_today - request_count
+def run_batch_search(cities, sectors, triggered_by='manuel'):
+    """Secilen il(ler) x sektor(ler) kombinasyonlarinin tamamini,
+    gunluk kalan kotayla sinirli olarak calistirir."""
+    valid_cities = [c for c in cities if c in ALL_CITIES]
+    valid_sectors = [s for s in sectors if s in SEARCH_SECTORS]
+    if not valid_cities or not valid_sectors:
+        return {'skipped': True, 'reason': 'En az bir il ve bir sektör seçmelisiniz.'}
 
-        for place in candidates:
-            if remaining_quota <= 0:
-                break
-            place_id = place.get('place_id')
-            if not place_id:
-                continue
+    used_today = todays_request_count()
+    remaining = DAILY_REQUEST_LIMIT - used_today
+    if remaining <= 0:
+        return {'skipped': True, 'reason': f'Günlük kota doldu ({used_today}/{DAILY_REQUEST_LIMIT}).'}
 
-            details = gmaps.place(place_id=place_id, fields=PLACE_DETAIL_FIELDS, language='tr')
-            request_count += 1
-            remaining_quota -= 1
-            result = details.get('result', {})
+    combos = [(c, s) for c in valid_cities for s in valid_sectors]
+    executed = []
+    combos_skipped = 0
 
-            name = result.get('name')
-            if not name:
-                continue
-            phone = result.get('formatted_phone_number') or result.get('international_phone_number')
-
-            if phone and PotentialCustomer.query.filter_by(phone=phone).first():
-                continue  # telefon numarasina gore tekrar kontrolu
-
-            pc = PotentialCustomer(
-                company_name=name,
-                phone=phone,
-                address=result.get('formatted_address'),
-                city=city,
-                sector=sector,
-                source='Otomatik',
-                status='Aranacak',
-                notes=f"Google Places otomatik arama. Website: {result.get('website') or '-'}",
-            )
-            db.session.add(pc)
-            new_companies += 1
-
-        db.session.commit()
-
-    except Exception as e:
-        db.session.rollback()
-        log = PlacesSearchLog(city=city, sector=sector, search_query=query, request_count=request_count,
-                               results_found=results_found, new_companies=0,
-                               triggered_by=triggered_by, error=str(e)[:500])
-        db.session.add(log)
-        db.session.commit()
-        return {'skipped': False, 'error': str(e), 'city': city, 'sector': sector}
-
-    log = PlacesSearchLog(city=city, sector=sector, search_query=query, request_count=request_count,
-                           results_found=results_found, new_companies=new_companies,
-                           triggered_by=triggered_by)
-    db.session.add(log)
-    db.session.commit()
+    for city, sector in combos:
+        if remaining <= 0:
+            combos_skipped += 1
+            continue
+        result = _run_one_combo(city, sector, triggered_by)
+        remaining -= result['request_count']
+        executed.append(result)
 
     return {
-        'skipped': False, 'city': city, 'sector': sector, 'query': query,
-        'request_count': request_count, 'results_found': results_found,
-        'new_companies': new_companies,
+        'skipped': False,
+        'combos_run': len(executed),
+        'combos_skipped': combos_skipped,
+        'total_requests': sum(r['request_count'] for r in executed),
+        'total_results': sum(r['results_found'] for r in executed),
+        'total_new': sum(r['new_companies'] for r in executed),
+        'errors': [r for r in executed if r.get('error')],
+        'details': executed,
     }
