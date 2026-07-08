@@ -39,13 +39,22 @@
                             <input type="text" class="form-control" id="tax_id" name="tax_id" value="{{ customer.tax_id or '' }}">
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="status" class="form-label">Durum</label>
-                        <select class="form-select" id="status" name="status">
-                            <option value="aktif" {{ 'selected' if customer.status == 'aktif' }}>Aktif</option>
-                            <option value="pasif" {{ 'selected' if customer.status == 'pasif' }}>Pasif</option>
-                            <option value="potansiyel" {{ 'selected' if customer.status == 'potansiyel' }}>Potansiyel</option>
-                        </select>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="status" class="form-label">Durum</label>
+                            <select class="form-select" id="status" name="status">
+                                <option value="aktif" {{ 'selected' if customer.status == 'aktif' }}>Aktif</option>
+                                <option value="pasif" {{ 'selected' if customer.status == 'pasif' }}>Pasif</option>
+                                <option value="potansiyel" {{ 'selected' if customer.status == 'potansiyel' }}>Potansiyel</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="siparis_dongusu_gun" class="form-label">
+                                Sipariş Döngüsü (gün)
+                                <i class="bi bi-info-circle" title="Bu müşterinin ortalama kaç günde bir sipariş verdiği - üretim hatırlatması için kullanılır"></i>
+                            </label>
+                            <input type="number" class="form-control" id="siparis_dongusu_gun" name="siparis_dongusu_gun" value="{{ customer.siparis_dongusu_gun }}" min="1">
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label for="address" class="form-label">Adres</label>

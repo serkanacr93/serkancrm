@@ -86,6 +86,7 @@ class Customer(db.Model):
     address = db.Column(db.Text)
     notes = db.Column(db.Text)
     status = db.Column(db.String(20), default='aktif')
+    siparis_dongusu_gun = db.Column(db.Integer, default=120, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

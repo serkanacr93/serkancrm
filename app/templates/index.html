@@ -191,6 +191,48 @@
     </div>
 </div>
 
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-info text-white">
+                <i class="bi bi-arrow-repeat"></i> Üretim Zamanı Yaklaşan Müşteriler ({{ production_cycle_customers|length }})
+            </div>
+            <div class="card-body p-0">
+                {% if production_cycle_customers %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Müşteri</th>
+                                <th>Son Sipariş</th>
+                                <th>Tahmini Sonraki Tarih</th>
+                                <th>Kalan Gün</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in production_cycle_customers %}
+                            <tr>
+                                <td><a href="{{ url_for('customer_detail', id=item.customer.id) }}">{{ item.customer.display_name }}</a></td>
+                                <td>{{ item.last_order_date.strftime('%d.%m.%Y') }}</td>
+                                <td>{{ item.next_expected.strftime('%d.%m.%Y') }}</td>
+                                <td>
+                                    <span class="badge bg-{{ 'danger' if item.days_remaining < 0 else 'warning text-dark' if item.days_remaining <= 7 else 'info' }}">
+                                        {% if item.days_remaining < 0 %}{{ -item.days_remaining }} gün geçti{% else %}{{ item.days_remaining }} gün kaldı{% endif %}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted text-center py-3 mb-0">Üretim zamanı yaklaşan müşteri yok.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 fetch('/api/chart-data')
     .then(r => r.json())

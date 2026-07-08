@@ -91,9 +91,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Müşteri arama fonksiyonu
     function setupCustomerSearch(input) {
-        const customerInfo = input.closest('.col-md-5').querySelector('.customer-info');
+        const customerInfo = input.closest('.col-md-4').querySelector('.customer-info');
         const phoneInput = input.closest('.row').querySelector('.phone-input');
-        const hiddenIdInput = input.closest('.col-md-5').querySelector('.customer-id');
+        const hiddenIdInput = input.closest('.col-md-4').querySelector('.customer-id');
         
         input.addEventListener('input', function() {
             const query = this.value;

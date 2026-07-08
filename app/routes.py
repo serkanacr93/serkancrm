@@ -158,8 +158,36 @@ def register_routes(app):
         avg_customer_days = 0
         if first_customer:
             avg_customer_days = (today - first_customer.created_at.date()).days
-        
-        return render_template('index.html', 
+
+        # Müşteri Takip Döngüsü: son siparişten itibaren siparis_dongusu_gun
+        # kadar süre sonra yeni bir siparişin beklendiği, ve bu tarihe 30 gün
+        # veya daha az kaldığı (ya da geçtiği) müşteriler.
+        last_order_subq = db.session.query(
+            Deal.customer_id,
+            db.func.max(Deal.deal_date).label('last_order_date')
+        ).filter(Deal.stage == 'kazanilan').group_by(Deal.customer_id).subquery()
+
+        production_cycle_rows = db.session.query(Customer, last_order_subq.c.last_order_date).join(
+            last_order_subq, Customer.id == last_order_subq.c.customer_id
+        ).filter(Customer.status != 'musteri_degil').all()
+
+        production_cycle_customers = []
+        for cust, last_order_date in production_cycle_rows:
+            if not last_order_date:
+                continue
+            next_expected = last_order_date + timedelta(days=cust.siparis_dongusu_gun)
+            days_remaining = (next_expected - today).days
+            if days_remaining <= 30:
+                production_cycle_customers.append({
+                    'customer': cust,
+                    'last_order_date': last_order_date,
+                    'next_expected': next_expected,
+                    'days_remaining': days_remaining,
+                })
+        production_cycle_customers.sort(key=lambda x: x['days_remaining'])
+        production_cycle_customers = production_cycle_customers[:10]
+
+        return render_template('index.html',
                              customers=customers, 
                              deals=deals,
                              total_value=total_value,
@@ -185,7 +213,8 @@ def register_routes(app):
                              total_visits=total_visits,
                              recent_visits=recent_visits,
                              conversion_rate=conversion_rate,
-                             avg_customer_days=avg_customer_days)
+                             avg_customer_days=avg_customer_days,
+                             production_cycle_customers=production_cycle_customers)
 
     @app.route('/reminders')
     @login_required
@@ -222,8 +251,27 @@ def register_routes(app):
         pagination = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
         customers = pagination.items
         not_customer_count = Customer.query.filter_by(status='musteri_degil').count()
+
+        never_transacted_count = Customer.query.filter(
+            Customer.status != 'musteri_degil',
+            ~Customer.id.in_(db.session.query(Deal.customer_id))
+        ).count()
+
+        dormant_cutoff = datetime.utcnow() - timedelta(days=90)
+        last_deal_subq2 = db.session.query(
+            Deal.customer_id,
+            db.func.max(Deal.created_at).label('last_deal_at')
+        ).group_by(Deal.customer_id).subquery()
+        dormant_count = db.session.query(Customer).join(
+            last_deal_subq2, Customer.id == last_deal_subq2.c.customer_id
+        ).filter(
+            Customer.status != 'musteri_degil',
+            last_deal_subq2.c.last_deal_at < dormant_cutoff
+        ).count()
+
         return render_template('customers.html', customers=customers, search=search, pagination=pagination,
-                                not_customer_count=not_customer_count)
+                                not_customer_count=not_customer_count, never_transacted_count=never_transacted_count,
+                                dormant_count=dormant_count)
 
     @app.route('/customers/<int:id>/mark-not-customer', methods=['POST'])
     @login_required
@@ -283,6 +331,40 @@ def register_routes(app):
                 msg += ' ...'
         flash(msg, 'warning' if blocked else 'success')
         return redirect(url_for('not_customer_list'))
+
+    @app.route('/customers/never-transacted')
+    @login_required
+    def never_transacted_customers():
+        page = request.args.get('page', 1, type=int)
+        query = Customer.query.filter(
+            Customer.status != 'musteri_degil',
+            ~Customer.id.in_(db.session.query(Deal.customer_id))
+        ).order_by(Customer.created_at.desc())
+        pagination = query.paginate(page=page, per_page=50, error_out=False)
+        return render_template('customers_never_transacted.html', customers=pagination.items, pagination=pagination)
+
+    @app.route('/customers/dormant')
+    @login_required
+    def dormant_customers():
+        page = request.args.get('page', 1, type=int)
+        cutoff = datetime.utcnow() - timedelta(days=90)
+
+        last_deal_subq = db.session.query(
+            Deal.customer_id,
+            db.func.max(Deal.created_at).label('last_deal_at')
+        ).group_by(Deal.customer_id).subquery()
+
+        query = db.session.query(Customer, last_deal_subq.c.last_deal_at).join(
+            last_deal_subq, Customer.id == last_deal_subq.c.customer_id
+        ).filter(
+            Customer.status != 'musteri_degil',
+            last_deal_subq.c.last_deal_at < cutoff
+        ).order_by(last_deal_subq.c.last_deal_at.asc())
+
+        pagination = query.paginate(page=page, per_page=50, error_out=False)
+        rows = [{'customer': c, 'last_deal_at': d, 'days_inactive': (datetime.utcnow() - d).days}
+                for c, d in pagination.items]
+        return render_template('customers_dormant.html', rows=rows, pagination=pagination)
 
     @app.route('/customers/add', methods=['GET', 'POST'])
     @login_required
@@ -457,6 +539,9 @@ def register_routes(app):
                          'trade_registry', 'company_phone', 'company_address', 'company_email', 'company_website',
                          'contact_person', 'contact_title', 'contact_phone', 'contact_email', 'address', 'notes', 'status']:
                 setattr(customer, field, request.form.get(field) or getattr(customer, field))
+            siparis_dongusu = request.form.get('siparis_dongusu_gun')
+            if siparis_dongusu:
+                customer.siparis_dongusu_gun = int(siparis_dongusu)
             db.session.commit()
             flash('Müşteri güncellendi!', 'success')
             return redirect(url_for('customer_detail', id=id))
@@ -1825,6 +1910,68 @@ def register_routes(app):
                                 sectors=PotentialCustomer.SECTORS, products=PotentialCustomer.PRODUCTS,
                                 statuses=PotentialCustomer.STATUSES, places_stats=places_stats,
                                 all_cities=places_search.ALL_CITIES, search_sectors=places_search.SEARCH_SECTORS)
+
+    @app.route('/potential-customers/export/excel')
+    @login_required
+    def potential_customers_export_excel():
+        from openpyxl.styles import Font, PatternFill, Alignment
+
+        search = request.args.get('search', '')
+        status_filter = request.args.get('status', '')
+        city_filter = request.args.get('city', '')
+        sector_filter = request.args.get('sector', '')
+        product_filter = request.args.get('product', '')
+
+        query = PotentialCustomer.query
+        if search:
+            query = query.filter(db.or_(
+                PotentialCustomer.company_name.ilike(f'%{search}%'),
+                PotentialCustomer.phone.ilike(f'%{search}%')
+            ))
+        if status_filter:
+            query = query.filter(PotentialCustomer.status == status_filter)
+        if city_filter:
+            query = query.filter(PotentialCustomer.city == city_filter)
+        if sector_filter:
+            query = query.filter(PotentialCustomer.sector == sector_filter)
+        if product_filter:
+            query = query.filter(PotentialCustomer.interested_products.ilike(f'%{product_filter}%'))
+        items = query.order_by(PotentialCustomer.created_at.desc()).all()
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Potansiyel Müşteriler'
+        headers = ['Firma Adı', 'Telefon', 'Adres', 'Şehir', 'Sektör', 'İlgilenilen Ürünler',
+                   'Durum', 'Web Sitesi', 'Kaynak', 'Eklenme Tarihi']
+        ws.append(headers)
+        header_fill = PatternFill(start_color='1a252f', end_color='1a252f', fill_type='solid')
+        header_font = Font(bold=True, color='FFFFFF')
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center')
+
+        for pc in items:
+            website = ''
+            if pc.notes and 'Website:' in pc.notes:
+                website = pc.notes.split('Website:', 1)[1].strip()
+                if website == '-':
+                    website = ''
+            ws.append([
+                pc.company_name, pc.phone or '', pc.address or '', pc.city or '', pc.sector or '',
+                ', '.join(pc.product_list), pc.status or '', website, pc.source or '',
+                pc.created_at.strftime('%d.%m.%Y') if pc.created_at else ''
+            ])
+
+        for col_cells in ws.columns:
+            length = max(len(str(c.value)) if c.value else 0 for c in col_cells)
+            ws.column_dimensions[col_cells[0].column_letter].width = min(max(length + 2, 12), 50)
+
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        return send_file(buffer, as_attachment=True,
+                          download_name=f'potansiyel_musteriler_{datetime.now().strftime("%Y%m%d")}.xlsx')
 
     @app.route('/potential-customers/search-now', methods=['POST'])
     @login_required
