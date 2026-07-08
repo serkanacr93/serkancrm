@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Müşteri Değil - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-person-dash"></i> Müşteri Değil <span class="badge bg-secondary">{{ customers|length }}</span></h2>
+    <a href="{{ url_for('customers') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Müşterilere Dön
+    </a>
+</div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Bu listedeki kayıtlar "Müşteri Değil" olarak işaretlenmiş, normal müşteri listesinden gizlenmiştir.
+    Yanlışlıkla işaretlenenleri <strong>Geri Al</strong> ile eski haline getirebilir, gerçekten gereksiz
+    olanları <strong>Kalıcı Sil</strong> ile veritabanından tamamen kaldırabilirsiniz.
+</div>
+
+{% if customers %}
+<form method="POST" id="bulkForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="d-flex gap-2 mb-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAll(true)">Tümünü Seç</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAll(false)">Seçimi Kaldır</button>
+                <div class="ms-auto">
+                    <button type="submit" formaction="{{ url_for('restore_not_customer') }}" class="btn btn-success"
+                            onclick="return confirmBulk('geri almak')">
+                        <i class="bi bi-arrow-counterclockwise"></i> Geri Al
+                    </button>
+                    <button type="submit" formaction="{{ url_for('delete_not_customer') }}" class="btn btn-danger"
+                            onclick="return confirmDelete()">
+                        <i class="bi bi-trash3"></i> Kalıcı Sil
+                    </button>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th><input type="checkbox" id="selectAllCb" onclick="toggleAll(this.checked)"></th>
+                            <th>Firma / Müşteri</th>
+                            <th>Telefon</th>
+                            <th>İşaretlenme Tarihi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for customer in customers %}
+                        <tr>
+                            <td><input type="checkbox" class="row-cb" name="customer_ids" value="{{ customer.id }}"></td>
+                            <td>
+                                {% if customer.company_name %}
+                                <strong><i class="bi bi-building"></i> {{ customer.company_name }}</strong><br>
+                                <small class="text-muted">{{ customer.first_name }} {{ customer.last_name }}</small>
+                                {% else %}
+                                {{ customer.first_name }} {{ customer.last_name }}
+                                {% endif %}
+                            </td>
+                            <td>{{ customer.phone or '-' }}</td>
+                            <td>{{ customer.updated_at.strftime('%d.%m.%Y %H:%M') if customer.updated_at else '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</form>
+
+<script>
+function toggleAll(checked) {
+    document.querySelectorAll('.row-cb').forEach(function(cb) { cb.checked = checked; });
+    document.getElementById('selectAllCb').checked = checked;
+}
+function selectedCount() {
+    return document.querySelectorAll('.row-cb:checked').length;
+}
+function confirmBulk(action) {
+    var n = selectedCount();
+    if (n === 0) { alert('En az bir kayıt seçin.'); return false; }
+    return confirm(n + ' kaydı ' + action + ' istediğinize emin misiniz?');
+}
+function confirmDelete() {
+    var n = selectedCount();
+    if (n === 0) { alert('En az bir kayıt seçin.'); return false; }
+    return confirm(n + ' kayıt kalıcı olarak silinecek, bu işlem geri alınamaz. Emin misiniz?');
+}
+</script>
+{% else %}
+<div class="alert alert-secondary">
+    <i class="bi bi-info-circle"></i> "Müşteri Değil" olarak işaretlenmiş kayıt bulunmuyor.
+</div>
+{% endif %}
+{% endblock %}

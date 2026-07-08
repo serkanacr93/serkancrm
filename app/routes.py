@@ -207,7 +207,7 @@ def register_routes(app):
     def customers():
         search = request.args.get('search', '')
         page = request.args.get('page', 1, type=int)
-        query = Customer.query
+        query = Customer.query.filter(Customer.status != 'musteri_degil')
         if search:
             query = query.filter(
                 db.or_(
@@ -221,7 +221,68 @@ def register_routes(app):
             )
         pagination = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
         customers = pagination.items
-        return render_template('customers.html', customers=customers, search=search, pagination=pagination)
+        not_customer_count = Customer.query.filter_by(status='musteri_degil').count()
+        return render_template('customers.html', customers=customers, search=search, pagination=pagination,
+                                not_customer_count=not_customer_count)
+
+    @app.route('/customers/<int:id>/mark-not-customer', methods=['POST'])
+    @login_required
+    def mark_not_customer(id):
+        customer = Customer.query.get_or_404(id)
+        customer.status = 'musteri_degil'
+        db.session.commit()
+        flash(f'"{customer.display_name}" "Müşteri Değil" olarak işaretlendi ve listeden gizlendi.', 'success')
+        return redirect(url_for('customers'))
+
+    @app.route('/customers/not-customer')
+    @login_required
+    def not_customer_list():
+        items = Customer.query.filter_by(status='musteri_degil').order_by(Customer.updated_at.desc()).all()
+        return render_template('customers_not_customer.html', customers=items)
+
+    @app.route('/customers/not-customer/restore', methods=['POST'])
+    @login_required
+    def restore_not_customer():
+        ids = request.form.getlist('customer_ids')
+        if not ids:
+            flash('Hiçbir kayıt seçmediniz.', 'warning')
+            return redirect(url_for('not_customer_list'))
+        customers = Customer.query.filter(Customer.id.in_(ids), Customer.status == 'musteri_degil').all()
+        for c in customers:
+            c.status = 'aktif'
+        db.session.commit()
+        flash(f'{len(customers)} kayıt geri alındı, tekrar normal müşteri listesinde görünecek.', 'success')
+        return redirect(url_for('not_customer_list'))
+
+    @app.route('/customers/not-customer/delete', methods=['POST'])
+    @login_required
+    def delete_not_customer():
+        ids = request.form.getlist('customer_ids')
+        if not ids:
+            flash('Hiçbir kayıt seçmediniz.', 'warning')
+            return redirect(url_for('not_customer_list'))
+
+        customers = Customer.query.filter(Customer.id.in_(ids), Customer.status == 'musteri_degil').all()
+        deleted = 0
+        blocked = []
+        for c in customers:
+            has_deps = (Deal.query.filter_by(customer_id=c.id).first()
+                        or Payment.query.filter_by(customer_id=c.id).first()
+                        or CustomerStatement.query.filter_by(customer_id=c.id).first())
+            if has_deps:
+                blocked.append(c.display_name)
+                continue
+            db.session.delete(c)
+            deleted += 1
+        db.session.commit()
+
+        msg = f'{deleted} kayıt kalıcı olarak silindi.'
+        if blocked:
+            msg += f' {len(blocked)} kayıt bağlı teklif/ödeme/ekstre kaydı olduğu için silinemedi: {", ".join(blocked[:5])}'
+            if len(blocked) > 5:
+                msg += ' ...'
+        flash(msg, 'warning' if blocked else 'success')
+        return redirect(url_for('not_customer_list'))
 
     @app.route('/customers/add', methods=['GET', 'POST'])
     @login_required
