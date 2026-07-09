@@ -32,6 +32,12 @@
                             <input type="date" class="form-control" id="end_date" name="end_date" value="{{ production.end_date.strftime('%Y-%m-%d') if production.end_date else '' }}">
                         </div>
                     </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="due_date" class="form-label">Teslim Tarihi</label>
+                            <input type="date" class="form-control" id="due_date" name="due_date" value="{{ production.due_date.strftime('%Y-%m-%d') if production.due_date else '' }}">
+                        </div>
+                    </div>
                     <div class="mb-3">
                         <label for="notes" class="form-label">Notlar</label>
                         <textarea class="form-control" id="notes" name="notes" rows="3">{{ production.notes or '' }}</textarea>

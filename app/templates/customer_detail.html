@@ -109,6 +109,12 @@
                     <i class="bi bi-cash-stack"></i> Ödemeler ({{ customer.payments|length }})
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#pending-productions">
+                    <i class="bi bi-gear"></i> Bekleyen İş Emirleri
+                    {% if pending_productions %}<span class="badge bg-warning text-dark">{{ pending_productions|length }}</span>{% endif %}
+                </a>
+            </li>
         </ul>
 
         <div class="tab-content">
@@ -268,6 +274,52 @@
                         </div>
                         {% else %}
                         <p class="text-muted text-center py-4">Henüz ödeme kaydı bulunmuyor.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="pending-productions">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        {% if pending_productions %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Teklif</th>
+                                        <th>Durum</th>
+                                        <th>Teslim Tarihi</th>
+                                        <th>İşlem</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for production in pending_productions %}
+                                    <tr>
+                                        <td><a href="{{ url_for('deal_detail', id=production.deal_id) }}">{{ production.deal.title }}</a></td>
+                                        <td>
+                                            <span class="badge bg-{{ 'warning text-dark' if production.status == 'uretimde' else 'secondary' }}">
+                                                {{ production.status }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            {% if production.due_date %}
+                                            {{ production.due_date.strftime('%d.%m.%Y') }}
+                                            {% else %}
+                                            <span class="text-muted">Belirtilmemiş</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('production_detail', id=production.id) }}" class="btn btn-sm btn-outline-primary" title="Görüntüle">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-4">Bekleyen iş emri bulunmuyor.</p>
                         {% endif %}
                     </div>
                 </div>

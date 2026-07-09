@@ -525,10 +525,17 @@ def register_routes(app):
                 DailyReport.phone == customer.phone
             )
         ).order_by(DailyReport.report_date.desc()).all()
-        
-        return render_template('customer_detail.html', customer=customer, deals=deals, 
+
+        # Bekleyen iş emirleri: bu müşterinin tekliflerinden doğan, henüz
+        # tamamlanmamış üretim kayıtları (Madde 1 - Üretim İş Emri Otomasyonu)
+        pending_productions = sorted(
+            [d.production for d in deals if d.production and d.production.status != 'tamamlandi'],
+            key=lambda p: (p.due_date is None, p.due_date)
+        )
+
+        return render_template('customer_detail.html', customer=customer, deals=deals,
                              statements=statements, total_debit=total_debit, total_credit=total_credit,
-                             daily_reports=daily_reports)
+                             daily_reports=daily_reports, pending_productions=pending_productions)
 
     @app.route('/customers/<int:id>/edit', methods=['GET', 'POST'])
     @login_required
@@ -877,7 +884,8 @@ def register_routes(app):
             deal.stage = 'kazanilan'
             deal.user_id = current_user.id
             
-            production = Production(deal_id=deal.id, status='beklemede', start_date=datetime.now().date())
+            production = Production(deal_id=deal.id, status='beklemede', start_date=datetime.now().date(),
+                                     due_date=deal.expected_close)
             db.session.add(production)
             db.session.flush()
             
@@ -988,7 +996,8 @@ def register_routes(app):
     def production_detail(id):
         production = Production.query.get_or_404(id)
         shipments = Shipment.query.filter_by(production_id=id).order_by(Shipment.created_at.desc()).all()
-        return render_template('production_detail.html', production=production, shipments=shipments)
+        return render_template('production_detail.html', production=production, shipments=shipments,
+                                today=datetime.now().date())
 
     @app.route('/production/<int:id>/update-items', methods=['POST'])
     @login_required
@@ -1087,6 +1096,7 @@ def register_routes(app):
             production.status = request.form['status']
             production.start_date = datetime.strptime(request.form['start_date'], '%Y-%m-%d').date() if request.form.get('start_date') else None
             production.end_date = datetime.strptime(request.form['end_date'], '%Y-%m-%d').date() if request.form.get('end_date') else None
+            production.due_date = datetime.strptime(request.form['due_date'], '%Y-%m-%d').date() if request.form.get('due_date') else None
             production.notes = request.form.get('notes')
             db.session.commit()
             flash('Üretim güncellendi!', 'success')

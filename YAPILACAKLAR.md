@@ -10,7 +10,7 @@
 
 ## 🚀 Katman 1 — Hemen Şimdi (Yüksek Öncelik / Acil)
 
-- [ ] 1. Üretim İş Emri Otomasyonu — teklif onaylanınca ürün/miktar/teslim tarihi içeren iş emri otomatik oluşsun, müşteri detayında "bekleyen iş emri" görünsün
+- [x] 1. Üretim İş Emri Otomasyonu — teklif onaylanınca ürün/miktar/teslim tarihi içeren iş emri otomatik oluşsun, müşteri detayında "bekleyen iş emri" görünsün ✅ (2026-07-10) — mevcut Production/ProductionItem modelleri üzerine inşa edildi (yeni tablo açılmadı), Production.due_date eklendi
 - [ ] 2. Üretim Aşamaları Takibi — iş emri statüleri (Bekleyen → Kesme → Baskı → Yapıştırma → Kontrol → Hazır → Sevkiyat) butonlarla değişsin, tarih kaydedilsin, teslim tarihi tahmini yapılsın
 - [ ] 3. Sevkiyat Modülü — kargo şirketi/takip no/teslim tarihi girilsin, kargo takip linki ve İrsaliye PDF'i otomatik oluşsun
 - [ ] 4. Rol ve Yetkilendirme Sistemi — Admin/Satış/Üretim/Mali/Yönetici rolleri, sayfa+işlem bazlı erişim kontrolü

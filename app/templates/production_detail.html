@@ -134,6 +134,19 @@
                     </tr>
                     <tr><th>Başlangıç:</th><td>{{ production.start_date.strftime('%d.%m.%Y') if production.start_date else '-' }}</td></tr>
                     <tr><th>Bitiş:</th><td>{{ production.end_date.strftime('%d.%m.%Y') if production.end_date else '-' }}</td></tr>
+                    <tr>
+                        <th>Teslim Tarihi:</th>
+                        <td>
+                            {% if production.due_date %}
+                            {{ production.due_date.strftime('%d.%m.%Y') }}
+                            {% if production.status != 'tamamlandi' and production.due_date < today %}
+                            <span class="badge bg-danger">Gecikti</span>
+                            {% endif %}
+                            {% else %}
+                            <span class="text-muted">Belirtilmemiş</span>
+                            {% endif %}
+                        </td>
+                    </tr>
                     <tr><th>Toplam Kalem:</th><td>{{ production.total_items_count }}</td></tr>
                     <tr><th>Üretilen:</th><td>{{ production.produced_items_count }}</td></tr>
                 </table>

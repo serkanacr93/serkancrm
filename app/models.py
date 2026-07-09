@@ -178,9 +178,10 @@ class Production(db.Model):
     status = db.Column(db.String(30), default='beklemede')
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
+    due_date = db.Column(db.Date, nullable=True)  # teslim tarihi - teklifteki beklenen kapanistan gelir, elle degistirilebilir
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     items = db.relationship('ProductionItem', backref='production', lazy=True, cascade='all, delete-orphan')
     shipments = db.relationship('Shipment', backref='production', lazy=True, cascade='all, delete-orphan')
 
