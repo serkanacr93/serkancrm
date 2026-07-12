@@ -28,8 +28,8 @@
                 <td><a href="{{ url_for('deal_detail', id=p.deal.id) }}">{{ p.deal.title }}</a></td>
                 <td>{{ p.deal.customer.first_name }} {{ p.deal.customer.last_name }}</td>
                 <td>
-                    <span class="badge bg-{{ 'warning' if p.status == 'beklemede' else 'info' if p.status == 'uretimde' else 'success' if p.status == 'tamamlandi' else 'secondary' }}">
-                        {{ p.status }}
+                    <span class="badge bg-{{ 'danger' if p.status == 'iptal' else 'success' if p.status in ('hazir', 'sevkiyat') else 'warning text-dark' if p.status == 'beklemede' else 'info' }}">
+                        {{ p.stage_label }}
                     </span>
                 </td>
                 <td>{{ p.start_date.strftime('%d.%m.%Y') if p.start_date else '-' }}</td>

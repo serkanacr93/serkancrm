@@ -297,8 +297,8 @@
                                     <tr>
                                         <td><a href="{{ url_for('deal_detail', id=production.deal_id) }}">{{ production.deal.title }}</a></td>
                                         <td>
-                                            <span class="badge bg-{{ 'warning text-dark' if production.status == 'uretimde' else 'secondary' }}">
-                                                {{ production.status }}
+                                            <span class="badge bg-{{ 'danger' if production.status == 'iptal' else 'success' if production.status == 'hazir' else 'warning text-dark' if production.status == 'beklemede' else 'info' }}">
+                                                {{ production.stage_label }}
                                             </span>
                                         </td>
                                         <td>

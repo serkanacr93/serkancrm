@@ -73,13 +73,67 @@
 
         {% if production.all_items_produced %}
         <div class="alert alert-success">
-            <i class="bi bi-check-circle"></i> 
-            <strong>Tüm ürünler üretildi!</strong> 
+            <i class="bi bi-check-circle"></i>
+            <strong>Tüm ürünler üretildi!</strong>
             <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success btn-sm ms-3">
                 <i class="bi bi-truck"></i> Sevkiyata Aktar
             </a>
         </div>
         {% endif %}
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header"><i class="bi bi-diagram-3"></i> Üretim Aşaması</div>
+            <div class="card-body">
+                {% if production.status == 'iptal' %}
+                <span class="badge bg-danger fs-6">İptal Edildi</span>
+                {% else %}
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    {% for key, label in stages %}
+                    <span class="badge {{ 'bg-primary' if key == production.status else ('bg-success' if loop.index0 < production.stage_index else 'bg-light text-dark border') }}">
+                        {{ label }}
+                    </span>
+                    {% if not loop.last %}<i class="bi bi-arrow-right text-muted"></i>{% endif %}
+                    {% endfor %}
+                </div>
+                <div class="d-flex gap-2">
+                    <form method="POST" action="{{ url_for('revert_production_stage', id=production.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-outline-secondary" {{ 'disabled' if not production.prev_stage }}>
+                            <i class="bi bi-arrow-left"></i> Geri Al{% if production.prev_stage %}: {{ production.prev_stage[1] }}{% endif %}
+                        </button>
+                    </form>
+                    <form method="POST" action="{{ url_for('advance_production_stage', id=production.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-primary" {{ 'disabled' if not production.next_stage }}>
+                            İleri{% if production.next_stage %}: {{ production.next_stage[1] }}{% endif %} <i class="bi bi-arrow-right"></i>
+                        </button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header"><i class="bi bi-clock-history"></i> Aşama Geçmişi (Timeline)</div>
+            <div class="card-body">
+                {% if production.status_logs %}
+                <ul class="list-group list-group-flush">
+                    {% for log in production.status_logs %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>
+                            {% if log.from_status %}{{ log.from_label }} <i class="bi bi-arrow-right"></i> {% endif %}
+                            <strong>{{ log.to_label }}</strong>
+                            {% if log.changed_by %}<small class="text-muted">({{ log.changed_by.full_name or log.changed_by.username }})</small>{% endif %}
+                        </span>
+                        <small class="text-muted">{{ log.changed_at.strftime('%d.%m.%Y %H:%M') if log.changed_at else '-' }}</small>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted mb-0">Henüz aşama geçişi kaydedilmedi.</p>
+                {% endif %}
+            </div>
+        </div>
 
         <div class="card mb-4 shadow-sm">
             <div class="card-header"><i class="bi bi-truck"></i> Sevkiyatlar</div>
@@ -127,8 +181,8 @@
                 <table class="table table-borderless">
                     <tr><th>Durum:</th>
                         <td>
-                            <span class="badge bg-{{ 'success' if production.status == 'tamamlandi' else 'warning' if production.status == 'uretimde' else 'secondary' }}">
-                                {{ production.status }}
+                            <span class="badge bg-{{ 'danger' if production.status == 'iptal' else 'success' if production.status in ('hazir', 'sevkiyat') else 'warning' if production.status == 'beklemede' else 'info' }}">
+                                {{ production.stage_label }}
                             </span>
                         </td>
                     </tr>
@@ -139,11 +193,22 @@
                         <td>
                             {% if production.due_date %}
                             {{ production.due_date.strftime('%d.%m.%Y') }}
-                            {% if production.status != 'tamamlandi' and production.due_date < today %}
+                            {% if production.status not in ('hazir', 'sevkiyat', 'iptal') and production.due_date < today %}
                             <span class="badge bg-danger">Gecikti</span>
                             {% endif %}
                             {% else %}
                             <span class="text-muted">Belirtilmemiş</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Tahmini Teslim:</th>
+                        <td>
+                            {% if production.estimated_due_date %}
+                            <span class="text-muted">{{ production.estimated_due_date.strftime('%d.%m.%Y') }}</span>
+                            <small class="text-muted">(mevcut aşamaya göre otomatik tahmin)</small>
+                            {% else %}
+                            <span class="text-muted">-</span>
                             {% endif %}
                         </td>
                     </tr>

@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, Shipment, ShipmentItem, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, ProductionStatusLog, PRODUCTION_STAGES, Shipment, ShipmentItem, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf
 from app import db, places_search
 from datetime import datetime, timedelta, date
@@ -539,8 +539,8 @@ def register_routes(app):
         # Bekleyen iş emirleri: bu müşterinin tekliflerinden doğan, henüz
         # tamamlanmamış üretim kayıtları (Madde 1 - Üretim İş Emri Otomasyonu)
         pending_productions = sorted(
-            [d.production for d in deals if d.production and d.production.status != 'tamamlandi'],
-            key=lambda p: (p.due_date is None, p.due_date)
+            [d.production for d in deals if d.production and d.production.status not in ('sevkiyat', 'iptal')],
+            key=lambda p: p.due_date or date.max
         )
 
         return render_template('customer_detail.html', customer=customer, deals=deals,
@@ -1007,7 +1007,7 @@ def register_routes(app):
         production = Production.query.get_or_404(id)
         shipments = Shipment.query.filter_by(production_id=id).order_by(Shipment.created_at.desc()).all()
         return render_template('production_detail.html', production=production, shipments=shipments,
-                                today=datetime.now().date())
+                                today=datetime.now().date(), stages=PRODUCTION_STAGES)
 
     @app.route('/production/<int:id>/update-items', methods=['POST'])
     @login_required
@@ -1029,17 +1029,51 @@ def register_routes(app):
                 item.status = 'kismi'
             else:
                 item.status = 'bekleniyor'
-        
-        # Üretim durumunu güncelle
-        if production.all_items_produced:
-            production.status = 'tamamlandi'
-        elif production.produced_items_count > 0:
-            production.status = 'uretimde'
-        else:
-            production.status = 'beklemede'
-        
+
         db.session.commit()
         flash('Üretim miktarları güncellendi!', 'success')
+        return redirect(url_for('production_detail', id=id))
+
+    def _change_production_stage(production, new_status):
+        old_status = production.status
+        if old_status == new_status:
+            return
+        production.status = new_status
+        db.session.add(ProductionStatusLog(
+            production_id=production.id,
+            from_status=old_status,
+            to_status=new_status,
+            changed_by_id=current_user.id
+        ))
+        if new_status == 'sevkiyat' and not production.end_date:
+            production.end_date = datetime.now().date()
+        if old_status == 'beklemede' and new_status != 'beklemede' and not production.start_date:
+            production.start_date = datetime.now().date()
+
+    @app.route('/production/<int:id>/advance', methods=['POST'])
+    @login_required
+    def advance_production_stage(id):
+        production = Production.query.get_or_404(id)
+        target = production.next_stage
+        if not target:
+            flash('Bu üretim zaten son aşamada veya iptal edilmiş.', 'warning')
+        else:
+            _change_production_stage(production, target[0])
+            db.session.commit()
+            flash(f'Üretim "{target[1]}" aşamasına geçirildi.', 'success')
+        return redirect(url_for('production_detail', id=id))
+
+    @app.route('/production/<int:id>/revert', methods=['POST'])
+    @login_required
+    def revert_production_stage(id):
+        production = Production.query.get_or_404(id)
+        target = production.prev_stage
+        if not target:
+            flash('Bu üretim zaten ilk aşamada veya iptal edilmiş.', 'warning')
+        else:
+            _change_production_stage(production, target[0])
+            db.session.commit()
+            flash(f'Üretim "{target[1]}" aşamasına geri alındı.', 'warning')
         return redirect(url_for('production_detail', id=id))
 
     @app.route('/production/<int:id>/create-shipment', methods=['GET', 'POST'])
@@ -1103,7 +1137,9 @@ def register_routes(app):
     def edit_production(id):
         production = Production.query.get_or_404(id)
         if request.method == 'POST':
-            production.status = request.form['status']
+            new_status = request.form['status']
+            if new_status != production.status:
+                _change_production_stage(production, new_status)
             production.start_date = datetime.strptime(request.form['start_date'], '%Y-%m-%d').date() if request.form.get('start_date') else None
             production.end_date = datetime.strptime(request.form['end_date'], '%Y-%m-%d').date() if request.form.get('end_date') else None
             production.due_date = datetime.strptime(request.form['due_date'], '%Y-%m-%d').date() if request.form.get('due_date') else None
@@ -1111,7 +1147,7 @@ def register_routes(app):
             db.session.commit()
             flash('Üretim güncellendi!', 'success')
             return redirect(url_for('production_detail', id=id))
-        return render_template('edit_production.html', production=production)
+        return render_template('edit_production.html', production=production, stages=PRODUCTION_STAGES)
 
     @app.route('/production/<int:id>/shipment/add', methods=['GET', 'POST'])
     @login_required

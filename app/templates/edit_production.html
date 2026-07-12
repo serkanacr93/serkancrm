@@ -15,9 +15,9 @@
                         <div class="col-md-6 mb-3">
                             <label for="status" class="form-label">Durum</label>
                             <select class="form-select" id="status" name="status">
-                                <option value="beklemede" {{ 'selected' if production.status == 'beklemede' }}>Beklemede</option>
-                                <option value="uretimde" {{ 'selected' if production.status == 'uretimde' }}>Üretimde</option>
-                                <option value="tamamlandi" {{ 'selected' if production.status == 'tamamlandi' }}>Tamamlandı</option>
+                                {% for key, label in stages %}
+                                <option value="{{ key }}" {{ 'selected' if production.status == key }}>{{ label }}</option>
+                                {% endfor %}
                                 <option value="iptal" {{ 'selected' if production.status == 'iptal' }}>İptal</option>
                             </select>
                         </div>
