@@ -300,6 +300,9 @@
                                             <span class="badge bg-{{ 'danger' if production.status == 'iptal' else 'success' if production.status == 'hazir' else 'warning text-dark' if production.status == 'beklemede' else 'info' }}">
                                                 {{ production.stage_label }}
                                             </span>
+                                            {% if production.latest_shipment %}
+                                            <br><small class="text-muted">{{ production.latest_shipment.status_label }}{% if production.latest_shipment.carrier %} - {{ production.latest_shipment.carrier }}{% endif %}</small>
+                                            {% endif %}
                                         </td>
                                         <td>
                                             {% if production.due_date %}

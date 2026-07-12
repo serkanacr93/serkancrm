@@ -13,45 +13,40 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="row">
                         <div class="col-md-4 mb-3">
-                            <label for="quantity" class="form-label">Miktar *</label>
-                            <input type="number" class="form-control" id="quantity" name="quantity" value="{{ shipment.quantity }}" min="0" step="0.01" required>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label for="unit" class="form-label">Birim</label>
-                            <select class="form-select" id="unit" name="unit">
-                                <option value="adet" {{ 'selected' if shipment.unit == 'adet' }}>Adet</option>
-                                <option value="kg" {{ 'selected' if shipment.unit == 'kg' }}>Kg</option>
-                                <option value="mt" {{ 'selected' if shipment.unit == 'mt' }}>Metre</option>
-                                <option value="lt" {{ 'selected' if shipment.unit == 'lt' }}>Litre</option>
-                                <option value="m2" {{ 'selected' if shipment.unit == 'm2' }}>m²</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label for="weight_kg" class="form-label">Kilo (kg)</label>
-                            <input type="number" class="form-control" id="weight_kg" name="weight_kg" value="{{ shipment.weight_kg or '' }}" min="0" step="0.01">
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-4 mb-3">
-                            <label for="ship_date" class="form-label">Sevkiyat Tarihi</label>
-                            <input type="date" class="form-control" id="ship_date" name="ship_date" value="{{ shipment.ship_date.strftime('%Y-%m-%d') if shipment.ship_date else '' }}">
-                        </div>
-                        <div class="col-md-4 mb-3">
                             <label for="carrier" class="form-label">Kargo Firması</label>
-                            <input type="text" class="form-control" id="carrier" name="carrier" value="{{ shipment.carrier or '' }}">
+                            <select class="form-select" id="carrier" name="carrier">
+                                <option value="">Seçiniz...</option>
+                                {% for c in carriers %}
+                                <option value="{{ c }}" {{ 'selected' if shipment.carrier == c }}>{{ c }}</option>
+                                {% endfor %}
+                            </select>
                         </div>
                         <div class="col-md-4 mb-3">
                             <label for="tracking_number" class="form-label">Takip Numarası</label>
                             <input type="text" class="form-control" id="tracking_number" name="tracking_number" value="{{ shipment.tracking_number or '' }}">
                         </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="status" class="form-label">Durum</label>
+                            <select class="form-select" id="status" name="status">
+                                {% for key, label in statuses %}
+                                <option value="{{ key }}" {{ 'selected' if shipment.status == key }}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="status" class="form-label">Durum</label>
-                        <select class="form-select" id="status" name="status">
-                            <option value="hazirlaniyor" {{ 'selected' if shipment.status == 'hazirlaniyor' }}>Hazırlanıyor</option>
-                            <option value="yolda" {{ 'selected' if shipment.status == 'yolda' }}>Yolda</option>
-                            <option value="teslim_edildi" {{ 'selected' if shipment.status == 'teslim_edildi' }}>Teslim Edildi</option>
-                        </select>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="ship_date" class="form-label">Gönderim Tarihi</label>
+                            <input type="date" class="form-control" id="ship_date" name="ship_date" value="{{ shipment.ship_date.strftime('%Y-%m-%d') if shipment.ship_date else '' }}">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="estimated_delivery_date" class="form-label">Tahmini Teslim Tarihi</label>
+                            <input type="date" class="form-control" id="estimated_delivery_date" name="estimated_delivery_date" value="{{ shipment.estimated_delivery_date.strftime('%Y-%m-%d') if shipment.estimated_delivery_date else '' }}">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Gerçek Teslim Tarihi</label>
+                            <input type="text" class="form-control" value="{{ shipment.actual_delivery_date.strftime('%d.%m.%Y') if shipment.actual_delivery_date else 'Henüz teslim edilmedi' }}" readonly>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label for="notes" class="form-label">Notlar</label>

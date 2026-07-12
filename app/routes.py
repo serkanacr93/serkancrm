@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, ProductionStatusLog, PRODUCTION_STAGES, Shipment, ShipmentItem, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, ProductionStatusLog, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf
 from app import db, places_search
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -537,9 +537,17 @@ def register_routes(app):
         ).order_by(DailyReport.report_date.desc()).all()
 
         # Bekleyen iş emirleri: bu müşterinin tekliflerinden doğan, henüz
-        # tamamlanmamış üretim kayıtları (Madde 1 - Üretim İş Emri Otomasyonu)
+        # teslim edilmemiş üretim kayıtları (Madde 1 - Üretim İş Emri Otomasyonu).
+        # 'sevkiyat' aşaması kargoya verilmiş ama henüz teslim edilmemiş demektir,
+        # bu yuzden gercek teslimat (Shipment.status == 'teslim_edildi') olana
+        # kadar hala "bekleyen" sayilir (Madde 3 - Sevkiyat Modulu).
+        def _is_pending(p):
+            if p.status == 'iptal':
+                return False
+            latest = p.latest_shipment
+            return not (latest and latest.status == 'teslim_edildi')
         pending_productions = sorted(
-            [d.production for d in deals if d.production and d.production.status not in ('sevkiyat', 'iptal')],
+            [d.production for d in deals if d.production and _is_pending(d.production)],
             key=lambda p: p.due_date or date.max
         )
 
@@ -1080,21 +1088,24 @@ def register_routes(app):
     @login_required
     def create_shipment_from_production(id):
         production = Production.query.get_or_404(id)
-        
-        if not production.all_items_produced:
-            flash('Tüm ürünler üretilmeden sevkiyat oluşturulamaz!', 'danger')
+
+        if production.status not in ('hazir', 'sevkiyat'):
+            flash('Sevkiyat oluşturmak için üretim "Hazır" veya "Sevkiyat" aşamasında olmalı.', 'danger')
             return redirect(url_for('production_detail', id=id))
-        
+
         if request.method == 'POST':
             shipment = Shipment(
                 production_id=id,
-                ship_date=datetime.now().date(),
+                ship_date=datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else datetime.now().date(),
+                estimated_delivery_date=datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None,
+                carrier=request.form.get('carrier') or None,
+                tracking_number=request.form.get('tracking_number') or None,
                 status='hazirlaniyor',
                 notes=request.form.get('notes', '')
             )
             db.session.add(shipment)
             db.session.flush()
-            
+
             i = 0
             while f'desc_{i}' in request.form:
                 qty_str = request.form.get(f'qty_{i}', '').strip()
@@ -1119,12 +1130,31 @@ def register_routes(app):
                     )
                     db.session.add(item)
                 i += 1
-            
+
+            if production.status != 'sevkiyat':
+                _change_production_stage(production, 'sevkiyat')
             db.session.commit()
             flash(f'SVN-{shipment.id:05d} sevkiyatı oluşturuldu!', 'success')
             return redirect(url_for('shipment_detail', id=shipment.id))
-        
-        return render_template('create_shipment_from_production.html', production=production)
+
+        return render_template('create_shipment_from_production.html', production=production, carriers=CARRIER_OPTIONS, today=datetime.now().date())
+
+    @app.route('/shipments/<int:id>/mark-delivered', methods=['POST'])
+    @login_required
+    def mark_shipment_delivered(id):
+        shipment = Shipment.query.get_or_404(id)
+        shipment.actual_delivery_date = datetime.now().date()
+        shipment.status = 'teslim_edildi'
+        db.session.commit()
+        flash('Sevkiyat "Teslim Edildi" olarak işaretlendi.', 'success')
+        return redirect(url_for('shipment_detail', id=id))
+
+    @app.route('/shipments/<int:id>/irsaliye')
+    @login_required
+    def shipment_irsaliye_pdf(id):
+        shipment = Shipment.query.get_or_404(id)
+        pdf = generate_irsaliye_pdf(shipment)
+        return send_file(pdf, as_attachment=True, download_name=f'irsaliye_SVN-{shipment.id:05d}.pdf')
 
     @app.route('/shipments/<int:id>')
     @login_required
@@ -1179,18 +1209,18 @@ def register_routes(app):
     def edit_shipment(id):
         shipment = Shipment.query.get_or_404(id)
         if request.method == 'POST':
-            shipment.quantity = float(request.form['quantity'])
-            shipment.unit = request.form.get('unit', 'adet')
-            shipment.weight_kg = float(request.form['weight_kg']) if request.form.get('weight_kg') else None
             shipment.ship_date = datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else None
-            shipment.tracking_number = request.form.get('tracking_number')
-            shipment.carrier = request.form.get('carrier')
+            shipment.estimated_delivery_date = datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None
+            shipment.tracking_number = request.form.get('tracking_number') or None
+            shipment.carrier = request.form.get('carrier') or None
             shipment.status = request.form['status']
+            if shipment.status == 'teslim_edildi' and not shipment.actual_delivery_date:
+                shipment.actual_delivery_date = datetime.now().date()
             shipment.notes = request.form.get('notes')
             db.session.commit()
             flash('Sevkiyat güncellendi!', 'success')
             return redirect(url_for('production_detail', id=shipment.production_id))
-        return render_template('edit_shipment.html', shipment=shipment)
+        return render_template('edit_shipment.html', shipment=shipment, carriers=CARRIER_OPTIONS, statuses=SHIPMENT_STATUSES)
 
     @app.route('/products')
     @login_required

@@ -73,6 +73,27 @@
                         <input type="text" class="form-control" value="{{ production.deal.customer.display_name }}" readonly>
                     </div>
                     <div class="mb-3">
+                        <label for="carrier" class="form-label">Kargo Firması</label>
+                        <select class="form-select" id="carrier" name="carrier">
+                            <option value="">Seçiniz...</option>
+                            {% for c in carriers %}
+                            <option value="{{ c }}">{{ c }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tracking_number" class="form-label">Takip Numarası</label>
+                        <input type="text" class="form-control" id="tracking_number" name="tracking_number">
+                    </div>
+                    <div class="mb-3">
+                        <label for="ship_date" class="form-label">Gönderim Tarihi</label>
+                        <input type="date" class="form-control" id="ship_date" name="ship_date" value="{{ today.strftime('%Y-%m-%d') }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="estimated_delivery_date" class="form-label">Tahmini Teslim Tarihi</label>
+                        <input type="date" class="form-control" id="estimated_delivery_date" name="estimated_delivery_date">
+                    </div>
+                    <div class="mb-3">
                         <label class="form-label">Notlar</label>
                         <textarea class="form-control" name="notes" rows="3" placeholder="İsteğe bağlı..."></textarea>
                     </div>

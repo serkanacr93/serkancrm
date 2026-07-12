@@ -27,13 +27,53 @@
             <div class="card-body">
                 <table class="table table-borderless">
                     <tr><th>Durum:</th>
-                        <td><span class="badge bg-{{ 'success' if shipment.status == 'teslim_edildi' else 'warning' }}">{{ shipment.status }}</span>
+                        <td><span class="badge bg-{{ 'success' if shipment.status == 'teslim_edildi' else 'info' if shipment.status == 'yolda' else 'primary' if shipment.status == 'kargoya_verildi' else 'secondary' }}">{{ shipment.status_label }}</span>
                         </td>
                     </tr>
-                    <tr><th>Tarih:</th><td>{{ shipment.ship_date.strftime('%d.%m.%Y') if shipment.ship_date else '-' }}</td></tr>
-                    <tr><th>Takip No:</th><td>{{ shipment.tracking_number or '-' }}</td></tr>
+                    <tr><th>Gönderim Tarihi:</th><td>{{ shipment.ship_date.strftime('%d.%m.%Y') if shipment.ship_date else '-' }}</td></tr>
+                    <tr><th>Tahmini Teslim:</th><td>{{ shipment.estimated_delivery_date.strftime('%d.%m.%Y') if shipment.estimated_delivery_date else '-' }}</td></tr>
+                    <tr><th>Gerçek Teslim:</th><td>{{ shipment.actual_delivery_date.strftime('%d.%m.%Y') if shipment.actual_delivery_date else '-' }}</td></tr>
+                    <tr>
+                        <th>Takip No:</th>
+                        <td>
+                            {% if shipment.tracking_url %}
+                            <a href="{{ shipment.tracking_url }}" target="_blank" rel="noopener">{{ shipment.tracking_number }} <i class="bi bi-box-arrow-up-right"></i></a>
+                            {% else %}
+                            {{ shipment.tracking_number or '-' }}
+                            {% endif %}
+                        </td>
+                    </tr>
                     <tr><th>Taşıyıcı:</th><td>{{ shipment.carrier or '-' }}</td></tr>
+                    <tr><th>Notlar:</th><td>{{ shipment.notes or '-' }}</td></tr>
                 </table>
+                {% if shipment.items %}
+                <div class="table-responsive">
+                    <table class="table table-bordered">
+                        <thead class="table-dark">
+                            <tr><th>Açıklama</th><th>Miktar</th><th>Birim</th><th>Kg</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for item in shipment.items %}
+                            <tr>
+                                <td>{{ item.description }}</td>
+                                <td>{{ item.quantity }}</td>
+                                <td>{{ item.unit }}</td>
+                                <td>{{ item.weight_kg or '-' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+                <a href="{{ url_for('shipment_irsaliye_pdf', id=shipment.id) }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-file-earmark-pdf"></i> İrsaliye İndir
+                </a>
+                {% if shipment.status != 'teslim_edildi' %}
+                <form method="POST" action="{{ url_for('mark_shipment_delivered', id=shipment.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-success"><i class="bi bi-check-circle"></i> Teslim Edildi Olarak İşaretle</button>
+                </form>
+                {% endif %}
             </div>
         </div>
 

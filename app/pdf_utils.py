@@ -151,6 +151,94 @@ def generate_deal_pdf(deal):
     buffer.seek(0)
     return buffer
 
+def generate_irsaliye_pdf(shipment):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=9)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Vera-Bold', fontSize=18)
+    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontName='Vera-Bold', fontSize=11, spaceAfter=5)
+
+    production = shipment.production
+    customer = production.deal.customer
+
+    elements = []
+
+    elements.append(Paragraph("İRSALİYE", title_style))
+    elements.append(Spacer(1, 8*mm))
+
+    elements.append(Paragraph(f"<b>Sevkiyat No:</b> SVN-{shipment.id:05d}", turkish_style))
+    elements.append(Paragraph(f"<b>Teklif No:</b> {production.deal.display_no}", turkish_style))
+    elements.append(Paragraph(f"<b>Gönderim Tarihi:</b> {shipment.ship_date.strftime('%d.%m.%Y') if shipment.ship_date else '-'}", turkish_style))
+    if shipment.carrier:
+        elements.append(Paragraph(f"<b>Kargo Firması:</b> {shipment.carrier}", turkish_style))
+    if shipment.tracking_number:
+        elements.append(Paragraph(f"<b>Takip No:</b> {shipment.tracking_number}", turkish_style))
+    elements.append(Spacer(1, 5*mm))
+
+    elements.append(Paragraph("MÜŞTERİ BİLGİLERİ", heading_style))
+    if customer.company_name:
+        elements.append(Paragraph(f"<b>Firma:</b> {_clean_for_pdf(customer.company_name)}", turkish_style))
+    elements.append(Paragraph(f"<b>Ad Soyad:</b> {_clean_for_pdf(customer.first_name)} {_clean_for_pdf(customer.last_name)}", turkish_style))
+    if customer.company_address or customer.address:
+        elements.append(Paragraph(f"<b>Adres:</b> {customer.company_address or customer.address}", turkish_style))
+    if customer.company_phone or customer.phone:
+        elements.append(Paragraph(f"<b>Telefon:</b> {customer.company_phone or customer.phone}", turkish_style))
+    elements.append(Spacer(1, 5*mm))
+
+    elements.append(Paragraph("ÜRÜN / MİKTAR", heading_style))
+
+    if production.items:
+        data = [['#', 'Açıklama', 'Miktar', 'Birim']]
+        for i, item in enumerate(production.items, 1):
+            data.append([
+                str(i),
+                Paragraph(item.description, turkish_style),
+                f"{item.produced_quantity:.2f}",
+                item.unit
+            ])
+        table = Table(data, colWidths=[1*cm, 9*cm, 3*cm, 3*cm])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+        ]))
+        elements.append(table)
+    else:
+        elements.append(Paragraph("<i>Ürün kalemi bulunamadı.</i>", turkish_style))
+
+    if shipment.notes:
+        elements.append(Spacer(1, 5*mm))
+        elements.append(Paragraph("NOTLAR", heading_style))
+        elements.append(Paragraph(shipment.notes, turkish_style))
+
+    elements.append(Spacer(1, 15*mm))
+    signature_data = [
+        ['Teslim Eden:', '', 'Teslim Alan:'],
+        ['', '', ''],
+        ['', '', ''],
+        ['Adı Soyadı:', '', 'Adı Soyadı:'],
+        ['Tarih:', '', 'Tarih:'],
+    ]
+    signature_table = Table(signature_data, colWidths=[5*cm, 4*cm, 5*cm])
+    signature_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Vera'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('LINEBELOW', (0, 2), (0, 2), 1, colors.black),
+        ('LINEBELOW', (2, 2), (2, 2), 1, colors.black),
+    ]))
+    elements.append(signature_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 def generate_statement_pdf(customer, statements, total_debit, total_credit):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)

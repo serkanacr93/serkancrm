@@ -71,16 +71,6 @@
             </div>
         </div>
 
-        {% if production.all_items_produced %}
-        <div class="alert alert-success">
-            <i class="bi bi-check-circle"></i>
-            <strong>Tüm ürünler üretildi!</strong>
-            <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success btn-sm ms-3">
-                <i class="bi bi-truck"></i> Sevkiyata Aktar
-            </a>
-        </div>
-        {% endif %}
-
         <div class="card mb-4 shadow-sm">
             <div class="card-header"><i class="bi bi-diagram-3"></i> Üretim Aşaması</div>
             <div class="card-body">
@@ -136,37 +126,55 @@
         </div>
 
         <div class="card mb-4 shadow-sm">
-            <div class="card-header"><i class="bi bi-truck"></i> Sevkiyatlar</div>
+            <div class="card-header"><i class="bi bi-truck"></i> Sevkiyat Bilgisi</div>
             <div class="card-body">
-                {% if shipments %}
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Tarih</th>
-                                <th>Durum</th>
-                                <th>İşlem</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for s in shipments %}
-                            <tr>
-                                <td>{{ s.id }}</td>
-                                <td>{{ s.ship_date.strftime('%d.%m.%Y') if s.ship_date else '-' }}</td>
-                                <td><span class="badge bg-{{ 'success' if s.status == 'teslim_edildi' else 'warning' }}">{{ s.status }}</span></td>
-                                <td>
-                                    <a href="{{ url_for('shipment_detail', id=s.id) }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="bi bi-eye"></i>
-                                    </a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                {% if production.latest_shipment %}
+                {% set s = production.latest_shipment %}
+                <table class="table table-borderless mb-3">
+                    <tr><th style="width:180px">Durum:</th>
+                        <td><span class="badge bg-{{ 'success' if s.status == 'teslim_edildi' else 'info' if s.status == 'yolda' else 'primary' if s.status == 'kargoya_verildi' else 'secondary' }}">{{ s.status_label }}</span></td>
+                    </tr>
+                    <tr><th>Kargo Firması:</th><td>{{ s.carrier or '-' }}</td></tr>
+                    <tr>
+                        <th>Takip No:</th>
+                        <td>
+                            {% if s.tracking_url %}
+                            <a href="{{ s.tracking_url }}" target="_blank" rel="noopener">{{ s.tracking_number }} <i class="bi bi-box-arrow-up-right"></i></a>
+                            {% else %}
+                            {{ s.tracking_number or '-' }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr><th>Gönderim Tarihi:</th><td>{{ s.ship_date.strftime('%d.%m.%Y') if s.ship_date else '-' }}</td></tr>
+                    <tr><th>Tahmini Teslim:</th><td>{{ s.estimated_delivery_date.strftime('%d.%m.%Y') if s.estimated_delivery_date else '-' }}</td></tr>
+                    <tr><th>Gerçek Teslim:</th><td>{{ s.actual_delivery_date.strftime('%d.%m.%Y') if s.actual_delivery_date else '-' }}</td></tr>
+                </table>
+                <div class="d-flex gap-2 flex-wrap">
+                    {% if s.status != 'teslim_edildi' %}
+                    <form method="POST" action="{{ url_for('mark_shipment_delivered', id=s.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-circle"></i> Teslim Edildi Olarak İşaretle</button>
+                    </form>
+                    {% endif %}
+                    <a href="{{ url_for('shipment_irsaliye_pdf', id=s.id) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-file-earmark-pdf"></i> İrsaliye İndir</a>
+                    <a href="{{ url_for('shipment_detail', id=s.id) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-eye"></i> Sevkiyat Detayı</a>
                 </div>
+                {% if shipments|length > 1 %}
+                <hr>
+                <p class="text-muted small mb-1">Bu iş emrine ait diğer sevkiyatlar:</p>
+                <ul class="list-unstyled mb-0">
+                    {% for s2 in shipments if s2.id != s.id %}
+                    <li><a href="{{ url_for('shipment_detail', id=s2.id) }}">SVN-{{ "%05d"|format(s2.id) }}</a> - {{ s2.status_label }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% elif production.status in ('hazir', 'sevkiyat') %}
+                <p class="text-muted">Bu iş emri için henüz sevkiyat oluşturulmadı.</p>
+                <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success">
+                    <i class="bi bi-truck"></i> Sevkiyat Oluştur
+                </a>
                 {% else %}
-                <p class="text-muted mb-0">Henüz sevkiyat yapılmamış.</p>
+                <p class="text-muted mb-0">Üretim "Hazır" aşamasına geldiğinde sevkiyat oluşturulabilir.</p>
                 {% endif %}
             </div>
         </div>

@@ -238,6 +238,10 @@ class Production(db.Model):
         return PRODUCTION_STAGE_LABELS.get(self.status, self.status)
 
     @property
+    def latest_shipment(self):
+        return max(self.shipments, key=lambda s: s.created_at) if self.shipments else None
+
+    @property
     def next_stage(self):
         idx = self.stage_index
         if idx is None or idx >= len(PRODUCTION_STAGES) - 1:
@@ -293,17 +297,53 @@ class ProductionItem(db.Model):
     def is_produced(self):
         return self.produced_quantity >= self.planned_quantity
 
+CARRIER_OPTIONS = ['Aras Kargo', 'MNG Kargo', 'Yurtiçi Kargo', 'UPS', 'Sürat Kargo', 'Elden Teslim', 'Diğer']
+
+SHIPMENT_STATUSES = [
+    ('hazirlaniyor', 'Hazırlanıyor'),
+    ('kargoya_verildi', 'Kargoya Verildi'),
+    ('yolda', 'Yolda'),
+    ('teslim_edildi', 'Teslim Edildi'),
+]
+SHIPMENT_STATUS_LABELS = dict(SHIPMENT_STATUSES)
+
+# Kargo firmalarinin genel takip sayfasi URL sablonlari (takip no eklenerek
+# olusturulur). Elden Teslim / Diger icin harici bir takip sayfasi yok.
+_CARRIER_TRACKING_URL_TEMPLATES = {
+    'Aras Kargo': 'http://kargotakip.araskargo.com.tr/mainpage.aspx?code={no}',
+    'MNG Kargo': 'https://kargotakip.mngkargo.com.tr/?takipNo={no}',
+    'Yurtiçi Kargo': 'https://www.yurticikargo.com/tr/online-servisler/gonderi-sorgula?code={no}',
+    'UPS': 'https://www.ups.com/track?loc=tr_TR&tracknum={no}',
+    'Sürat Kargo': 'https://www.suratkargo.com.tr/KargoTakip/?kargotakipno={no}',
+}
+
 class Shipment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     production_id = db.Column(db.Integer, db.ForeignKey('production.id'), nullable=False)
     ship_date = db.Column(db.Date)
     tracking_number = db.Column(db.String(100))
     carrier = db.Column(db.String(100))
+    estimated_delivery_date = db.Column(db.Date, nullable=True)
+    actual_delivery_date = db.Column(db.Date, nullable=True)
     status = db.Column(db.String(30), default='hazirlaniyor')
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     items = db.relationship('ShipmentItem', backref='shipment', lazy=True, cascade='all, delete-orphan')
+
+    @property
+    def status_label(self):
+        return SHIPMENT_STATUS_LABELS.get(self.status, self.status)
+
+    @property
+    def tracking_url(self):
+        if not self.tracking_number or not self.carrier:
+            return None
+        template = _CARRIER_TRACKING_URL_TEMPLATES.get(self.carrier)
+        if not template:
+            return None
+        from urllib.parse import quote
+        return template.format(no=quote(self.tracking_number.strip()))
 
 class ShipmentItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
