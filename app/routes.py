@@ -8,6 +8,16 @@ from functools import wraps
 from io import BytesIO
 import openpyxl
 
+def _next_deal_no():
+    """Bir sonraki teklif numarasini dondurur. MAX() SQL agregasyonu NULL
+    degerleri otomatik yok sayar - Deal.query.order_by(deal_no.desc())
+    kullanimi, deal_no NULL olan bir kayit varsa Postgres'in DESC'te
+    NULL'lari basa koymasi yuzunden yanlislikla 1'e donup mevcut bir
+    numarayla cakisabiliyordu (bkz. deal id=27 / revise_deal bug'i)."""
+    max_no = db.session.query(db.func.max(Deal.deal_no)).scalar()
+    return (max_no or 0) + 1
+
+
 def admin_required(f):
     @wraps(f)
     @login_required
@@ -681,8 +691,7 @@ def register_routes(app):
         if request.method == 'POST':
             today = datetime.now().date()
             # Otomatik sıralı teklif numarası
-            last_deal = Deal.query.order_by(Deal.deal_no.desc()).first()
-            next_no = (last_deal.deal_no + 1) if last_deal and last_deal.deal_no else 1
+            next_no = _next_deal_no()
             
             title = request.form.get('title', '').strip()
             if not title:
@@ -855,6 +864,7 @@ def register_routes(app):
         today = datetime.now().date()
         revize_count = Deal.query.filter(Deal.title.like(f'%{deal.title}%')).count()
         new_deal = Deal(
+            deal_no=_next_deal_no(),
             title=f"{deal.title} (Revize {revize_count})", stage='teklif', probability=deal.probability,
             deal_date=today, expected_close=deal.expected_close, valid_until=today + timedelta(days=7),
             vat_rate=deal.vat_rate, notes=f"Revize. Orijinal: {deal.notes or ''}", customer_id=deal.customer_id,
