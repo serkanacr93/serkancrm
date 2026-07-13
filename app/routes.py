@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, ProductionStatusLog, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf
 from app import db, places_search
 from datetime import datetime, timedelta, date
@@ -16,6 +16,20 @@ def _next_deal_no():
     numarayla cakisabiliyordu (bkz. deal id=27 / revise_deal bug'i)."""
     max_no = db.session.query(db.func.max(Deal.deal_no)).scalar()
     return (max_no or 0) + 1
+
+_TR_LOWER_MAP = str.maketrans({
+    'ş': 's', 'Ş': 's', 'ğ': 'g', 'Ğ': 'g', 'ı': 'i', 'I': 'i', 'İ': 'i',
+    'ö': 'o', 'Ö': 'o', 'ü': 'u', 'Ü': 'u', 'ç': 'c', 'Ç': 'c',
+})
+
+def _normalize_tr(s):
+    """Turkce karakterleri ASCII esdegerlerine indirger ve kucuk harfe cevirir.
+    Postgres'in ILIKE'i 'saroglu' -> 'Şaroğlu' gibi diyakritiksiz aramalari
+    yakalamiyordu (ş != s karakter bazinda), musteri aramasinda bazi
+    isimlerin hic bulunamamasina sebep oluyordu."""
+    if not s:
+        return ''
+    return s.translate(_TR_LOWER_MAP).lower()
 
 
 def admin_required(f):
@@ -902,7 +916,7 @@ def register_routes(app):
             deal.stage = 'kazanilan'
             deal.user_id = current_user.id
             
-            production = Production(deal_id=deal.id, status='beklemede', start_date=datetime.now().date(),
+            production = Production(deal_id=deal.id, status='uretimde', start_date=datetime.now().date(),
                                      due_date=deal.expected_close)
             db.session.add(production)
             db.session.flush()
@@ -963,26 +977,32 @@ def register_routes(app):
     @app.route('/api/customers/search')
     @login_required
     def search_customers():
-        query = request.args.get('q', '')
+        query = request.args.get('q', '').strip()
         if len(query) < 2:
             return jsonify([])
-        
-        customers = Customer.query.filter(
-            db.or_(
-                Customer.first_name.ilike(f'%{query}%'),
-                Customer.last_name.ilike(f'%{query}%'),
-                Customer.company_name.ilike(f'%{query}%'),
-                Customer.phone.ilike(f'%{query}%')
-            )
-        ).limit(10).all()
-        
+
+        norm_q = _normalize_tr(query)
+        rows = Customer.query.with_entities(
+            Customer.id, Customer.first_name, Customer.last_name,
+            Customer.company_name, Customer.phone, Customer.email
+        ).all()
+
+        starts_with, contains = [], []
+        for r in rows:
+            haystack = _normalize_tr(' '.join(filter(None, [r.first_name, r.last_name, r.company_name, r.phone])))
+            if norm_q not in haystack:
+                continue
+            (starts_with if haystack.startswith(norm_q) else contains).append(r)
+
         result = []
-        for c in customers:
+        for r in (starts_with + contains)[:10]:
+            name = ' '.join(filter(None, [r.first_name, r.last_name]))
+            name = f"{r.company_name} - {name}" if r.company_name and name else (r.company_name or name or 'İsimsiz Müşteri')
             result.append({
-                'id': c.id,
-                'name': c.display_name,
-                'phone': c.phone or '',
-                'email': c.email or ''
+                'id': r.id,
+                'name': name,
+                'phone': r.phone or '',
+                'email': r.email or ''
             })
         return jsonify(result)
 
@@ -1017,71 +1037,28 @@ def register_routes(app):
         return render_template('production_detail.html', production=production, shipments=shipments,
                                 today=datetime.now().date(), stages=PRODUCTION_STAGES)
 
-    @app.route('/production/<int:id>/update-items', methods=['POST'])
+    @app.route('/production/<int:id>/mark-ready', methods=['POST'])
     @login_required
-    def update_production_items(id):
+    def mark_production_ready(id):
         production = Production.query.get_or_404(id)
-        
+        if production.status != 'uretimde':
+            flash('Sadece "Üretimde" durumundaki iş emirleri Hazır olarak işaretlenebilir.', 'danger')
+            return redirect(url_for('production_detail', id=id))
+
+        # Her kalem icin gercek uretilen adet (fiyat/kg istenmez - Is C)
         for item in production.items:
             produced_str = request.form.get(f'produced_{item.id}', '').strip()
-            if produced_str == '':
-                continue
-            try:
-                produced = float(produced_str)
-            except ValueError:
-                continue
-            item.produced_quantity = produced
-            if item.is_produced:
-                item.status = 'uretilen'
-            elif item.produced_quantity > 0:
-                item.status = 'kismi'
-            else:
-                item.status = 'bekleniyor'
+            if produced_str != '':
+                try:
+                    item.produced_quantity = float(produced_str)
+                except ValueError:
+                    pass
+            item.status = 'uretilen' if item.produced_quantity > 0 else 'bekleniyor'
 
+        production.status = 'hazir'
+        production.end_date = datetime.now().date()
         db.session.commit()
-        flash('Üretim miktarları güncellendi!', 'success')
-        return redirect(url_for('production_detail', id=id))
-
-    def _change_production_stage(production, new_status):
-        old_status = production.status
-        if old_status == new_status:
-            return
-        production.status = new_status
-        db.session.add(ProductionStatusLog(
-            production_id=production.id,
-            from_status=old_status,
-            to_status=new_status,
-            changed_by_id=current_user.id
-        ))
-        if new_status == 'sevkiyat' and not production.end_date:
-            production.end_date = datetime.now().date()
-        if old_status == 'beklemede' and new_status != 'beklemede' and not production.start_date:
-            production.start_date = datetime.now().date()
-
-    @app.route('/production/<int:id>/advance', methods=['POST'])
-    @login_required
-    def advance_production_stage(id):
-        production = Production.query.get_or_404(id)
-        target = production.next_stage
-        if not target:
-            flash('Bu üretim zaten son aşamada veya iptal edilmiş.', 'warning')
-        else:
-            _change_production_stage(production, target[0])
-            db.session.commit()
-            flash(f'Üretim "{target[1]}" aşamasına geçirildi.', 'success')
-        return redirect(url_for('production_detail', id=id))
-
-    @app.route('/production/<int:id>/revert', methods=['POST'])
-    @login_required
-    def revert_production_stage(id):
-        production = Production.query.get_or_404(id)
-        target = production.prev_stage
-        if not target:
-            flash('Bu üretim zaten ilk aşamada veya iptal edilmiş.', 'warning')
-        else:
-            _change_production_stage(production, target[0])
-            db.session.commit()
-            flash(f'Üretim "{target[1]}" aşamasına geri alındı.', 'warning')
+        flash('Üretim "Hazır" olarak işaretlendi!', 'success')
         return redirect(url_for('production_detail', id=id))
 
     @app.route('/production/<int:id>/create-shipment', methods=['GET', 'POST'])
@@ -1089,9 +1066,17 @@ def register_routes(app):
     def create_shipment_from_production(id):
         production = Production.query.get_or_404(id)
 
-        if production.status not in ('hazir', 'sevkiyat'):
-            flash('Sevkiyat oluşturmak için üretim "Hazır" veya "Sevkiyat" aşamasında olmalı.', 'danger')
+        if production.status != 'hazir':
+            flash('Sevkiyat oluşturmak için üretim "Hazır" aşamasında olmalı.', 'danger')
             return redirect(url_for('production_detail', id=id))
+
+        # Is D: sevkiyat oncesi fatura VE irsaliye kaydi zorunlu
+        deal_id = production.deal_id
+        has_invoice = Invoice.query.filter_by(deal_id=deal_id, type='fatura').first()
+        has_irsaliye = Invoice.query.filter_by(deal_id=deal_id, type='irsaliye').first()
+        if not has_invoice or not has_irsaliye:
+            flash('Sevkiyat oluşturmadan önce bu iş emrine bağlı fatura ve irsaliye oluşturmalısınız.', 'danger')
+            return redirect(url_for('deal_detail', id=deal_id))
 
         if request.method == 'POST':
             shipment = Shipment(
@@ -1106,33 +1091,19 @@ def register_routes(app):
             db.session.add(shipment)
             db.session.flush()
 
-            i = 0
-            while f'desc_{i}' in request.form:
-                qty_str = request.form.get(f'qty_{i}', '').strip()
-                if not qty_str:
-                    i += 1
-                    continue
-                qty = float(qty_str)
-                if qty > 0:
-                    w_str = request.form.get(f'weight_{i}', '').strip()
-                    weight_kg = float(w_str) if w_str else None
-                    p_str = request.form.get(f'price_{i}', '').strip()
-                    price = float(p_str) if p_str else 0
-                    item = ShipmentItem(
+            # Sevkiyat kalemleri, uretimde kaydedilen gercek uretilen adetten
+            # otomatik olusturulur - fiyat/kg tekrar sorulmaz (Is C).
+            for item in production.items:
+                if item.produced_quantity and item.produced_quantity > 0:
+                    db.session.add(ShipmentItem(
                         shipment_id=shipment.id,
-                        production_item_id=int(request.form.get(f'prod_item_id_{i}', 0)) or None,
-                        description=request.form[f'desc_{i}'],
-                        quantity=qty,
-                        unit=request.form.get(f'unit_{i}', 'adet'),
-                        weight_kg=weight_kg,
-                        unit_price=price,
-                        total_price=qty * price
-                    )
-                    db.session.add(item)
-                i += 1
+                        production_item_id=item.id,
+                        description=item.description,
+                        quantity=item.produced_quantity,
+                        unit=item.unit
+                    ))
 
-            if production.status != 'sevkiyat':
-                _change_production_stage(production, 'sevkiyat')
+            production.status = 'sevkiyat'
             db.session.commit()
             flash(f'SVN-{shipment.id:05d} sevkiyatı oluşturuldu!', 'success')
             return redirect(url_for('shipment_detail', id=shipment.id))
@@ -1167,9 +1138,7 @@ def register_routes(app):
     def edit_production(id):
         production = Production.query.get_or_404(id)
         if request.method == 'POST':
-            new_status = request.form['status']
-            if new_status != production.status:
-                _change_production_stage(production, new_status)
+            production.status = request.form['status']
             production.start_date = datetime.strptime(request.form['start_date'], '%Y-%m-%d').date() if request.form.get('start_date') else None
             production.end_date = datetime.strptime(request.form['end_date'], '%Y-%m-%d').date() if request.form.get('end_date') else None
             production.due_date = datetime.strptime(request.form['due_date'], '%Y-%m-%d').date() if request.form.get('due_date') else None
@@ -1829,29 +1798,42 @@ def register_routes(app):
     @app.route('/api/customers/search-by-name')
     @login_required
     def search_customers_by_name():
-        query = request.args.get('q', '')
+        query = request.args.get('q', '').strip()
         if len(query) < 2:
             return jsonify([])
-        
-        # Müşteri ID'si, isim, soyisim, firma adı ve telefon ile arama
-        customers = Customer.query.filter(
-            db.or_(
-                Customer.id == query if query.isdigit() else False,
-                Customer.first_name.ilike(f'%{query}%'),
-                Customer.last_name.ilike(f'%{query}%'),
-                Customer.company_name.ilike(f'%{query}%'),
-                Customer.phone.ilike(f'%{query}%')
-            )
-        ).limit(20).all()
-        
+
+        if query.isdigit():
+            by_id = Customer.query.get(int(query))
+            if by_id:
+                return jsonify([{
+                    'id': by_id.id, 'name': by_id.display_name,
+                    'phone': by_id.phone or '', 'email': by_id.email or '',
+                    'company_name': by_id.company_name or ''
+                }])
+
+        norm_q = _normalize_tr(query)
+        rows = Customer.query.with_entities(
+            Customer.id, Customer.first_name, Customer.last_name,
+            Customer.company_name, Customer.phone, Customer.email
+        ).all()
+
+        starts_with, contains = [], []
+        for r in rows:
+            haystack = _normalize_tr(' '.join(filter(None, [r.first_name, r.last_name, r.company_name, r.phone])))
+            if norm_q not in haystack:
+                continue
+            (starts_with if haystack.startswith(norm_q) else contains).append(r)
+
         result = []
-        for c in customers:
+        for r in (starts_with + contains)[:20]:
+            name = ' '.join(filter(None, [r.first_name, r.last_name]))
+            name = f"{r.company_name} - {name}" if r.company_name and name else (r.company_name or name or 'İsimsiz Müşteri')
             result.append({
-                'id': c.id,
-                'name': c.display_name,
-                'phone': c.phone or '',
-                'email': c.email or '',
-                'company_name': c.company_name or ''
+                'id': r.id,
+                'name': name,
+                'phone': r.phone or '',
+                'email': r.email or '',
+                'company_name': r.company_name or ''
             })
         return jsonify(result)
 

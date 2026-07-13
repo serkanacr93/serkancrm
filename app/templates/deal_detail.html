@@ -188,7 +188,7 @@
                 <a href="{{ url_for('production_detail', id=deal.production.id) }}" class="btn btn-sm btn-light">Detay</a>
             </div>
             <div class="card-body">
-                <span class="badge bg-{{ 'danger' if deal.production.status == 'iptal' else 'success' if deal.production.status in ('hazir', 'sevkiyat') else 'warning' if deal.production.status == 'beklemede' else 'info' }} fs-6">
+                <span class="badge bg-{{ 'danger' if deal.production.status == 'iptal' else 'success' if deal.production.status in ('hazir', 'sevkiyat') else 'info' }} fs-6">
                     {{ deal.production.stage_label }}
                 </span>
             </div>

@@ -28,7 +28,8 @@
                 </span>
             </div>
             <div class="card-body">
-                <form method="POST" action="{{ url_for('update_production_items', id=production.id) }}">
+                {% if production.status == 'uretimde' %}
+                <form method="POST" action="{{ url_for('mark_production_ready', id=production.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="table-responsive">
                         <table class="table table-bordered">
@@ -36,38 +37,54 @@
                                 <tr>
                                     <th>Açıklama</th>
                                     <th>Planlanan</th>
-                                    <th>Üretilen</th>
+                                    <th>Gerçek Üretilen Adet</th>
                                     <th>Birim</th>
-                                    <th>Durum</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for item in production.items %}
-                                <tr class="{{ 'table-success' if item.is_produced else '' }}">
+                                <tr>
                                     <td>{{ item.description }}</td>
                                     <td>{{ item.planned_quantity }}</td>
                                     <td>
-                                        <input type="number" step="0.001" class="form-control form-control-sm" 
-                                               name="produced_{{ item.id }}" value="{{ item.produced_quantity }}" 
+                                        <input type="number" step="0.001" class="form-control form-control-sm"
+                                               name="produced_{{ item.id }}" value="{{ item.produced_quantity }}"
                                                style="width:120px" min="0">
                                     </td>
                                     <td>{{ item.unit }}</td>
-                                    <td>
-                                        {% if item.is_produced %}
-                                        <span class="badge bg-success">Üretildi</span>
-                                        {% else %}
-                                        <span class="badge bg-warning text-dark">Bekleniyor</span>
-                                        {% endif %}
-                                    </td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
                         </table>
                     </div>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-save"></i> Üretim Miktarlarını Güncelle
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-check-circle"></i> Hazır Olarak İşaretle
                     </button>
                 </form>
+                {% else %}
+                <div class="table-responsive">
+                    <table class="table table-bordered">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Açıklama</th>
+                                <th>Planlanan</th>
+                                <th>Gerçek Üretilen Adet</th>
+                                <th>Birim</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in production.items %}
+                            <tr>
+                                <td>{{ item.description }}</td>
+                                <td>{{ item.planned_quantity }}</td>
+                                <td>{{ item.produced_quantity }}</td>
+                                <td>{{ item.unit }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
             </div>
         </div>
 
@@ -77,7 +94,7 @@
                 {% if production.status == 'iptal' %}
                 <span class="badge bg-danger fs-6">İptal Edildi</span>
                 {% else %}
-                <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <div class="d-flex flex-wrap align-items-center gap-2">
                     {% for key, label in stages %}
                     <span class="badge {{ 'bg-primary' if key == production.status else ('bg-success' if loop.index0 < production.stage_index else 'bg-light text-dark border') }}">
                         {{ label }}
@@ -85,42 +102,6 @@
                     {% if not loop.last %}<i class="bi bi-arrow-right text-muted"></i>{% endif %}
                     {% endfor %}
                 </div>
-                <div class="d-flex gap-2">
-                    <form method="POST" action="{{ url_for('revert_production_stage', id=production.id) }}">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-outline-secondary" {{ 'disabled' if not production.prev_stage }}>
-                            <i class="bi bi-arrow-left"></i> Geri Al{% if production.prev_stage %}: {{ production.prev_stage[1] }}{% endif %}
-                        </button>
-                    </form>
-                    <form method="POST" action="{{ url_for('advance_production_stage', id=production.id) }}">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-primary" {{ 'disabled' if not production.next_stage }}>
-                            İleri{% if production.next_stage %}: {{ production.next_stage[1] }}{% endif %} <i class="bi bi-arrow-right"></i>
-                        </button>
-                    </form>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header"><i class="bi bi-clock-history"></i> Aşama Geçmişi (Timeline)</div>
-            <div class="card-body">
-                {% if production.status_logs %}
-                <ul class="list-group list-group-flush">
-                    {% for log in production.status_logs %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span>
-                            {% if log.from_status %}{{ log.from_label }} <i class="bi bi-arrow-right"></i> {% endif %}
-                            <strong>{{ log.to_label }}</strong>
-                            {% if log.changed_by %}<small class="text-muted">({{ log.changed_by.full_name or log.changed_by.username }})</small>{% endif %}
-                        </span>
-                        <small class="text-muted">{{ log.changed_at.strftime('%d.%m.%Y %H:%M') if log.changed_at else '-' }}</small>
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <p class="text-muted mb-0">Henüz aşama geçişi kaydedilmedi.</p>
                 {% endif %}
             </div>
         </div>
@@ -146,7 +127,7 @@
                         </td>
                     </tr>
                     <tr><th>Gönderim Tarihi:</th><td>{{ s.ship_date.strftime('%d.%m.%Y') if s.ship_date else '-' }}</td></tr>
-                    <tr><th>Tahmini Teslim:</th><td>{{ s.estimated_delivery_date.strftime('%d.%m.%Y') if s.estimated_delivery_date else '-' }}</td></tr>
+                    <tr><th>Tahmini Teslim Tarihi:</th><td>{{ s.estimated_delivery_date.strftime('%d.%m.%Y') if s.estimated_delivery_date else '-' }}</td></tr>
                     <tr><th>Gerçek Teslim:</th><td>{{ s.actual_delivery_date.strftime('%d.%m.%Y') if s.actual_delivery_date else '-' }}</td></tr>
                 </table>
                 <div class="d-flex gap-2 flex-wrap">
@@ -168,11 +149,26 @@
                     {% endfor %}
                 </ul>
                 {% endif %}
-                {% elif production.status in ('hazir', 'sevkiyat') %}
-                <p class="text-muted">Bu iş emri için henüz sevkiyat oluşturulmadı.</p>
-                <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success">
-                    <i class="bi bi-truck"></i> Sevkiyat Oluştur
-                </a>
+                {% elif production.status == 'hazir' %}
+                    {% set has_invoice = production.deal.invoices|selectattr('type', 'equalto', 'fatura')|list|length > 0 %}
+                    {% set has_irsaliye = production.deal.invoices|selectattr('type', 'equalto', 'irsaliye')|list|length > 0 %}
+                    {% if has_invoice and has_irsaliye %}
+                    <p class="text-muted">Bu iş emri için henüz sevkiyat oluşturulmadı.</p>
+                    <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success">
+                        <i class="bi bi-truck"></i> Sevkiyat Oluştur
+                    </a>
+                    {% else %}
+                    <div class="alert alert-warning mb-2">
+                        <i class="bi bi-exclamation-triangle"></i> Sevkiyat oluşturmadan önce fatura ve irsaliye oluşturmalısınız.
+                        <ul class="mb-0">
+                            <li>Fatura: {{ 'var' if has_invoice else 'eksik' }}</li>
+                            <li>İrsaliye: {{ 'var' if has_irsaliye else 'eksik' }}</li>
+                        </ul>
+                    </div>
+                    <a href="{{ url_for('create_invoice_from_deal', id=production.deal_id) }}" class="btn btn-warning">
+                        <i class="bi bi-receipt"></i> Fatura / İrsaliye Oluştur
+                    </a>
+                    {% endif %}
                 {% else %}
                 <p class="text-muted mb-0">Üretim "Hazır" aşamasına geldiğinde sevkiyat oluşturulabilir.</p>
                 {% endif %}
@@ -189,7 +185,7 @@
                 <table class="table table-borderless">
                     <tr><th>Durum:</th>
                         <td>
-                            <span class="badge bg-{{ 'danger' if production.status == 'iptal' else 'success' if production.status in ('hazir', 'sevkiyat') else 'warning' if production.status == 'beklemede' else 'info' }}">
+                            <span class="badge bg-{{ 'danger' if production.status == 'iptal' else 'success' if production.status in ('hazir', 'sevkiyat') else 'info' }}">
                                 {{ production.stage_label }}
                             </span>
                         </td>
@@ -206,17 +202,6 @@
                             {% endif %}
                             {% else %}
                             <span class="text-muted">Belirtilmemiş</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>Tahmini Teslim:</th>
-                        <td>
-                            {% if production.estimated_due_date %}
-                            <span class="text-muted">{{ production.estimated_due_date.strftime('%d.%m.%Y') }}</span>
-                            <small class="text-muted">(mevcut aşamaya göre otomatik tahmin)</small>
-                            {% else %}
-                            <span class="text-muted">-</span>
                             {% endif %}
                         </td>
                     </tr>

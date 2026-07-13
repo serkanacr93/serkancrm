@@ -172,37 +172,20 @@ class DealItem(db.Model):
     total_price = db.Column(db.Float, nullable=False)
     deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=False)
 
-# Uretim asama akisi: sirali liste, ileri/geri butonlari bu sirayi takip eder.
-# 'iptal' bilincli olarak bu akisin disinda tutulur (sadece edit_production'dan elle secilir).
+# Uretim asama akisi: basit 3 durumlu siralama. 'iptal' bilincli olarak bu
+# akisin disinda tutulur (sadece edit_production'dan elle secilir).
 PRODUCTION_STAGES = [
-    ('beklemede', 'Bekleyen'),
-    ('kesme', 'Kesme'),
-    ('baski', 'Baskı'),
-    ('yapistirma', 'Yapıştırma'),
-    ('kontrol', 'Kontrol'),
+    ('uretimde', 'Üretimde'),
     ('hazir', 'Hazır'),
     ('sevkiyat', 'Sevkiyat'),
 ]
 PRODUCTION_STAGE_KEYS = [key for key, _ in PRODUCTION_STAGES]
 PRODUCTION_STAGE_LABELS = dict(PRODUCTION_STAGES)
 
-# Her asamanin tahmini suresi (gun). Teslim tarihi tahmini, mevcut asamadan
-# itibaren kalan asamalarin sureleri toplanarak hesaplanir (basit/sabit tahmin,
-# gecmis uretim verisi biriktikce Kapasite Planlama maddesinde iyilestirilebilir).
-PRODUCTION_STAGE_ESTIMATED_DAYS = {
-    'beklemede': 0,
-    'kesme': 1,
-    'baski': 2,
-    'yapistirma': 1,
-    'kontrol': 1,
-    'hazir': 0,
-    'sevkiyat': 1,
-}
-
 class Production(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), unique=True, nullable=False)
-    status = db.Column(db.String(30), default='beklemede')
+    status = db.Column(db.String(30), default='uretimde')
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
     due_date = db.Column(db.Date, nullable=True)  # teslim tarihi - teklifteki beklenen kapanistan gelir, elle degistirilebilir
@@ -211,8 +194,6 @@ class Production(db.Model):
 
     items = db.relationship('ProductionItem', backref='production', lazy=True, cascade='all, delete-orphan')
     shipments = db.relationship('Shipment', backref='production', lazy=True, cascade='all, delete-orphan')
-    status_logs = db.relationship('ProductionStatusLog', backref='production', lazy=True,
-                                   cascade='all, delete-orphan', order_by='ProductionStatusLog.changed_at')
 
     @property
     def all_items_produced(self):
@@ -227,6 +208,10 @@ class Production(db.Model):
         return len(self.items)
 
     @property
+    def stage_label(self):
+        return PRODUCTION_STAGE_LABELS.get(self.status, self.status)
+
+    @property
     def stage_index(self):
         try:
             return PRODUCTION_STAGE_KEYS.index(self.status)
@@ -234,52 +219,8 @@ class Production(db.Model):
             return None
 
     @property
-    def stage_label(self):
-        return PRODUCTION_STAGE_LABELS.get(self.status, self.status)
-
-    @property
     def latest_shipment(self):
         return max(self.shipments, key=lambda s: s.created_at) if self.shipments else None
-
-    @property
-    def next_stage(self):
-        idx = self.stage_index
-        if idx is None or idx >= len(PRODUCTION_STAGES) - 1:
-            return None
-        return PRODUCTION_STAGES[idx + 1]
-
-    @property
-    def prev_stage(self):
-        idx = self.stage_index
-        if not idx:
-            return None
-        return PRODUCTION_STAGES[idx - 1]
-
-    @property
-    def estimated_due_date(self):
-        idx = self.stage_index
-        if idx is None or self.status == 'sevkiyat':
-            return None
-        remaining_days = sum(PRODUCTION_STAGE_ESTIMATED_DAYS.get(key, 0) for key, _ in PRODUCTION_STAGES[idx:])
-        return datetime.utcnow().date() + timedelta(days=remaining_days)
-
-class ProductionStatusLog(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    production_id = db.Column(db.Integer, db.ForeignKey('production.id'), nullable=False, index=True)
-    from_status = db.Column(db.String(30))
-    to_status = db.Column(db.String(30), nullable=False)
-    changed_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
-    changed_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    changed_by = db.relationship('User')
-
-    @property
-    def from_label(self):
-        return PRODUCTION_STAGE_LABELS.get(self.from_status, self.from_status or '-')
-
-    @property
-    def to_label(self):
-        return PRODUCTION_STAGE_LABELS.get(self.to_status, self.to_status)
 
 class ProductionItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)

@@ -8,61 +8,40 @@
     <a href="{{ url_for('production_detail', id=production.id) }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Üretime Dön</a>
 </div>
 
-<div class="alert alert-success">
-    <i class="bi bi-check-circle"></i> 
-    <strong>Tüm ürünler üretildi!</strong> Aşağıdaki miktarları ihtiyaca göre düzenleyip sevkiyat oluşturabilirsiniz.
-</div>
-
-<form method="POST">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="row">
-        <div class="col-md-8">
-            <div class="card mb-4">
-                <div class="card-header bg-primary text-white">
-                    <i class="bi bi-box"></i> Sevkiyat Kalemleri
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-bordered">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th>Açıklama</th>
-                                    <th style="width:100px">Miktar</th>
-                                    <th style="width:80px">Birim</th>
-                                    <th style="width:100px">Kg</th>
-                                    <th style="width:120px">Birim Fiyat</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in production.items %}
-                                <tr>
-                                    <td>
-                                        {{ item.description }}
-                                        <input type="hidden" name="desc_{{ loop.index0 }}" value="{{ item.description }}">
-                                        <input type="hidden" name="prod_item_id_{{ loop.index0 }}" value="{{ item.id }}">
-                                    </td>
-                                    <td>
-                                        <input type="number" step="0.001" class="form-control" name="qty_{{ loop.index0 }}" value="{{ item.produced_quantity }}" required>
-                                    </td>
-                                    <td>
-                                        <input type="text" class="form-control" name="unit_{{ loop.index0 }}" value="{{ item.unit }}" readonly>
-                                    </td>
-                                    <td>
-                                        <input type="number" step="0.001" class="form-control" name="weight_{{ loop.index0 }}" placeholder="kg">
-                                    </td>
-                                    <td>
-                                        <input type="number" step="0.01" class="form-control" name="price_{{ loop.index0 }}" value="0">
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-box"></i> Sevk Edilecek Kalemler (gerçek üretilen adet)
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Açıklama</th>
+                                <th style="width:120px">Üretilen Adet</th>
+                                <th style="width:100px">Birim</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in production.items %}
+                            <tr>
+                                <td>{{ item.description }}</td>
+                                <td>{{ item.produced_quantity }}</td>
+                                <td>{{ item.unit }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
+    </div>
 
-        <div class="col-md-4">
+    <div class="col-md-4">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="card mb-4">
                 <div class="card-header bg-success text-white">
                     <i class="bi bi-info-circle"></i> Sevkiyat Bilgileri
@@ -102,7 +81,7 @@
                     </button>
                 </div>
             </div>
-        </div>
+        </form>
     </div>
-</form>
+</div>
 {% endblock %}

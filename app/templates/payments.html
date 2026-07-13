@@ -66,7 +66,13 @@
                                 {{ payment.customer.display_name }}
                             </a>
                         </td>
-                        <td>{{ payment.invoice.display_no if payment.invoice else '-' }}</td>
+                        <td>
+                            {% if payment.invoice %}
+                            <a href="{{ url_for('invoice_detail', id=payment.invoice.id) }}">{{ payment.invoice.display_no }}</a>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
                         <td><strong>{{ "{:,.2f}".format(payment.amount) }} ₺</strong></td>
                         <td>{{ payment.payment_method or '-' }}</td>
                         <td>{{ payment.reference_no or '-' }}</td>
