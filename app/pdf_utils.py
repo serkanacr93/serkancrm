@@ -151,6 +151,93 @@ def generate_deal_pdf(deal):
     buffer.seek(0)
     return buffer
 
+def generate_is_emri_pdf(production):
+    """Dahili uretim talimati belgesi - fatura/irsaliye ile karistirilmamali,
+    fiyat bilgisi icermez. Atolyeye elden verilmek uzere tasarlandi."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=9)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Vera-Bold', fontSize=18)
+    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontName='Vera-Bold', fontSize=11, spaceAfter=5)
+
+    deal = production.deal
+    customer = deal.customer
+
+    elements = []
+
+    elements.append(Paragraph("İŞ EMRİ", title_style))
+    elements.append(Spacer(1, 8*mm))
+
+    elements.append(Paragraph(f"<b>İş Emri No:</b> IE-{production.id:05d}", turkish_style))
+    elements.append(Paragraph(f"<b>Tarih:</b> {datetime.now().strftime('%d.%m.%Y')}", turkish_style))
+    elements.append(Paragraph(f"<b>Teklif No:</b> {deal.display_no}", turkish_style))
+    customer_name = _clean_for_pdf(customer.company_name) if customer.company_name else \
+        f"{_clean_for_pdf(customer.first_name)} {_clean_for_pdf(customer.last_name)}"
+    elements.append(Paragraph(f"<b>Müşteri:</b> {customer_name}", turkish_style))
+    if production.due_date:
+        elements.append(Paragraph(f"<b>Teslim Tarihi:</b> {production.due_date.strftime('%d.%m.%Y')}", turkish_style))
+    elements.append(Spacer(1, 5*mm))
+
+    elements.append(Paragraph("ÜRÜN KALEMLERİ", heading_style))
+
+    if production.items:
+        data = [['Açıklama', 'Ölçü', 'Baskı Rengi/Sayısı', 'Kağıt Tipi', 'Gramaj', 'Planlanan Adet']]
+        for item in production.items:
+            data.append([
+                Paragraph(item.description, turkish_style),
+                item.olcu or '-',
+                item.baski_bilgisi or '-',
+                item.kagit_tipi or '-',
+                item.gramaj or '-',
+                f"{item.planned_quantity:.0f} {item.unit}"
+            ])
+        table = Table(data, colWidths=[4*cm, 2.3*cm, 3*cm, 2.7*cm, 2*cm, 3*cm])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+        ]))
+        elements.append(table)
+    else:
+        elements.append(Paragraph("<i>Ürün kalemi bulunamadı.</i>", turkish_style))
+
+    elements.append(Spacer(1, 8*mm))
+    elements.append(Paragraph("NOTLAR", heading_style))
+    notes_table = Table([['']], colWidths=[17*cm], rowHeights=[3*cm])
+    notes_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(notes_table)
+
+    elements.append(Spacer(1, 15*mm))
+    signature_data = [
+        ['Üretimi Yapan:', '', 'Kontrol Eden:'],
+        ['', '', ''],
+        ['', '', ''],
+        ['Adı Soyadı:', '', 'Adı Soyadı:'],
+        ['Tarih:', '', 'Tarih:'],
+    ]
+    signature_table = Table(signature_data, colWidths=[5*cm, 4*cm, 5*cm])
+    signature_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Vera'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('LINEBELOW', (0, 2), (0, 2), 1, colors.black),
+        ('LINEBELOW', (2, 2), (2, 2), 1, colors.black),
+    ]))
+    elements.append(signature_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 def generate_irsaliye_pdf(shipment):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)

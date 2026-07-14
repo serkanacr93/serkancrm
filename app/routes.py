@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf
 from app import db, places_search
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -15,6 +15,16 @@ def _next_deal_no():
     NULL'lari basa koymasi yuzunden yanlislikla 1'e donup mevcut bir
     numarayla cakisabiliyordu (bkz. deal id=27 / revise_deal bug'i)."""
     max_no = db.session.query(db.func.max(Deal.deal_no)).scalar()
+    return (max_no or 0) + 1
+
+def _next_invoice_no():
+    """Bir sonraki fatura/irsaliye numarasini dondurur. _next_deal_no() ile
+    ayni NULL-guvenli mantik: db.func.max() NULL degerleri otomatik yok
+    sayar, oysa Invoice.query.order_by(invoice_no.desc()) kullanimi,
+    invoice_no NULL olan bir kayit varsa Postgres'in DESC'te NULL'lari
+    basa koymasi yuzunden numaralamayi yanlislikla 1'e dondurup mevcut
+    bir numarayla cakisabiliyordu (bkz. deal_no / revise_deal bug'i)."""
+    max_no = db.session.query(db.func.max(Invoice.invoice_no)).scalar()
     return (max_no or 0) + 1
 
 _TR_LOWER_MAP = str.maketrans({
@@ -1037,6 +1047,26 @@ def register_routes(app):
         return render_template('production_detail.html', production=production, shipments=shipments,
                                 today=datetime.now().date(), stages=PRODUCTION_STAGES)
 
+    @app.route('/production/<int:id>/update-specs', methods=['POST'])
+    @login_required
+    def update_production_item_specs(id):
+        production = Production.query.get_or_404(id)
+        for item in production.items:
+            item.olcu = request.form.get(f'olcu_{item.id}', '').strip() or None
+            item.baski_bilgisi = request.form.get(f'baski_{item.id}', '').strip() or None
+            item.kagit_tipi = request.form.get(f'kagit_{item.id}', '').strip() or None
+            item.gramaj = request.form.get(f'gramaj_{item.id}', '').strip() or None
+        db.session.commit()
+        flash('İş emri bilgileri kaydedildi!', 'success')
+        return redirect(url_for('production_detail', id=id))
+
+    @app.route('/production/<int:id>/is-emri')
+    @login_required
+    def production_is_emri_pdf(id):
+        production = Production.query.get_or_404(id)
+        pdf = generate_is_emri_pdf(production)
+        return send_file(pdf, as_attachment=True, download_name=f'is_emri_{production.id:05d}.pdf')
+
     @app.route('/production/<int:id>/mark-ready', methods=['POST'])
     @login_required
     def mark_production_ready(id):
@@ -1070,15 +1100,21 @@ def register_routes(app):
             flash('Sevkiyat oluşturmak için üretim "Hazır" aşamasında olmalı.', 'danger')
             return redirect(url_for('production_detail', id=id))
 
-        # Is D: sevkiyat oncesi fatura VE irsaliye kaydi zorunlu
+        # Is D / Is 4: irsaliye HER DURUMDA zorunlu; fatura ise "Faturasiz Cikis"
+        # onay kutusu isaretlenmeden atlanamaz.
         deal_id = production.deal_id
-        has_invoice = Invoice.query.filter_by(deal_id=deal_id, type='fatura').first()
-        has_irsaliye = Invoice.query.filter_by(deal_id=deal_id, type='irsaliye').first()
-        if not has_invoice or not has_irsaliye:
-            flash('Sevkiyat oluşturmadan önce bu iş emrine bağlı fatura ve irsaliye oluşturmalısınız.', 'danger')
+        has_invoice = Invoice.query.filter_by(deal_id=deal_id, type='fatura').first() is not None
+        has_irsaliye = Invoice.query.filter_by(deal_id=deal_id, type='irsaliye').first() is not None
+        if not has_irsaliye:
+            flash('Sevkiyat oluşturmadan önce bu iş emrine bağlı bir irsaliye oluşturmalısınız.', 'danger')
             return redirect(url_for('deal_detail', id=deal_id))
 
         if request.method == 'POST':
+            faturasiz_cikis_checked = request.form.get('faturasiz_cikis') == 'on'
+            if not has_invoice and not faturasiz_cikis_checked:
+                flash('Sevkiyat oluşturmadan önce fatura oluşturmalı ya da "Faturasız Çıkış" seçeneğini işaretlemelisiniz.', 'danger')
+                return redirect(url_for('deal_detail', id=deal_id))
+
             shipment = Shipment(
                 production_id=id,
                 ship_date=datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else datetime.now().date(),
@@ -1086,6 +1122,7 @@ def register_routes(app):
                 carrier=request.form.get('carrier') or None,
                 tracking_number=request.form.get('tracking_number') or None,
                 status='hazirlaniyor',
+                faturasiz_cikis=not has_invoice,
                 notes=request.form.get('notes', '')
             )
             db.session.add(shipment)
@@ -1108,7 +1145,8 @@ def register_routes(app):
             flash(f'SVN-{shipment.id:05d} sevkiyatı oluşturuldu!', 'success')
             return redirect(url_for('shipment_detail', id=shipment.id))
 
-        return render_template('create_shipment_from_production.html', production=production, carriers=CARRIER_OPTIONS, today=datetime.now().date())
+        return render_template('create_shipment_from_production.html', production=production, carriers=CARRIER_OPTIONS,
+                                today=datetime.now().date(), has_invoice=has_invoice)
 
     @app.route('/shipments/<int:id>/mark-delivered', methods=['POST'])
     @login_required
@@ -1503,13 +1541,18 @@ def register_routes(app):
 
         if request.method == 'POST':
             inv_type = request.form.get('type', 'fatura')
-            
-            # Otomatik sıralı fatura/irsaliye no
-            last_inv = Invoice.query.order_by(Invoice.invoice_no.desc()).first()
-            next_no = (last_inv.invoice_no + 1) if last_inv and last_inv.invoice_no else 1
-            
+
+            # Is 3: eksik musteri bilgisi (firma unvani/vergi no) ayni formdan
+            # tamamlanabiliyor - fatura olusturmadan once musteri kaydina yazilir.
+            new_company_name = request.form.get('customer_company_name', '').strip()
+            new_tax_id = request.form.get('customer_tax_id', '').strip()
+            if new_company_name:
+                deal.customer.company_name = new_company_name
+            if new_tax_id:
+                deal.customer.tax_id = new_tax_id
+
             invoice = Invoice(
-                invoice_no=next_no,
+                invoice_no=_next_invoice_no(),
                 type=inv_type,
                 deal_id=deal.id,
                 customer_id=deal.customer_id,

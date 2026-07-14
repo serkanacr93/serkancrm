@@ -76,6 +76,17 @@
                         <label class="form-label">Notlar</label>
                         <textarea class="form-control" name="notes" rows="3" placeholder="İsteğe bağlı..."></textarea>
                     </div>
+                    {% if not has_invoice %}
+                    <div class="alert alert-warning">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="faturasiz_cikis" name="faturasiz_cikis">
+                            <label class="form-check-label" for="faturasiz_cikis">
+                                <strong>Bu sevkiyat faturasız yapılacak</strong>
+                            </label>
+                        </div>
+                        <small class="text-muted">Bu iş emrine bağlı bir fatura kaydı bulunamadı. Devam etmek için bu kutuyu işaretlemelisiniz.</small>
+                    </div>
+                    {% endif %}
                     <button type="submit" class="btn btn-primary w-100">
                         <i class="bi bi-check-lg"></i> Sevkiyat Oluştur
                     </button>

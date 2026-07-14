@@ -27,7 +27,9 @@
             <div class="card-body">
                 <table class="table table-borderless">
                     <tr><th>Durum:</th>
-                        <td><span class="badge bg-{{ 'success' if shipment.status == 'teslim_edildi' else 'info' if shipment.status == 'yolda' else 'primary' if shipment.status == 'kargoya_verildi' else 'secondary' }}">{{ shipment.status_label }}</span>
+                        <td>
+                            <span class="badge bg-{{ 'success' if shipment.status == 'teslim_edildi' else 'info' if shipment.status == 'yolda' else 'primary' if shipment.status == 'kargoya_verildi' else 'secondary' }}">{{ shipment.status_label }}</span>
+                            {% if shipment.faturasiz_cikis %}<span class="badge bg-warning text-dark">Faturasız Çıkış</span>{% endif %}
                         </td>
                     </tr>
                     <tr><th>Gönderim Tarihi:</th><td>{{ shipment.ship_date.strftime('%d.%m.%Y') if shipment.ship_date else '-' }}</td></tr>

@@ -101,6 +101,31 @@
                     </button>
                 </div>
             </div>
+
+            {% if not deal.customer.company_name or not deal.customer.tax_id %}
+            <div class="card mb-4 border-warning">
+                <div class="card-header bg-warning text-dark">
+                    <i class="bi bi-exclamation-triangle"></i> Eksik Müşteri Bilgisi
+                </div>
+                <div class="card-body">
+                    <p class="small mb-3">Bu müşteride
+                        {% if not deal.customer.company_name and not deal.customer.tax_id %}vergi no ve firma ünvanı bilgisi eksik.
+                        {% elif not deal.customer.company_name %}firma ünvanı bilgisi eksik.
+                        {% else %}vergi no bilgisi eksik.
+                        {% endif %}
+                        İsterseniz aşağıdan tamamlayıp fatura ile birlikte kaydedebilirsiniz.
+                    </p>
+                    <div class="mb-2">
+                        <label for="customer_company_name" class="form-label">Firma Ünvanı</label>
+                        <input type="text" class="form-control form-control-sm" id="customer_company_name" name="customer_company_name" value="{{ deal.customer.company_name or '' }}">
+                    </div>
+                    <div class="mb-0">
+                        <label for="customer_tax_id" class="form-label">Vergi No</label>
+                        <input type="text" class="form-control form-control-sm" id="customer_tax_id" name="customer_tax_id" value="{{ deal.customer.tax_id or '' }}">
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </form>

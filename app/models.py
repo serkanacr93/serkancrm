@@ -234,6 +234,13 @@ class ProductionItem(db.Model):
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Is Emri PDF'inde gosterilen uretim spesifikasyonlari - deal olusturulurken
+    # degil, uretim asamasinda atolye icin ayrica dolduruluyor.
+    olcu = db.Column(db.String(100))
+    baski_bilgisi = db.Column(db.String(100))
+    kagit_tipi = db.Column(db.String(100))
+    gramaj = db.Column(db.String(50))
+
     @property
     def is_produced(self):
         return self.produced_quantity >= self.planned_quantity
@@ -267,6 +274,7 @@ class Shipment(db.Model):
     estimated_delivery_date = db.Column(db.Date, nullable=True)
     actual_delivery_date = db.Column(db.Date, nullable=True)
     status = db.Column(db.String(30), default='hazirlaniyor')
+    faturasiz_cikis = db.Column(db.Boolean, default=False, nullable=False)
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

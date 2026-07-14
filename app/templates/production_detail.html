@@ -9,6 +9,9 @@
         <small class="text-muted">{{ production.deal.display_no }} - {{ production.deal.title }}</small>
     </div>
     <div>
+        <a href="{{ url_for('production_is_emri_pdf', id=production.id) }}" class="btn btn-outline-dark">
+            <i class="bi bi-printer"></i> İş Emri Yazdır
+        </a>
         <a href="{{ url_for('deal_detail', id=production.deal.id) }}" class="btn btn-outline-info">
             <i class="bi bi-file-earmark-text"></i> Teklif Detayı
         </a>
@@ -89,6 +92,43 @@
         </div>
 
         <div class="card mb-4 shadow-sm">
+            <div class="card-header"><i class="bi bi-clipboard-data"></i> İş Emri Detayları</div>
+            <div class="card-body">
+                <p class="text-muted small">Bu bilgiler İş Emri PDF'inde gösterilir (fiyat içermez).</p>
+                <form method="POST" action="{{ url_for('update_production_item_specs', id=production.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="table-responsive">
+                        <table class="table table-bordered">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Açıklama</th>
+                                    <th>Ölçü</th>
+                                    <th>Baskı Rengi/Sayısı</th>
+                                    <th>Kağıt Tipi</th>
+                                    <th>Gramaj</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in production.items %}
+                                <tr>
+                                    <td>{{ item.description }}</td>
+                                    <td><input type="text" class="form-control form-control-sm" name="olcu_{{ item.id }}" value="{{ item.olcu or '' }}"></td>
+                                    <td><input type="text" class="form-control form-control-sm" name="baski_{{ item.id }}" value="{{ item.baski_bilgisi or '' }}"></td>
+                                    <td><input type="text" class="form-control form-control-sm" name="kagit_{{ item.id }}" value="{{ item.kagit_tipi or '' }}"></td>
+                                    <td><input type="text" class="form-control form-control-sm" name="gramaj_{{ item.id }}" value="{{ item.gramaj or '' }}"></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="submit" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-save"></i> İş Emri Bilgilerini Kaydet
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
             <div class="card-header"><i class="bi bi-diagram-3"></i> Üretim Aşaması</div>
             <div class="card-body">
                 {% if production.status == 'iptal' %}
@@ -113,7 +153,10 @@
                 {% set s = production.latest_shipment %}
                 <table class="table table-borderless mb-3">
                     <tr><th style="width:180px">Durum:</th>
-                        <td><span class="badge bg-{{ 'success' if s.status == 'teslim_edildi' else 'info' if s.status == 'yolda' else 'primary' if s.status == 'kargoya_verildi' else 'secondary' }}">{{ s.status_label }}</span></td>
+                        <td>
+                            <span class="badge bg-{{ 'success' if s.status == 'teslim_edildi' else 'info' if s.status == 'yolda' else 'primary' if s.status == 'kargoya_verildi' else 'secondary' }}">{{ s.status_label }}</span>
+                            {% if s.faturasiz_cikis %}<span class="badge bg-warning text-dark">Faturasız Çıkış</span>{% endif %}
+                        </td>
                     </tr>
                     <tr><th>Kargo Firması:</th><td>{{ s.carrier or '-' }}</td></tr>
                     <tr>
@@ -152,17 +195,20 @@
                 {% elif production.status == 'hazir' %}
                     {% set has_invoice = production.deal.invoices|selectattr('type', 'equalto', 'fatura')|list|length > 0 %}
                     {% set has_irsaliye = production.deal.invoices|selectattr('type', 'equalto', 'irsaliye')|list|length > 0 %}
-                    {% if has_invoice and has_irsaliye %}
+                    {% if has_irsaliye %}
                     <p class="text-muted">Bu iş emri için henüz sevkiyat oluşturulmadı.</p>
+                    {% if not has_invoice %}
+                    <p class="text-warning small"><i class="bi bi-info-circle"></i> Fatura kaydı yok - sevkiyat ekranında "Faturasız Çıkış" seçeneğini işaretlemeniz gerekecek.</p>
+                    {% endif %}
                     <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success">
                         <i class="bi bi-truck"></i> Sevkiyat Oluştur
                     </a>
                     {% else %}
                     <div class="alert alert-warning mb-2">
-                        <i class="bi bi-exclamation-triangle"></i> Sevkiyat oluşturmadan önce fatura ve irsaliye oluşturmalısınız.
+                        <i class="bi bi-exclamation-triangle"></i> Sevkiyat oluşturmadan önce en azından irsaliye oluşturmalısınız.
                         <ul class="mb-0">
-                            <li>Fatura: {{ 'var' if has_invoice else 'eksik' }}</li>
-                            <li>İrsaliye: {{ 'var' if has_irsaliye else 'eksik' }}</li>
+                            <li>Fatura: {{ 'var' if has_invoice else 'eksik (faturasız çıkış ile devam edilebilir)' }}</li>
+                            <li>İrsaliye: eksik (zorunlu)</li>
                         </ul>
                     </div>
                     <a href="{{ url_for('create_invoice_from_deal', id=production.deal_id) }}" class="btn btn-warning">
