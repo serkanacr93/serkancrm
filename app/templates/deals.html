@@ -88,7 +88,7 @@
                 <tbody>
                     {% for deal in deals %}
                     <tr class="{{ 'table-danger' if deal.is_expired else 'table-warning' if deal.is_expiring_soon else '' }}">
-                        <td><small class="text-muted">TKL-{{ "%05d"|format(deal.id) }}</small></td>
+                        <td><small class="text-muted">{{ deal.display_no }}</small></td>
                         <td><a href="{{ url_for('deal_detail', id=deal.id) }}"><strong>{{ deal.title }}</strong></a></td>
                         <td>
                             {% if deal.customer.company_name %}

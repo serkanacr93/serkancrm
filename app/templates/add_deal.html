@@ -18,19 +18,37 @@
                 </div>
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-8 mb-3">
-                            <label for="title" class="form-label">Teklif Adı</label>
-                            <input type="text" class="form-control" id="title" name="title" placeholder="Müşteri seçince otomatik oluşur">
-                            <small class="text-muted">Boş bırakırsanız otomatik oluşur: <strong>FIRMAKISALTMA-GÜN.AY-SIRANO</strong></small>
-                        </div>
-                        <div class="col-md-4 mb-3">
+                        <div class="col-md-12 mb-3 position-relative">
                             <label for="customer_search" class="form-label">Müşteri *</label>
                             <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..." autocomplete="off" required>
                             <input type="hidden" id="customer_id" name="customer_id">
-                            <div id="customer_results" class="list-group mt-1" style="max-height: 200px; overflow-y: auto; display: none;"></div>
-                            <small class="text-muted">Yazmaya başlayınca arama yapar</small>
+                            <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
+                            <small class="text-muted">Teklif adı, seçilen müşterinin adından otomatik oluşturulur.</small>
                         </div>
                     </div>
+
+                    <div id="missing_info_box" class="alert alert-warning" style="display:none;">
+                        <i class="bi bi-exclamation-triangle"></i> <span id="missing_info_text"></span>
+                        <div class="row mt-2">
+                            <div class="col-md-6 mb-2">
+                                <label for="customer_company_name" class="form-label small mb-1">Firma Ünvanı</label>
+                                <input type="text" class="form-control form-control-sm" id="customer_company_name" name="customer_company_name">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label for="customer_tax_id" class="form-label small mb-1">Vergi No</label>
+                                <input type="text" class="form-control form-control-sm" id="customer_tax_id" name="customer_tax_id">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label for="customer_phone" class="form-label small mb-1">Telefon</label>
+                                <input type="text" class="form-control form-control-sm" id="customer_phone" name="customer_phone">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label for="customer_address" class="form-label small mb-1">Adres</label>
+                                <input type="text" class="form-control form-control-sm" id="customer_address" name="customer_address">
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Teklif Tarihi</label>
@@ -182,88 +200,38 @@
     </div>
 </form>
 
+<script src="{{ url_for('static', filename='js/customer-search.js') }}"></script>
 <script>
 let itemCount = 1;
-var TODAY = new Date();
-var DAY = String(TODAY.getDate()).padStart(2, '0');
-var MONTH = String(TODAY.getMonth() + 1).padStart(2, '0');
 
-// Müşteri arama ve seçimi
-const customerSearch = document.getElementById('customer_search');
-const customerIdInput = document.getElementById('customer_id');
-const customerResults = document.getElementById('customer_results');
+// Musteri arama (merkezi bilesen - Is 1) + secince eksik bilgi kontrolu (Is 4)
+initCustomerSearch({
+    inputId: 'customer_search',
+    hiddenIdInputId: 'customer_id',
+    resultsId: 'customer_results',
+    onSelect: function (c) {
+        var missingBox = document.getElementById('missing_info_box');
+        var missing = [];
+        if (!c.company_name) missing.push('firma ünvanı');
+        if (!c.tax_id) missing.push('vergi no');
+        if (!c.phone) missing.push('telefon');
+        if (!c.address) missing.push('adres');
 
-let searchTimeout;
-customerSearch.addEventListener('input', function() {
-    clearTimeout(searchTimeout);
-    const query = this.value.trim();
-    if (query.length < 2) {
-        customerResults.style.display = 'none';
-        customerIdInput.value = '';
-        return;
+        if (missing.length > 0) {
+            document.getElementById('missing_info_text').textContent =
+                'Bu müşteride eksik bilgi var: ' + missing.join(', ') + '. İsterseniz aşağıdan tamamlayıp teklifle birlikte kaydedebilirsiniz.';
+            document.getElementById('customer_company_name').value = c.company_name || '';
+            document.getElementById('customer_tax_id').value = c.tax_id || '';
+            document.getElementById('customer_phone').value = c.phone || '';
+            document.getElementById('customer_address').value = c.address || '';
+            missingBox.style.display = 'block';
+        } else {
+            missingBox.style.display = 'none';
+        }
+    },
+    onClear: function () {
+        document.getElementById('missing_info_box').style.display = 'none';
     }
-    searchTimeout = setTimeout(() => {
-        fetch(`/api/customers/search?q=${encodeURIComponent(query)}`)
-            .then(res => res.json())
-            .then(data => {
-                customerResults.innerHTML = '';
-                if (data.length === 0) {
-                    customerResults.style.display = 'none';
-                    return;
-                }
-                data.forEach(c => {
-                    const item = document.createElement('a');
-                    item.href = '#';
-                    item.className = 'list-group-item list-group-item-action';
-                    item.innerHTML = `<strong>${c.name}</strong><br><small>${c.phone} | ${c.email}</small>`;
-                    item.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        customerSearch.value = c.name;
-                        customerIdInput.value = c.id;
-                        customerResults.style.display = 'none';
-                        // Otomatik teklif adı oluştur
-                        var titleInput = document.getElementById('title');
-                        if (titleInput.value.trim() === '') {
-                            var namePart = c.name.toUpperCase().substring(0, 6);
-                            var seq = 1;
-                            var seqEl = document.getElementById('next-seq');
-                            if (seqEl) seq = parseInt(seqEl.value);
-                            var DAY = String(new Date().getDate()).padStart(2, '0');
-                            var MONTH = String(new Date().getMonth() + 1).padStart(2, '0');
-                            titleInput.value = namePart + '-' + DAY + '.' + MONTH + '-' + seq;
-                        }
-                    });
-                    customerResults.appendChild(item);
-                });
-                customerResults.style.display = 'block';
-            });
-    }, 300);
-});
-
-document.addEventListener('click', function(e) {
-    if (!customerSearch.contains(e.target) && !customerResults.contains(e.target)) {
-        customerResults.style.display = 'none';
-    }
-});
-
-// Müşteri seçilince otomatik teklif adı oluştur
-customerIdInput.addEventListener('change', function() {
-    var titleInput = document.getElementById('title');
-    if (titleInput.value.trim() !== '') return; // Kullanıcı manuel yazdıysa karışma
-    
-    var selected = this.options[this.selectedIndex];
-    if (!selected || !selected.value) return;
-    
-    var company = selected.getAttribute('data-company');
-    var name = selected.getAttribute('data-name');
-    var namePart = (company || name || 'MUSTERI').toUpperCase().substring(0, 6);
-    
-    // next_no'yu almak için sayfadaki son teklif no'sunu kullan
-    var seq = 1;
-    var seqEl = document.getElementById('next-seq');
-    if (seqEl) seq = parseInt(seqEl.value);
-    
-    titleInput.value = namePart + '-' + DAY + '.' + MONTH + '-' + seq;
 });
 
 document.getElementById('add-item').addEventListener('click', function() {

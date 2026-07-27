@@ -12,14 +12,11 @@
             <div class="card-body">
                 <form method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="mb-3">
-                        <label for="customer_id" class="form-label">Müşteri <span class="text-danger">*</span></label>
-                        <select class="form-select" id="customer_id" name="customer_id" required>
-                            <option value="">Müşteri Seçin</option>
-                            {% for customer in customers %}
-                            <option value="{{ customer.id }}">{{ customer.display_name }}</option>
-                            {% endfor %}
-                        </select>
+                    <div class="mb-3 position-relative">
+                        <label for="customer_search" class="form-label">Müşteri <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..." autocomplete="off" required>
+                        <input type="hidden" id="customer_id" name="customer_id">
+                        <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
                     </div>
                     
                     <div class="mb-3">
@@ -87,4 +84,8 @@
         </div>
     </div>
 </div>
+<script src="{{ url_for('static', filename='js/customer-search.js') }}"></script>
+<script>
+initCustomerSearch({ inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results' });
+</script>
 {% endblock %}

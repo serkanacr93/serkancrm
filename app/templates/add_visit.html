@@ -17,18 +17,11 @@
             <div class="card-body">
                 <form method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="mb-3">
-                        <label for="customer_id" class="form-label">Müşteri *</label>
-                        <select class="form-select" id="customer_id" name="customer_id" required>
-                            <option value="">Müşteri seçin...</option>
-                            {% for customer in customers %}
-                            <option value="{{ customer.id }}" {% if customer.id == customer.id %}selected{% endif %}>
-                                {% if customer.company_name %}{{ customer.company_name }} - {% endif %}
-                                {{ customer.first_name }} {{ customer.last_name }} 
-                                {% if customer.phone %}({{ customer.phone }}){% endif %}
-                            </option>
-                            {% endfor %}
-                        </select>
+                    <div class="mb-3 position-relative">
+                        <label for="customer_search" class="form-label">Müşteri *</label>
+                        <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..." autocomplete="off" required>
+                        <input type="hidden" id="customer_id" name="customer_id">
+                        <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
                     </div>
                     
                     <div class="row">
@@ -82,4 +75,8 @@
         </div>
     </div>
 </div>
+<script src="{{ url_for('static', filename='js/customer-search.js') }}"></script>
+<script>
+initCustomerSearch({ inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results' });
+</script>
 {% endblock %}

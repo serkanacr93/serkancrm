@@ -248,6 +248,110 @@ def generate_deal_pdf(deal):
     buffer.seek(0)
     return buffer
 
+def generate_invoice_pdf(invoice):
+    """Fatura (type='fatura') veya Irsaliye (type='irsaliye') kaydi icin PDF.
+    Is 2: invoice_detail sayfasinda daha once hic PDF indirme secenegi
+    yoktu - hem fatura hem irsaliye icin bu tek fonksiyon kullanilir."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+
+    company = _get_company_settings_for_pdf()
+
+    styles = getSampleStyleSheet()
+    normal = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=9, leading=12)
+    small = ParagraphStyle('SmallStyle', parent=normal, fontSize=8, leading=10)
+    title_style = ParagraphStyle('TitleStyle', parent=normal, fontName='Vera-Bold', fontSize=18, leading=22)
+    heading_style = ParagraphStyle('HeadingStyle', parent=normal, fontName='Vera-Bold', fontSize=11, leading=14, spaceAfter=5)
+    company_name_style = ParagraphStyle('CompanyName', parent=normal, fontName='Vera-Bold', fontSize=14, leading=17)
+
+    is_fatura = invoice.type == 'fatura'
+    doc_title = 'FATURA' if is_fatura else 'İRSALİYE'
+    customer = invoice.customer
+
+    elements = []
+
+    header_left = [Paragraph(company.company_name or 'Lema Ambalaj', company_name_style)]
+    if company.address:
+        header_left.append(Paragraph(company.address.replace('\n', '<br/>'), small))
+    contact_bits = [b for b in [
+        f"Tel: {company.phone}" if company.phone else None,
+        company.email or None,
+    ] if b]
+    if contact_bits:
+        header_left.append(Paragraph(' | '.join(contact_bits), small))
+    if company.tax_office or company.tax_id:
+        header_left.append(Paragraph(f"V.D.: {company.tax_office or '-'}  V.No: {company.tax_id or '-'}", small))
+
+    header_right = [
+        Paragraph(doc_title, title_style),
+        Spacer(1, 2*mm),
+        Paragraph(f"<b>{invoice.display_no}</b>", normal),
+        Paragraph(f"Tarih: {invoice.date.strftime('%d.%m.%Y') if invoice.date else '-'}", normal),
+        Paragraph(f"Teklif: {invoice.deal.display_no}", normal),
+    ]
+
+    header_table = Table([[header_left, header_right]], colWidths=[11*cm, 6*cm])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 4*mm))
+    elements.append(Table([['']], colWidths=[17*cm], style=[('LINEBELOW', (0, 0), (-1, -1), 1, colors.HexColor('#1a252f'))]))
+    elements.append(Spacer(1, 5*mm))
+
+    elements.append(Paragraph("MÜŞTERİ BİLGİLERİ", heading_style))
+    person_name = f"{_clean_for_pdf(customer.first_name) or ''} {_clean_for_pdf(customer.last_name) or ''}".strip()
+    elements.append(Paragraph(f"<b>Sayın:</b> {person_name or '-'}", normal))
+    if customer.company_name:
+        elements.append(Paragraph(f"<b>Firma:</b> {_clean_for_pdf(customer.company_name)}", normal))
+    elements.append(Paragraph(f"<b>Adres:</b> {customer.company_address or customer.address or '-'}", normal))
+    elements.append(Paragraph(f"<b>V.D.:</b> {customer.tax_office or '-'}  <b>V.No:</b> {customer.tax_id or '-'}", normal))
+    elements.append(Spacer(1, 5*mm))
+
+    elements.append(Paragraph("KALEMLER", heading_style))
+    if invoice.items:
+        data = [['Açıklama', 'Miktar', 'Birim', 'Birim Fiyat', 'Toplam']]
+        for item in invoice.items:
+            data.append([
+                Paragraph(item.description, small),
+                f"{item.quantity:.2f}",
+                item.unit,
+                f"{item.unit_price:,.2f} TL",
+                f"{item.total_price:,.2f} TL"
+            ])
+        data.append(['', '', '', 'Ara Toplam:', f"{invoice.subtotal:,.2f} TL"])
+        data.append(['', '', '', f'KDV (%{invoice.vat_rate:.0f}):', f"{invoice.vat_amount:,.2f} TL"])
+        data.append(['', '', '', 'TOPLAM:', f"{invoice.total:,.2f} TL"])
+
+        table = Table(data, colWidths=[6.5*cm, 2*cm, 1.5*cm, 3.5*cm, 3.5*cm])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BACKGROUND', (-1, -3), (-1, -1), colors.HexColor('#e8f4f8')),
+            ('FONTNAME', (-1, -3), (-1, -1), 'Vera-Bold'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -4), [colors.white, colors.HexColor('#f8f9fa')]),
+            ('ALIGN', (-1, 0), (-1, -1), 'RIGHT'),
+            ('ALIGN', (-2, 0), (-2, -1), 'RIGHT'),
+        ]))
+        elements.append(table)
+    else:
+        elements.append(Paragraph("<i>Kalem bulunmuyor.</i>", normal))
+
+    if invoice.notes:
+        elements.append(Spacer(1, 5*mm))
+        elements.append(Paragraph("NOTLAR", heading_style))
+        elements.append(Paragraph(invoice.notes, normal))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 def generate_is_emri_pdf(production):
     """Dahili uretim talimati belgesi - fatura/irsaliye ile karistirilmamali,
     fiyat bilgisi icermez. Atolyeye elden verilmek uzere tasarlandi."""

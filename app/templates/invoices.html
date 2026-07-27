@@ -67,6 +67,9 @@
                             <a href="{{ url_for('invoice_detail', id=inv.id) }}" class="btn btn-sm btn-outline-primary">
                                 <i class="bi bi-eye"></i>
                             </a>
+                            <a href="{{ url_for('invoice_pdf', id=inv.id) }}" class="btn btn-sm btn-outline-info">
+                                <i class="bi bi-file-pdf"></i>
+                            </a>
                         </td>
                     </tr>
                     {% endfor %}

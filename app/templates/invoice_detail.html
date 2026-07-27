@@ -12,6 +12,9 @@
         <small class="text-muted">Tarih: {{ invoice.date.strftime('%d.%m.%Y') }}</small>
     </div>
     <div>
+        <a href="{{ url_for('invoice_pdf', id=invoice.id) }}" class="btn btn-info">
+            <i class="bi bi-file-pdf"></i> PDF İndir
+        </a>
         <a href="{{ url_for('deal_detail', id=invoice.deal.id) }}" class="btn btn-outline-info">
             <i class="bi bi-file-earmark-text"></i> Teklif Detayı
         </a>

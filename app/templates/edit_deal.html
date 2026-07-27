@@ -11,18 +11,13 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label for="title" class="form-label">Fırsat Adı *</label>
-                    <input type="text" class="form-control" id="title" name="title" value="{{ deal.title }}" required>
+                    <label class="form-label">Teklif No</label>
+                    <input type="text" class="form-control" value="{{ deal.display_no }}" readonly>
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label for="customer_id" class="form-label">Müşteri *</label>
-                    <select class="form-select" id="customer_id" name="customer_id" required>
-                        {% for customer in customers %}
-                        <option value="{{ customer.id }}" {{ 'selected' if customer.id == deal.customer_id }}>
-                            {{ customer.first_name }} {{ customer.last_name }} - {{ customer.company or 'Bireysel' }}
-                        </option>
-                        {% endfor %}
-                    </select>
+                    <label class="form-label">Müşteri</label>
+                    <input type="text" class="form-control" value="{{ deal.title }}" readonly>
+                    <small class="text-muted">Teklif adı müşterinin adından otomatik oluşur, değiştirilemez.</small>
                 </div>
             </div>
             <div class="row">

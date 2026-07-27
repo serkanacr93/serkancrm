@@ -139,7 +139,7 @@
                                 <tbody>
                                     {% for deal in deals %}
                                     <tr class="{{ 'table-danger' if deal.is_expired else 'table-warning' if deal.is_expiring_soon else '' }}">
-                                        <td><small>TKL-{{ "%05d"|format(deal.id) }}</small></td>
+                                        <td><small>{{ deal.display_no }}</small></td>
                                         <td><a href="{{ url_for('deal_detail', id=deal.id) }}">{{ deal.title }}</a></td>
                                         <td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td>
                                         <td><small>%{{ deal.vat_rate }}</small></td>

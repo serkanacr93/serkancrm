@@ -27,11 +27,11 @@
                             <div id="reportsContainer">
                                 <div class="report-row mb-3">
                                     <div class="row">
-                                        <div class="col-md-4">
+                                        <div class="col-md-4 position-relative">
                                             <label class="form-label">Müşteri Adı <span class="text-danger">*</span></label>
                                             <input type="text" class="form-control customer-search" name="customer_name[]" required autocomplete="off">
-                                            <input type="hidden" class="form-control customer-id" name="customer_id[]">
-                                            <div class="customer-info mt-1" style="display: none;"></div>
+                                            <input type="hidden" class="customer-id" name="customer_id[]">
+                                            <div class="customer-results list-group position-absolute w-100" style="z-index: 1000; max-height: 220px; overflow-y: auto; display: none;"></div>
                                         </div>
                                         <div class="col-md-2">
                                             <label class="form-label">Telefon</label>
@@ -84,66 +84,41 @@
     </div>
 </div>
 
+<script src="{{ url_for('static', filename='js/customer-search.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const container = document.getElementById('reportsContainer');
     const addButton = document.querySelector('.btn-add-row');
-    
-    // Müşteri arama fonksiyonu
-    function setupCustomerSearch(input) {
-        const customerInfo = input.closest('.col-md-4').querySelector('.customer-info');
-        const phoneInput = input.closest('.row').querySelector('.phone-input');
-        const hiddenIdInput = input.closest('.col-md-4').querySelector('.customer-id');
-        
-        input.addEventListener('input', function() {
-            const query = this.value;
-            if (query.length < 2) {
-                customerInfo.style.display = 'none';
-                return;
+
+    // Merkezi arama bileseni (Is 1) - bir satirdaki musteri arama alanini baglar
+    function setupCustomerSearch(row) {
+        const input = row.querySelector('.customer-search');
+        const hiddenIdInput = row.querySelector('.customer-id');
+        const resultsEl = row.querySelector('.customer-results');
+        const phoneInput = row.querySelector('.phone-input');
+        initCustomerSearchRow(input, hiddenIdInput, resultsEl, {
+            onSelect: function (c) {
+                if (phoneInput && !phoneInput.value) phoneInput.value = c.phone || '';
             }
-            
-            fetch(`/api/customers/search-by-name?q=${encodeURIComponent(query)}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.length > 0) {
-                        const customer = data[0];
-                        customerInfo.innerHTML = `<strong>${customer.name}</strong><br>Tel: ${customer.phone || '-'}`;
-                        customerInfo.style.display = 'block';
-                        customerInfo.style.cursor = 'pointer';
-                        customerInfo.style.padding = '5px';
-                        customerInfo.style.backgroundColor = '#f8f9fa';
-                        customerInfo.style.border = '1px solid #dee2e6';
-                        customerInfo.style.borderRadius = '4px';
-                        
-                        customerInfo.onclick = function() {
-                            input.value = customer.name;
-                            phoneInput.value = customer.phone || '';
-                            hiddenIdInput.value = customer.id;
-                            customerInfo.style.display = 'none';
-                        };
-                    } else {
-                        customerInfo.style.display = 'none';
-                    }
-                });
         });
     }
-    
+
     // İlk satır için arama ayarla
-    const firstSearch = document.querySelector('.customer-search');
-    if (firstSearch) {
-        setupCustomerSearch(firstSearch);
+    const firstRow = document.querySelector('.report-row');
+    if (firstRow) {
+        setupCustomerSearch(firstRow);
     }
-    
+
     // Yeni satır ekleme
     addButton.addEventListener('click', function() {
         const newRow = document.createElement('div');
         newRow.className = 'report-row mb-3';
         newRow.innerHTML = `
             <div class="row">
-                <div class="col-md-4">
+                <div class="col-md-4 position-relative">
                     <input type="text" class="form-control customer-search" name="customer_name[]" required autocomplete="off">
-                    <input type="hidden" class="form-control customer-id" name="customer_id[]">
-                    <div class="customer-info mt-1" style="display: none;"></div>
+                    <input type="hidden" class="customer-id" name="customer_id[]">
+                    <div class="customer-results list-group position-absolute w-100" style="z-index: 1000; max-height: 220px; overflow-y: auto; display: none;"></div>
                 </div>
                 <div class="col-md-2">
                     <input type="tel" class="form-control phone-input" name="phone[]" placeholder="05XX XXX XX XX">
@@ -166,12 +141,9 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         container.appendChild(newRow);
-        
-        // Yeni satır için arama ayarla
-        const newSearch = newRow.querySelector('.customer-search');
-        setupCustomerSearch(newSearch);
+        setupCustomerSearch(newRow);
     });
-    
+
     // Satır silme
     container.addEventListener('click', function(e) {
         if (e.target.closest('.btn-remove-row')) {

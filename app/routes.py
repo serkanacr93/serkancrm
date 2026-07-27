@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
 from app import db, places_search
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -16,6 +16,34 @@ def _get_company_settings():
         db.session.add(settings)
         db.session.commit()
     return settings
+
+def _customer_full_name(customer):
+    """Musterinin tam adini (kisaltmadan), gundelik hitaplardan (Abi/Amca/
+    Abla/Baba/Dayi) temizlenmis halde dondurur. Teklif title'i olarak
+    kullanilir (Is 3) - eskiden 'MEHMET-01.07-1' gibi kisaltilmis/karisik
+    otomatik basliklar kullaniliyordu."""
+    person = f"{_clean_for_pdf(customer.first_name) or ''} {_clean_for_pdf(customer.last_name) or ''}".strip()
+    if customer.company_name:
+        return f"{customer.company_name} - {person}" if person else customer.company_name
+    return person or 'İsimsiz Müşteri'
+
+def _apply_customer_updates_from_form(customer, form):
+    """Fatura/teklif formlarinda 'eksik bilgi tamamlama' alanlarindan
+    (customer_company_name, customer_tax_id, customer_phone,
+    customer_address) gelen degerleri musteri kaydina yazar - bos
+    birakilanlara dokunmaz."""
+    company_name = form.get('customer_company_name', '').strip()
+    tax_id = form.get('customer_tax_id', '').strip()
+    phone = form.get('customer_phone', '').strip()
+    address = form.get('customer_address', '').strip()
+    if company_name:
+        customer.company_name = company_name
+    if tax_id:
+        customer.tax_id = tax_id
+    if phone:
+        customer.phone = phone
+    if address:
+        customer.address = address
 
 def _next_deal_no():
     """Bir sonraki teklif numarasini dondurur. MAX() SQL agregasyonu NULL
@@ -733,14 +761,14 @@ def register_routes(app):
             today = datetime.now().date()
             # Otomatik sıralı teklif numarası
             next_no = _next_deal_no()
-            
-            title = request.form.get('title', '').strip()
-            if not title:
-                # Müşteri adına göre otomatik başlık oluştur: "05.07.2026 - Lema Ambalaj"
-                customer = Customer.query.get(int(request.form['customer_id']))
-                customer_name = customer.display_name if customer else "Müşteri"
-                title = f"{today.strftime('%d.%m.%Y')} - {customer_name}"
-            
+
+            customer = Customer.query.get_or_404(int(request.form['customer_id']))
+            _apply_customer_updates_from_form(customer, request.form)
+            # Is 3: teklif basligi artik her zaman musterinin tam (temizlenmis)
+            # adi - eski kisaltma+tarih+sirano mantigi (orn. "MEHMET-01.07-1")
+            # tamamen kaldirildi.
+            title = _customer_full_name(customer)
+
             deal = Deal(
                 deal_no=next_no,
                 title=title,
@@ -751,12 +779,12 @@ def register_routes(app):
                 valid_until=today + timedelta(days=7),
                 vat_rate=float(request.form.get('vat_rate', 20)),
                 notes=request.form.get('notes'),
-                customer_id=int(request.form['customer_id']),
+                customer_id=customer.id,
                 user_id=current_user.id
             )
             db.session.add(deal)
             db.session.flush()
-            
+
             i = 0
             while f'desc_{i}' in request.form:
                 qty = float(request.form[f'qty_{i}'])
@@ -779,7 +807,7 @@ def register_routes(app):
                 customer_id=deal.customer_id,
                 deal_id=deal.id,
                 title=f'Teklif Süresi Doluyor: {deal.title}',
-                message=f'TKL-{deal.id:05d} teklifinin geçerlilik süresi {deal.valid_until.strftime("%d.%m.%Y")} tarihinde doluyor.',
+                message=f'{deal.display_no} teklifinin geçerlilik süresi {deal.valid_until.strftime("%d.%m.%Y")} tarihinde doluyor.',
                 remind_date=deal.valid_until - timedelta(days=1)
             )
             db.session.add(reminder)
@@ -810,7 +838,8 @@ def register_routes(app):
             flash('Bu teklif onaylanmış ve üretime aktarılmış, kalemleri artık düzenlenemez.', 'danger')
             return redirect(url_for('deal_detail', id=id))
         if request.method == 'POST':
-            deal.title = request.form['title']
+            # Is 3: title artik musteri adindan otomatik geldigi icin
+            # duzenleme formundan degistirilmiyor.
             deal.stage = request.form['stage']
             deal.probability = int(request.form.get('probability', 0))
             deal.vat_rate = float(request.form.get('vat_rate', 20))
@@ -833,8 +862,7 @@ def register_routes(app):
             db.session.commit()
             flash('Teklif güncellendi!', 'success')
             return redirect(url_for('deal_detail', id=id))
-        customers = Customer.query.order_by(Customer.company_name, Customer.last_name).all()
-        return render_template('edit_deal.html', deal=deal, customers=customers)
+        return render_template('edit_deal.html', deal=deal)
 
     @app.route('/deals/<int:id>/delete', methods=['POST'])
     @login_required
@@ -903,12 +931,15 @@ def register_routes(app):
             flash('Bu teklifi revize etme yetkiniz yok.', 'danger')
             return redirect(url_for('deals'))
         today = datetime.now().date()
-        revize_count = Deal.query.filter(Deal.title.like(f'%{deal.title}%')).count()
+        # Is 3: revize teklif ayni (temizlenmis) musteri adiyla devam eder,
+        # eski karisik "(Revize N)" suffix mantigi kaldirildi - tekilligi
+        # artik deal_no sagliyor.
         new_deal = Deal(
             deal_no=_next_deal_no(),
-            title=f"{deal.title} (Revize {revize_count})", stage='teklif', probability=deal.probability,
+            title=deal.title, stage='teklif', probability=deal.probability,
             deal_date=today, expected_close=deal.expected_close, valid_until=today + timedelta(days=7),
-            vat_rate=deal.vat_rate, notes=f"Revize. Orijinal: {deal.notes or ''}", customer_id=deal.customer_id,
+            vat_rate=deal.vat_rate, notes=f"Revize. Orijinal: {deal.display_no}. {deal.notes or ''}".strip(),
+            customer_id=deal.customer_id,
             user_id=deal.user_id
         )
         db.session.add(new_deal)
@@ -996,14 +1027,29 @@ def register_routes(app):
     @app.route('/api/customers/search')
     @login_required
     def search_customers():
+        """Site genelinde TEK musteri arama endpoint'i (Is 1). Turkce karakter
+        normalizasyonu (_normalize_tr) kullanir, isim/telefon/firma icinde
+        arar, sayisal sorguda dogrudan ID ile de eslesir."""
         query = request.args.get('q', '').strip()
         if len(query) < 2:
             return jsonify([])
 
+        if query.isdigit():
+            by_id = Customer.query.get(int(query))
+            if by_id:
+                return jsonify([{
+                    'id': by_id.id, 'name': by_id.display_name,
+                    'phone': by_id.phone or '', 'email': by_id.email or '',
+                    'company_name': by_id.company_name or '',
+                    'tax_id': by_id.tax_id or '',
+                    'address': by_id.company_address or by_id.address or ''
+                }])
+
         norm_q = _normalize_tr(query)
         rows = Customer.query.with_entities(
             Customer.id, Customer.first_name, Customer.last_name,
-            Customer.company_name, Customer.phone, Customer.email
+            Customer.company_name, Customer.phone, Customer.email,
+            Customer.tax_id, Customer.address, Customer.company_address
         ).all()
 
         starts_with, contains = [], []
@@ -1014,14 +1060,17 @@ def register_routes(app):
             (starts_with if haystack.startswith(norm_q) else contains).append(r)
 
         result = []
-        for r in (starts_with + contains)[:10]:
+        for r in (starts_with + contains)[:20]:
             name = ' '.join(filter(None, [r.first_name, r.last_name]))
             name = f"{r.company_name} - {name}" if r.company_name and name else (r.company_name or name or 'İsimsiz Müşteri')
             result.append({
                 'id': r.id,
                 'name': name,
                 'phone': r.phone or '',
-                'email': r.email or ''
+                'email': r.email or '',
+                'company_name': r.company_name or '',
+                'tax_id': r.tax_id or '',
+                'address': r.company_address or r.address or ''
             })
         return jsonify(result)
 
@@ -1035,7 +1084,7 @@ def register_routes(app):
         headers = ['Teklif No', 'Başlık', 'Müşteri', 'Ara Toplam', 'KDV Oranı', 'KDV', 'Toplam', 'Durum', 'Tarih']
         ws.append(headers)
         for d in deals:
-            ws.append([f'TKL-{d.id:05d}', d.title, d.customer.display_name, d.subtotal, f'%{d.vat_rate}', 
+            ws.append([d.display_no, d.title, d.customer.display_name, d.subtotal, f'%{d.vat_rate}', 
                        d.vat_amount, d.value, d.stage, d.deal_date.strftime('%d.%m.%Y') if d.deal_date else ''])
         buffer = BytesIO()
         wb.save(buffer)
@@ -1582,6 +1631,13 @@ def register_routes(app):
         invoice = Invoice.query.get_or_404(id)
         return render_template('invoice_detail.html', invoice=invoice)
 
+    @app.route('/invoices/<int:id>/pdf')
+    @login_required
+    def invoice_pdf(id):
+        invoice = Invoice.query.get_or_404(id)
+        pdf = generate_invoice_pdf(invoice)
+        return send_file(pdf, as_attachment=True, download_name=f'{invoice.display_no}.pdf')
+
     @app.route('/deals/<int:id>/create-invoice', methods=['GET', 'POST'])
     @login_required
     def create_invoice_from_deal(id):
@@ -1888,48 +1944,6 @@ def register_routes(app):
             return redirect(url_for('daily_reports'))
         
         return render_template('add_daily_report.html', today=today)
-
-    @app.route('/api/customers/search-by-name')
-    @login_required
-    def search_customers_by_name():
-        query = request.args.get('q', '').strip()
-        if len(query) < 2:
-            return jsonify([])
-
-        if query.isdigit():
-            by_id = Customer.query.get(int(query))
-            if by_id:
-                return jsonify([{
-                    'id': by_id.id, 'name': by_id.display_name,
-                    'phone': by_id.phone or '', 'email': by_id.email or '',
-                    'company_name': by_id.company_name or ''
-                }])
-
-        norm_q = _normalize_tr(query)
-        rows = Customer.query.with_entities(
-            Customer.id, Customer.first_name, Customer.last_name,
-            Customer.company_name, Customer.phone, Customer.email
-        ).all()
-
-        starts_with, contains = [], []
-        for r in rows:
-            haystack = _normalize_tr(' '.join(filter(None, [r.first_name, r.last_name, r.company_name, r.phone])))
-            if norm_q not in haystack:
-                continue
-            (starts_with if haystack.startswith(norm_q) else contains).append(r)
-
-        result = []
-        for r in (starts_with + contains)[:20]:
-            name = ' '.join(filter(None, [r.first_name, r.last_name]))
-            name = f"{r.company_name} - {name}" if r.company_name and name else (r.company_name or name or 'İsimsiz Müşteri')
-            result.append({
-                'id': r.id,
-                'name': name,
-                'phone': r.phone or '',
-                'email': r.email or '',
-                'company_name': r.company_name or ''
-            })
-        return jsonify(result)
 
     @app.route('/daily-reports/by-date/<date_str>')
     @login_required
