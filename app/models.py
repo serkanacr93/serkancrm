@@ -490,6 +490,23 @@ class PotentialCustomer(db.Model):
     def __repr__(self):
         return f'<PotentialCustomer {self.company_name}>'
 
+class CompanySettings(db.Model):
+    """Tekil satir (id=1) - Teklif PDF'inde gosterilen firma bilgileri.
+    Logo, Render'in disk depolamasi kalici olmadigi icin dosya olarak degil
+    veritabaninda (bytea) saklanir."""
+    id = db.Column(db.Integer, primary_key=True)
+    company_name = db.Column(db.String(200), default='Lema Ambalaj', nullable=False)
+    address = db.Column(db.Text)
+    phone = db.Column(db.String(50))
+    fax = db.Column(db.String(50))
+    email = db.Column(db.String(120))
+    website = db.Column(db.String(200))
+    tax_office = db.Column(db.String(100))
+    tax_id = db.Column(db.String(20))
+    logo_data = db.Column(db.LargeBinary)
+    logo_mimetype = db.Column(db.String(50))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class PlacesSearchConfig(db.Model):
     """Tekil satir (id=1) - Google Places otomatik arama ayarlari."""
     id = db.Column(db.Integer, primary_key=True)

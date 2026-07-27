@@ -8,6 +8,70 @@
 </div>
 
 <div class="row">
+    <div class="col-md-12">
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white">
+                <i class="bi bi-building"></i> Firma Bilgileri (Teklif PDF'inde kullanılır)
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('update_company_settings') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="company_name" class="form-label">Firma Adı</label>
+                            <input type="text" class="form-control" id="company_name" name="company_name" value="{{ company_settings.company_name or '' }}">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="address" class="form-label">Adres</label>
+                            <textarea class="form-control" id="address" name="address" rows="1">{{ company_settings.address or '' }}</textarea>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <label for="phone" class="form-label">Telefon</label>
+                            <input type="text" class="form-control" id="phone" name="phone" value="{{ company_settings.phone or '' }}">
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="fax" class="form-label">Faks (opsiyonel)</label>
+                            <input type="text" class="form-control" id="fax" name="fax" value="{{ company_settings.fax or '' }}">
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="email" class="form-label">E-posta</label>
+                            <input type="email" class="form-control" id="email" name="email" value="{{ company_settings.email or '' }}">
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="website" class="form-label">Web Sitesi (opsiyonel)</label>
+                            <input type="text" class="form-control" id="website" name="website" value="{{ company_settings.website or '' }}">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <label for="tax_office" class="form-label">Vergi Dairesi</label>
+                            <input type="text" class="form-control" id="tax_office" name="tax_office" value="{{ company_settings.tax_office or '' }}">
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="tax_id" class="form-label">Vergi Numarası</label>
+                            <input type="text" class="form-control" id="tax_id" name="tax_id" value="{{ company_settings.tax_id or '' }}">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="logo" class="form-label">Logo (opsiyonel)</label>
+                            {% if company_settings.logo_data %}
+                            <img src="{{ url_for('company_logo') }}" alt="Logo" style="max-height:40px; vertical-align:middle;" class="me-2">
+                            {% endif %}
+                            <input type="file" class="form-control d-inline-block" style="width:auto; vertical-align:middle;" id="logo" name="logo" accept="image/*">
+                            <small class="text-muted d-block">Yüklenmezse teklif PDF'inde sadece firma adı büyük/kalın gösterilir. Maks. 2 MB.</small>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Kaydet
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
     <div class="col-md-6">
         <div class="card mb-4">
             <div class="card-header bg-primary text-white">

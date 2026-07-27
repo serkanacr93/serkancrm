@@ -1,12 +1,21 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf
 from app import db, places_search
 from datetime import datetime, timedelta, date
 from functools import wraps
 from io import BytesIO
 import openpyxl
+
+def _get_company_settings():
+    """Tekil satir (id=1) - yoksa varsayilan degerlerle olusturur."""
+    settings = CompanySettings.query.get(1)
+    if not settings:
+        settings = CompanySettings(id=1, company_name='Lema Ambalaj')
+        db.session.add(settings)
+        db.session.commit()
+    return settings
 
 def _next_deal_no():
     """Bir sonraki teklif numarasini dondurur. MAX() SQL agregasyonu NULL
@@ -1477,9 +1486,11 @@ def register_routes(app):
         customer_count = Customer.query.count()
         deal_count = Deal.query.count()
         places_config = places_search.get_config()
+        company_settings = _get_company_settings()
 
         return render_template('settings.html', db_size=db_size, customer_count=customer_count,
-                                deal_count=deal_count, places_config=places_config)
+                                deal_count=deal_count, places_config=places_config,
+                                company_settings=company_settings)
 
     @app.route('/settings/places-toggle', methods=['POST'])
     @login_required
@@ -1489,6 +1500,46 @@ def register_routes(app):
         db.session.commit()
         flash(f"Otomatik müşteri arama {'aktif' if config.enabled else 'pasif'} edildi.", 'success')
         return redirect(url_for('settings'))
+
+    @app.route('/settings/company', methods=['POST'])
+    @login_required
+    def update_company_settings():
+        company_settings = _get_company_settings()
+        company_settings.company_name = request.form.get('company_name', '').strip() or 'Lema Ambalaj'
+        company_settings.address = request.form.get('address', '').strip() or None
+        company_settings.phone = request.form.get('phone', '').strip() or None
+        company_settings.fax = request.form.get('fax', '').strip() or None
+        company_settings.email = request.form.get('email', '').strip() or None
+        company_settings.website = request.form.get('website', '').strip() or None
+        company_settings.tax_office = request.form.get('tax_office', '').strip() or None
+        company_settings.tax_id = request.form.get('tax_id', '').strip() or None
+
+        logo = request.files.get('logo')
+        if logo and logo.filename:
+            data = logo.read()
+            if len(data) > 2 * 1024 * 1024:
+                flash('Logo dosyası çok büyük (maks. 2 MB).', 'danger')
+                return redirect(url_for('settings'))
+            try:
+                from PIL import Image as PILImage
+                PILImage.open(BytesIO(data)).verify()
+            except Exception:
+                flash('Logo dosyası geçerli bir görsel değil.', 'danger')
+                return redirect(url_for('settings'))
+            company_settings.logo_data = data
+            company_settings.logo_mimetype = logo.mimetype
+
+        db.session.commit()
+        flash('Firma bilgileri güncellendi!', 'success')
+        return redirect(url_for('settings'))
+
+    @app.route('/settings/company-logo')
+    @login_required
+    def company_logo():
+        company_settings = _get_company_settings()
+        if not company_settings.logo_data:
+            return '', 404
+        return send_file(BytesIO(company_settings.logo_data), mimetype=company_settings.logo_mimetype)
 
     @app.route('/users/<int:id>/commissions')
     @login_required
