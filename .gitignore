@@ -23,4 +23,5 @@ Thumbs.db
 build/
 dist/
 Teklifler/
+app/static/uploads/
 /Microsoft

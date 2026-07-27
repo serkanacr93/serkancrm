@@ -9,9 +9,16 @@
         <small class="text-muted">{{ production.deal.display_no }} - {{ production.deal.title }}</small>
     </div>
     <div>
-        <a href="{{ url_for('production_is_emri_pdf', id=production.id) }}" class="btn btn-outline-dark">
-            <i class="bi bi-printer"></i> İş Emri Yazdır
-        </a>
+        <div class="btn-group">
+            <button type="button" class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-printer"></i> İş Emri Yazdır
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="{{ url_for('production_is_emri_pdf', id=production.id, nusha='baski') }}">Nüsha: Baskı Ustası</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('production_is_emri_pdf', id=production.id, nusha='makine') }}">Nüsha: Makine Ustası</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('production_is_emri_pdf', id=production.id) }}">Nüsha etiketsiz</a></li>
+            </ul>
+        </div>
         <a href="{{ url_for('deal_detail', id=production.deal.id) }}" class="btn btn-outline-info">
             <i class="bi bi-file-earmark-text"></i> Teklif Detayı
         </a>
@@ -106,6 +113,7 @@
                                     <th>Baskı Rengi/Sayısı</th>
                                     <th>Kağıt Tipi</th>
                                     <th>Gramaj</th>
+                                    <th>Kaç Kg</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -116,6 +124,7 @@
                                     <td><input type="text" class="form-control form-control-sm" name="baski_{{ item.id }}" value="{{ item.baski_bilgisi or '' }}"></td>
                                     <td><input type="text" class="form-control form-control-sm" name="kagit_{{ item.id }}" value="{{ item.kagit_tipi or '' }}"></td>
                                     <td><input type="text" class="form-control form-control-sm" name="gramaj_{{ item.id }}" value="{{ item.gramaj or '' }}"></td>
+                                    <td><input type="text" class="form-control form-control-sm" name="kackg_{{ item.id }}" value="{{ item.kac_kg or '' }}"></td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -124,6 +133,30 @@
                     <button type="submit" class="btn btn-outline-primary btn-sm">
                         <i class="bi bi-save"></i> İş Emri Bilgilerini Kaydet
                     </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header"><i class="bi bi-image"></i> Tasarım Görseli</div>
+            <div class="card-body">
+                {% if production.tasarim_gorseli %}
+                <img src="{{ url_for('static', filename=production.tasarim_gorseli) }}" alt="Tasarım Görseli" style="max-height:180px; border:1px solid #dee2e6; border-radius:4px;" class="mb-2 d-block">
+                {% if production.tasarim_gorseli_override %}
+                <span class="badge bg-info text-dark mb-2">Bu iş emrine özel görsel (müşteri varsayılanını geçersiz kılıyor)</span>
+                {% else %}
+                <span class="badge bg-secondary mb-2">Müşterinin varsayılan görseli gösteriliyor</span>
+                {% endif %}
+                {% else %}
+                <p class="text-muted small">Müşteride veya bu iş emrinde tanımlı bir tasarım görseli yok.</p>
+                {% endif %}
+                <form method="POST" action="{{ url_for('upload_production_tasarim', id=production.id) }}" enctype="multipart/form-data" class="mt-2">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="input-group input-group-sm">
+                        <input type="file" class="form-control" name="tasarim_gorseli" accept="image/png,image/jpeg" required>
+                        <button type="submit" class="btn btn-outline-primary">Farklı Görsel Yükle</button>
+                    </div>
+                    <small class="text-muted">Sadece bu iş emri için geçerli olur (müşteri kaydını değiştirmez).</small>
                 </form>
             </div>
         </div>

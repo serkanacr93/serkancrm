@@ -9,7 +9,7 @@
     <div class="col-md-8">
         <div class="card">
             <div class="card-body">
-                <form method="POST">
+                <form method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="row">
                         <div class="col-md-6 mb-3">
@@ -63,6 +63,16 @@
                     <div class="mb-3">
                         <label for="notes" class="form-label">Notlar</label>
                         <textarea class="form-control" id="notes" name="notes" rows="2">{{ customer.notes or '' }}</textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tasarim_gorseli" class="form-label">Tasarım Görseli</label>
+                        {% if customer.tasarim_gorseli %}
+                        <div class="mb-2">
+                            <img src="{{ url_for('static', filename=customer.tasarim_gorseli) }}" alt="Tasarım Görseli" style="max-height:120px; border:1px solid #dee2e6; border-radius:4px;">
+                        </div>
+                        {% endif %}
+                        <input type="file" class="form-control" id="tasarim_gorseli" name="tasarim_gorseli" accept="image/png,image/jpeg">
+                        <small class="text-muted">JPG/PNG, maks. 2 MB. İş Emri PDF'inde gösterilir.</small>
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Güncelle</button>

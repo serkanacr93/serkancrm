@@ -85,6 +85,9 @@ class Customer(db.Model):
     
     address = db.Column(db.Text)
     notes = db.Column(db.Text)
+    # Musterinin varsayilan tasarim gorseli - dosya yolu (static/uploads/tasarimlar/...),
+    # is emri PDF'inde gosterilir, uretim bazinda edit_production'dan override edilebilir.
+    tasarim_gorseli = db.Column(db.String(300), nullable=True)
     status = db.Column(db.String(20), default='aktif')
     siparis_dongusu_gun = db.Column(db.Integer, default=120, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -121,10 +124,14 @@ class Deal(db.Model):
     expected_close = db.Column(db.Date)
     valid_until = db.Column(db.Date)
     notes = db.Column(db.Text)
+    # Odeme sekli - serbest metin, teklif PDF'indeki "ODEME SEKLI" kutusuna yansir
+    vade_gun = db.Column(db.String(50))
+    pesinat = db.Column(db.String(100))
+    bakiye_odemesi = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
-    
+
     items = db.relationship('DealItem', backref='deal', lazy=True, cascade='all, delete-orphan')
     production = db.relationship('Production', backref='deal', uselist=False)
     statements = db.relationship('CustomerStatement', backref='deal', lazy=True)
@@ -189,6 +196,8 @@ class Production(db.Model):
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
     due_date = db.Column(db.Date, nullable=True)  # teslim tarihi - teklifteki beklenen kapanistan gelir, elle degistirilebilir
+    # Musterinin varsayilan tasarim gorselini bu uretime ozel gecersiz kilar (opsiyonel)
+    tasarim_gorseli_override = db.Column(db.String(300), nullable=True)
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -206,6 +215,12 @@ class Production(db.Model):
     @property
     def total_items_count(self):
         return len(self.items)
+
+    @property
+    def tasarim_gorseli(self):
+        """Uretime ozel override varsa onu, yoksa musterinin varsayilan
+        tasarim gorselini dondurur (Is Emri PDF'inde kullanilir)."""
+        return self.tasarim_gorseli_override or self.deal.customer.tasarim_gorseli
 
     @property
     def stage_label(self):
@@ -240,6 +255,7 @@ class ProductionItem(db.Model):
     baski_bilgisi = db.Column(db.String(100))
     kagit_tipi = db.Column(db.String(100))
     gramaj = db.Column(db.String(50))
+    kac_kg = db.Column(db.String(50))
 
     @property
     def is_produced(self):

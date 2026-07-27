@@ -38,6 +38,32 @@ def register_fonts():
 
 register_fonts()
 
+def _payment_method_checkboxes(text_style):
+    """Nakit/KK/Cek/Senet icin cizilmis kutucuklar dondurur (Vera fontunda
+    Unicode checkbox glifi (U+2610) bulunmuyor, o yuzden kucuk BOX kenarli
+    hucreler kullanilir)."""
+    labels = ['Nakit', 'KK', 'Çek', 'Senet']
+    row = []
+    widths = []
+    for label in labels:
+        row.append('')
+        widths.append(0.35*cm)
+        row.append(Paragraph(label, text_style))
+        widths.append(1.4*cm)
+    table = Table([row], colWidths=widths)
+    box_cols = [i for i in range(0, len(row), 2)]
+    style = [
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 1),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+        ('TOPPADDING', (0, 0), (-1, -1), 1),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+    ]
+    for c in box_cols:
+        style.append(('BOX', (c, 0), (c, 0), 0.75, colors.black))
+    table.setStyle(TableStyle(style))
+    return table
+
 def _get_company_settings_for_pdf():
     """PDF ciktilari icin firma bilgilerini dondurur - CompanySettings kaydi
     yoksa (henuz Ayarlar'dan doldurulmamissa) None yerine bos/varsayilan
@@ -50,9 +76,10 @@ def _get_company_settings_for_pdf():
 
 def generate_deal_pdf(deal):
     """Siparis Sozlesmesi formatinda teklif PDF'i. Fiyat/urun kalemleri
-    tekliften gelir; Kagit Cinsi/Boy/En/Renk ve odeme sekli (Vade-Pesinat-
-    Bakiye) alanlari veri modelinde tutulmadigi icin bos birakilir, elle
-    doldurulmak uzere PDF'te yer kaplar."""
+    tekliften gelir. Vade/Pesinat/Bakiye Deal alanlarindan geliyor (bos ise
+    noktali cizgi kalir). Kagit Cinsi/Boy/En/Korukyapi/Sedef/Selefon/Gofre/
+    Varak/Renk sutunlari DealItem'da yapisal olarak tutulmadigi icin '-' ile
+    doldurulur, elle doldurulmak uzere PDF'te yer kaplar."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.3*cm, leftMargin=1.3*cm, topMargin=1.3*cm, bottomMargin=1.3*cm)
 
@@ -133,12 +160,16 @@ def generate_deal_pdf(deal):
         customer_box.append(Paragraph(f"<b>Firma:</b> {_clean_for_pdf(customer.company_name)}", normal))
     customer_box.append(Paragraph(f"<b>Adres:</b> {customer.company_address or customer.address or '-'}", normal))
     customer_box.append(Paragraph(f"<b>V.D.:</b> {customer.tax_office or '-'}  <b>V.No:</b> {customer.tax_id or '-'}", normal))
+
+    dots = "..................."
     payment_box = [
         Paragraph("ÖDEME ŞEKLİ", box_heading),
         Spacer(1, 1.5*mm),
-        Paragraph("<b>Vade (Gün):</b> ...................", normal),
-        Paragraph("<b>Peşinat:</b> ...................", normal),
-        Paragraph("<b>Bakiye Ödemesi:</b> ...................", normal),
+        Paragraph(f"<b>Vade (Gün):</b> {deal.vade_gun or dots}", normal),
+        Paragraph(f"<b>Peşinat:</b> {deal.pesinat or dots}", normal),
+        Paragraph(f"<b>Bakiye Ödemesi:</b> {deal.bakiye_odemesi or dots}", normal),
+        Spacer(1, 2*mm),
+        _payment_method_checkboxes(normal),
     ]
 
     info_table = Table([[customer_box, payment_box]], colWidths=[8.6*cm, 8.6*cm])
@@ -155,15 +186,22 @@ def generate_deal_pdf(deal):
     elements.append(Spacer(1, 5*mm))
 
     # ===== URUN TABLOSU =====
+    # Kagit Cinsi/Boy/En/Korukyapi/Sedef/Selefon/Gofre/Varak/Renk DealItem'da
+    # yapisal olarak tutulmuyor (teklif olusturma akisina dokunulmadi) -
+    # bu yuzden '-' ile doldurulur, elle PDF uzerinde not edilebilir.
     delivery_str = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
     if deal.items:
-        col_widths = [3.6*cm, 2.1*cm, 1.2*cm, 1.2*cm, 1.4*cm, 1.6*cm, 1.3*cm, 1.7*cm, 2.0*cm]
-        headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', 'Fiyat', 'Teslim\nTarihi']
-        data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style) for h in headers]]
+        table_small = ParagraphStyle('TableSmall', parent=small, fontSize=6.5, leading=8)
+        table_header_style_small = ParagraphStyle('TableHeaderSmall', parent=table_header_style, fontSize=6, leading=7.5)
+        col_widths = [2.4*cm, 1.6*cm, 0.85*cm, 0.85*cm, 0.85*cm, 0.85*cm, 0.95*cm, 0.95*cm, 0.85*cm, 0.85*cm,
+                      0.95*cm, 1.15*cm, 0.95*cm, 1.3*cm, 1.4*cm]
+        headers = ['Ürün Cinsi', 'Kağıt\nCinsi', 'Boy', 'En', 'Körük', 'Sedef', 'Selefon\nM', 'Selefon\nP',
+                   'Gofre', 'Varak', 'Renk', 'Miktar', 'Birim', 'Fiyat', 'Teslim\nTarihi']
+        data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style_small) for h in headers]]
         for item in deal.items:
             data.append([
-                Paragraph(item.description, small),
-                '-', '-', '-', '-',
+                Paragraph(item.description, table_small),
+                '-', '-', '-', '-', '-', '-', '-', '-', '-', '-',
                 f"{item.quantity:.2f}",
                 item.unit,
                 f"{item.unit_price:,.2f}",
@@ -176,11 +214,11 @@ def generate_deal_pdf(deal):
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 1), (-1, -1), 'Vera'),
-            ('FONTSIZE', (0, 1), (-1, -1), 7.5),
+            ('FONTSIZE', (0, 1), (-1, -1), 6.5),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
-            ('TOPPADDING', (0, 0), (-1, 0), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+            ('TOPPADDING', (0, 0), (-1, 0), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 3),
         ]))
         elements.append(table)
 
@@ -205,6 +243,16 @@ def generate_deal_pdf(deal):
 
     elements.append(Spacer(1, 4*mm))
     elements.append(Paragraph("<i>Fiyatlarımıza yürürlükteki K.D.V oranları ilave edilecektir.</i>", normal))
+    elements.append(Spacer(1, 4*mm))
+
+    # ===== ACIKLAMA (bos, elle doldurulacak) =====
+    elements.append(Paragraph("AÇIKLAMA", box_heading))
+    aciklama_table = Table([['']], colWidths=[17.2*cm], rowHeights=[2*cm])
+    aciklama_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(aciklama_table)
     elements.append(Spacer(1, 4*mm))
 
     # ===== SARTLAR / KOSULLAR =====
@@ -352,86 +400,184 @@ def generate_invoice_pdf(invoice):
     buffer.seek(0)
     return buffer
 
-def generate_is_emri_pdf(production):
+def generate_is_emri_pdf(production, copy_label=None):
     """Dahili uretim talimati belgesi - fatura/irsaliye ile karistirilmamali,
-    fiyat bilgisi icermez. Atolyeye elden verilmek uzere tasarlandi."""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+    fiyat bilgisi icermez. Atolyeye elden verilmek uzere tasarlandi.
+    copy_label: 'Baski Ustasi' / 'Makine Ustasi' gibi nusha etiketi (opsiyonel)."""
+    from app.models import PRODUCTION_STAGES
 
-    styles = getSampleStyleSheet()
-    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=9)
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Vera-Bold', fontSize=18)
-    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontName='Vera-Bold', fontSize=11, spaceAfter=5)
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.3*cm, leftMargin=1.3*cm, topMargin=1.3*cm, bottomMargin=1.3*cm)
+
+    company = _get_company_settings_for_pdf()
+
+    normal = ParagraphStyle('TurkishStyle', fontName='Vera', fontSize=9, leading=12)
+    small = ParagraphStyle('SmallStyle', parent=normal, fontSize=7.5, leading=10)
+    heading_style = ParagraphStyle('HeadingStyle', parent=normal, fontName='Vera-Bold', fontSize=11, leading=14, spaceAfter=5)
+    company_name_style = ParagraphStyle('CompanyName', parent=normal, fontName='Vera-Bold', fontSize=15, leading=18)
+    badge_style = ParagraphStyle('BadgeStyle', parent=normal, fontName='Vera-Bold', fontSize=15, leading=18,
+                                  textColor=colors.white, alignment=1)
+    copy_style = ParagraphStyle('CopyStyle', parent=normal, fontName='Vera-Bold', fontSize=9, leading=11, alignment=2)
+    table_header_style = ParagraphStyle('TableHeaderIE', parent=normal, fontName='Vera-Bold', fontSize=8, leading=10,
+                                         textColor=colors.white, alignment=1)
 
     deal = production.deal
     customer = deal.customer
 
     elements = []
 
-    elements.append(Paragraph("İŞ EMRİ", title_style))
-    elements.append(Spacer(1, 8*mm))
+    # ===== 1) Firma adi (buyuk) + vergi/adres (kucuk) - solda =====
+    header_left = [Paragraph(company.company_name or 'Lema Ambalaj', company_name_style)]
+    legal_bits = []
+    if company.address:
+        legal_bits.append(company.address)
+    if company.tax_office or company.tax_id:
+        legal_bits.append(f"V.D.: {company.tax_office or '-'} V.No: {company.tax_id or '-'}")
+    if legal_bits:
+        header_left.append(Paragraph(' | '.join(legal_bits), small))
 
-    elements.append(Paragraph(f"<b>İş Emri No:</b> IE-{production.id:05d}", turkish_style))
-    elements.append(Paragraph(f"<b>Tarih:</b> {datetime.now().strftime('%d.%m.%Y')}", turkish_style))
-    elements.append(Paragraph(f"<b>Teklif No:</b> {deal.display_no}", turkish_style))
+    # ===== 2) Sagda koyu arka planli "IS EMRI" rozeti =====
+    badge_table = Table([[Paragraph('İŞ EMRİ', badge_style)]], colWidths=[4.5*cm], rowHeights=[1*cm])
+    badge_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1a252f')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+    ]))
+    header_right = [badge_table, Spacer(1, 2*mm)]
+    # ===== 3) Nusha etiketi =====
+    if copy_label:
+        header_right.append(Paragraph(f"Nüsha: {copy_label}", copy_style))
+    header_right.append(Paragraph(f"IE-{production.id:05d}", copy_style))
+    header_right.append(Paragraph(f"Tarih: {datetime.now().strftime('%d.%m.%Y')}", copy_style))
+
+    header_table = Table([[header_left, header_right]], colWidths=[12.5*cm, 4.7*cm])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 4*mm))
+    elements.append(Table([['']], colWidths=[17.2*cm], style=[('LINEBELOW', (0, 0), (-1, -1), 1, colors.HexColor('#1a252f'))]))
+    elements.append(Spacer(1, 4*mm))
+
+    elements.append(Paragraph(f"<b>Teklif No:</b> {deal.display_no}", normal))
     customer_name = _clean_for_pdf(customer.company_name) if customer.company_name else \
         f"{_clean_for_pdf(customer.first_name)} {_clean_for_pdf(customer.last_name)}"
-    elements.append(Paragraph(f"<b>Müşteri:</b> {customer_name}", turkish_style))
+    elements.append(Paragraph(f"<b>Müşteri:</b> {customer_name}", normal))
+    # ===== 5) Teslim tarihi =====
     if production.due_date:
-        elements.append(Paragraph(f"<b>Teslim Tarihi:</b> {production.due_date.strftime('%d.%m.%Y')}", turkish_style))
-    elements.append(Spacer(1, 5*mm))
+        elements.append(Paragraph(f"<b>Teslim Tarihi:</b> {production.due_date.strftime('%d.%m.%Y')}", normal))
+    elements.append(Spacer(1, 4*mm))
 
+    # ===== 4) Durum cubugu: Uretimde -> Hazir -> Sevkiyat =====
+    if production.status != 'iptal':
+        try:
+            active_idx = [k for k, _ in PRODUCTION_STAGES].index(production.status)
+        except ValueError:
+            active_idx = -1
+        status_cells = []
+        for i, (key, label) in enumerate(PRODUCTION_STAGES):
+            if i == active_idx:
+                bg = colors.HexColor('#1a252f')
+                fg = colors.white
+            elif i < active_idx:
+                bg = colors.HexColor('#c8e6c9')
+                fg = colors.HexColor('#1a252f')
+            else:
+                bg = colors.HexColor('#f0f0f0')
+                fg = colors.grey
+            cell_style = ParagraphStyle(f'Stage{i}', parent=normal, fontName='Vera-Bold', fontSize=8,
+                                         alignment=1, textColor=fg)
+            status_cells.append(Paragraph(label, cell_style))
+        status_table = Table([status_cells], colWidths=[5.7*cm]*3)
+        style = [('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4)]
+        for i, (key, label) in enumerate(PRODUCTION_STAGES):
+            bg = colors.HexColor('#1a252f') if i == active_idx else (colors.HexColor('#c8e6c9') if i < active_idx else colors.HexColor('#f0f0f0'))
+            style.append(('BACKGROUND', (i, 0), (i, 0), bg))
+        status_table.setStyle(TableStyle(style))
+        elements.append(status_table)
+        elements.append(Spacer(1, 5*mm))
+
+    # ===== 6) Tasarim gorseli (varsa) =====
+    if production.tasarim_gorseli:
+        try:
+            import os as _os
+            img_path = _os.path.join(_os.path.dirname(__file__), 'static', production.tasarim_gorseli)
+            with open(img_path, 'rb') as f:
+                img_data = f.read()
+            from PIL import Image as PILImage
+            PILImage.open(BytesIO(img_data)).verify()
+            elements.append(Paragraph("TASARIM GÖRSELİ", heading_style))
+            elements.append(Image(BytesIO(img_data), width=5*cm, height=5*cm, kind='proportional'))
+            elements.append(Spacer(1, 4*mm))
+        except Exception:
+            pass
+
+    # ===== 7) Tablo: Kagit Cinsi | Kac Kg | Baski Rengi | Olcu | Planlanan | Gerceklesen =====
     elements.append(Paragraph("ÜRÜN KALEMLERİ", heading_style))
 
     if production.items:
-        data = [['Açıklama', 'Ölçü', 'Baskı Rengi/Sayısı', 'Kağıt Tipi', 'Gramaj', 'Planlanan Adet']]
+        headers = ['Kağıt Cinsi', 'Kaç Kg', 'Baskı Rengi', 'Ölçü', 'Planlanan Adet', 'Gerçekleşen Adet']
+        data = [[Paragraph(h, table_header_style) for h in headers]]
         for item in production.items:
+            kagit_cell = item.kagit_tipi or item.description
+            if item.kagit_tipi and item.description:
+                kagit_cell = f"{item.kagit_tipi}<br/><font size=6>{item.description}</font>"
             data.append([
-                Paragraph(item.description, turkish_style),
-                item.olcu or '-',
+                Paragraph(kagit_cell, small),
+                item.kac_kg or '-',
                 item.baski_bilgisi or '-',
-                item.kagit_tipi or '-',
-                item.gramaj or '-',
-                f"{item.planned_quantity:.0f} {item.unit}"
+                item.olcu or '-',
+                f"{item.planned_quantity:.0f} {item.unit}",
+                f"{item.produced_quantity:.0f} {item.unit}" if item.produced_quantity else '-'
             ])
-        table = Table(data, colWidths=[4*cm, 2.3*cm, 3*cm, 2.7*cm, 2*cm, 3*cm])
+        table = Table(data, colWidths=[4.5*cm, 2.2*cm, 3*cm, 2.5*cm, 2.5*cm, 2.5*cm], repeatRows=1)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Vera'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+            ('TOPPADDING', (0, 0), (-1, 0), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
         ]))
         elements.append(table)
     else:
-        elements.append(Paragraph("<i>Ürün kalemi bulunamadı.</i>", turkish_style))
+        elements.append(Paragraph("<i>Ürün kalemi bulunamadı.</i>", normal))
 
-    elements.append(Spacer(1, 8*mm))
+    elements.append(Spacer(1, 6*mm))
     elements.append(Paragraph("NOTLAR", heading_style))
-    notes_table = Table([['']], colWidths=[17*cm], rowHeights=[3*cm])
+    notes_table = Table([['']], colWidths=[17.2*cm], rowHeights=[2.5*cm])
     notes_table.setStyle(TableStyle([
         ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
     elements.append(notes_table)
+    elements.append(Spacer(1, 8*mm))
 
-    elements.append(Spacer(1, 15*mm))
+    # ===== 8) UC imza alani =====
     signature_data = [
-        ['Üretimi Yapan:', '', 'Kontrol Eden:'],
-        ['', '', ''],
-        ['', '', ''],
-        ['Adı Soyadı:', '', 'Adı Soyadı:'],
-        ['Tarih:', '', 'Tarih:'],
+        ['Üretimi Yapan:', '', 'Kontrol Eden:', '', 'Teslim Alan:'],
+        ['', '', '', '', ''],
+        ['', '', '', '', ''],
+        ['Adı Soyadı:', '', 'Adı Soyadı:', '', 'Adı Soyadı:'],
+        ['Tarih:', '', 'Tarih:', '', 'Tarih:'],
     ]
-    signature_table = Table(signature_data, colWidths=[5*cm, 4*cm, 5*cm])
+    signature_table = Table(signature_data, colWidths=[5*cm, 1.1*cm, 5*cm, 1.1*cm, 5*cm])
     signature_table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, -1), 'Vera'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('FONTNAME', (0, 0), (0, 0), 'Vera-Bold'),
+        ('FONTNAME', (2, 0), (2, 0), 'Vera-Bold'),
+        ('FONTNAME', (4, 0), (4, 0), 'Vera-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8.5),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('LINEBELOW', (0, 2), (0, 2), 1, colors.black),
         ('LINEBELOW', (2, 2), (2, 2), 1, colors.black),
+        ('LINEBELOW', (4, 2), (4, 2), 1, colors.black),
     ]))
     elements.append(signature_table)
 

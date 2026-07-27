@@ -6,7 +6,10 @@ from app import db, places_search
 from datetime import datetime, timedelta, date
 from functools import wraps
 from io import BytesIO
+from werkzeug.utils import secure_filename
 import openpyxl
+import os
+import uuid
 
 def _get_company_settings():
     """Tekil satir (id=1) - yoksa varsayilan degerlerle olusturur."""
@@ -16,6 +19,46 @@ def _get_company_settings():
         db.session.add(settings)
         db.session.commit()
     return settings
+
+def _save_uploaded_image(file_storage, subfolder):
+    """Yuklenen gorseli static/uploads/<subfolder>/ altina guvenli/benzersiz
+    bir isimle kaydeder, static/ koku itibariyle goreli yolu dondurur
+    (Customer.tasarim_gorseli / Production.tasarim_gorseli_override icin).
+    Gecersiz gorsel (PIL dogrulamasi) veya cok buyuk dosya durumunda None
+    dondurur ve hata mesaji ile birlikte (None, hata_mesaji) verir."""
+    if not file_storage or not file_storage.filename:
+        return None, None
+    data = file_storage.read()
+    if len(data) > 2 * 1024 * 1024:
+        return None, 'Görsel dosyası çok büyük (maks. 2 MB).'
+    try:
+        from PIL import Image as PILImage
+        PILImage.open(BytesIO(data)).verify()
+    except Exception:
+        return None, 'Geçerli bir görsel dosyası değil (JPG/PNG olmalı).'
+
+    ext = os.path.splitext(secure_filename(file_storage.filename))[1].lower()
+    if ext not in ('.jpg', '.jpeg', '.png'):
+        return None, 'Sadece JPG/PNG dosyaları desteklenir.'
+
+    upload_dir = os.path.join(os.path.dirname(__file__), 'static', 'uploads', subfolder)
+    os.makedirs(upload_dir, exist_ok=True)
+    filename = f'{uuid.uuid4().hex}{ext}'
+    with open(os.path.join(upload_dir, filename), 'wb') as f:
+        f.write(data)
+    return f'uploads/{subfolder}/{filename}', None
+
+_TR_FILENAME_MAP = str.maketrans({
+    'ı': 'i', 'İ': 'I', 'ğ': 'g', 'Ğ': 'G', 'ü': 'u', 'Ü': 'U',
+    'ş': 's', 'Ş': 'S', 'ö': 'o', 'Ö': 'O', 'ç': 'c', 'Ç': 'C', ' ': '_',
+})
+
+def _safe_filename_part(text):
+    """Turkce karakterleri/bosluklari dosya adi icin guvenli ASCII'ye
+    cevirir (orn. IsEmri_{musteri_adi}_{no}.pdf dosya adlarinda kullanilir)."""
+    if not text:
+        return 'Musteri'
+    return text.translate(_TR_FILENAME_MAP)
 
 def _customer_full_name(customer):
     """Musterinin tam adini (kisaltmadan), gundelik hitaplardan (Abi/Amca/
@@ -628,6 +671,15 @@ def register_routes(app):
             siparis_dongusu = request.form.get('siparis_dongusu_gun')
             if siparis_dongusu:
                 customer.siparis_dongusu_gun = int(siparis_dongusu)
+
+            tasarim_file = request.files.get('tasarim_gorseli')
+            if tasarim_file and tasarim_file.filename:
+                path, error = _save_uploaded_image(tasarim_file, 'tasarimlar')
+                if error:
+                    flash(error, 'danger')
+                    return redirect(url_for('edit_customer', id=id))
+                customer.tasarim_gorseli = path
+
             db.session.commit()
             flash('Müşteri güncellendi!', 'success')
             return redirect(url_for('customer_detail', id=id))
@@ -779,6 +831,9 @@ def register_routes(app):
                 valid_until=today + timedelta(days=7),
                 vat_rate=float(request.form.get('vat_rate', 20)),
                 notes=request.form.get('notes'),
+                vade_gun=request.form.get('vade_gun', '').strip() or None,
+                pesinat=request.form.get('pesinat', '').strip() or None,
+                bakiye_odemesi=request.form.get('bakiye_odemesi', '').strip() or None,
                 customer_id=customer.id,
                 user_id=current_user.id
             )
@@ -846,7 +901,10 @@ def register_routes(app):
             deal.expected_close = datetime.strptime(request.form['expected_close'], '%Y-%m-%d').date() if request.form.get('expected_close') else None
             deal.valid_until = datetime.strptime(request.form['valid_until'], '%Y-%m-%d').date() if request.form.get('valid_until') else None
             deal.notes = request.form.get('notes')
-            
+            deal.vade_gun = request.form.get('vade_gun', '').strip() or None
+            deal.pesinat = request.form.get('pesinat', '').strip() or None
+            deal.bakiye_odemesi = request.form.get('bakiye_odemesi', '').strip() or None
+
             DealItem.query.filter_by(deal_id=id).delete()
             i = 0
             while f'desc_{i}' in request.form:
@@ -899,7 +957,6 @@ def register_routes(app):
     @app.route('/deals/<int:id>/pdf')
     @login_required
     def deal_pdf(id):
-        import os
         deal = Deal.query.get_or_404(id)
         if not current_user.is_admin and deal.user_id != current_user.id:
             flash('Bu teklifin PDF\'ini görüntüleme yetkiniz yok.', 'danger')
@@ -1114,16 +1171,38 @@ def register_routes(app):
             item.baski_bilgisi = request.form.get(f'baski_{item.id}', '').strip() or None
             item.kagit_tipi = request.form.get(f'kagit_{item.id}', '').strip() or None
             item.gramaj = request.form.get(f'gramaj_{item.id}', '').strip() or None
+            item.kac_kg = request.form.get(f'kackg_{item.id}', '').strip() or None
         db.session.commit()
         flash('İş emri bilgileri kaydedildi!', 'success')
+        return redirect(url_for('production_detail', id=id))
+
+    @app.route('/production/<int:id>/tasarim-yukle', methods=['POST'])
+    @login_required
+    def upload_production_tasarim(id):
+        production = Production.query.get_or_404(id)
+        tasarim_file = request.files.get('tasarim_gorseli')
+        path, error = _save_uploaded_image(tasarim_file, 'tasarimlar')
+        if error:
+            flash(error, 'danger')
+        else:
+            production.tasarim_gorseli_override = path
+            db.session.commit()
+            flash('Bu iş emri için tasarım görseli kaydedildi!', 'success')
         return redirect(url_for('production_detail', id=id))
 
     @app.route('/production/<int:id>/is-emri')
     @login_required
     def production_is_emri_pdf(id):
         production = Production.query.get_or_404(id)
-        pdf = generate_is_emri_pdf(production)
-        return send_file(pdf, as_attachment=True, download_name=f'is_emri_{production.id:05d}.pdf')
+        nusha = request.args.get('nusha')
+        copy_labels = {'baski': 'Baskı Ustası', 'makine': 'Makine Ustası'}
+        copy_label = copy_labels.get(nusha)
+        pdf = generate_is_emri_pdf(production, copy_label=copy_label)
+
+        customer_name = _customer_full_name(production.deal.customer)
+        safe_name = _safe_filename_part(customer_name)
+        filename = f'IsEmri_{safe_name}_IE{production.id:05d}.pdf'
+        return send_file(pdf, as_attachment=True, download_name=filename)
 
     @app.route('/production/<int:id>/mark-ready', methods=['POST'])
     @login_required
