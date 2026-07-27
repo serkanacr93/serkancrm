@@ -63,9 +63,11 @@ def generate_deal_pdf(deal):
     small = ParagraphStyle('SmallStyle', parent=normal, fontSize=7.5, leading=10)
     box_heading = ParagraphStyle('BoxHeading', parent=normal, fontName='Vera-Bold', fontSize=8.5)
     company_name_style = ParagraphStyle('CompanyName', parent=normal, fontName='Vera-Bold', fontSize=16, leading=19)
-    doc_title_style = ParagraphStyle('DocTitle', parent=normal, fontName='Vera-Bold', fontSize=20, alignment=2)
-    doc_meta_style = ParagraphStyle('DocMeta', parent=normal, fontName='Vera-Bold', fontSize=9, alignment=2)
+    doc_title_style = ParagraphStyle('DocTitle', parent=normal, fontName='Vera-Bold', fontSize=20, leading=24, alignment=2, spaceAfter=3)
+    doc_meta_style = ParagraphStyle('DocMeta', parent=normal, fontName='Vera-Bold', fontSize=9, leading=13, alignment=2)
     terms_style = ParagraphStyle('TermsStyle', parent=normal, fontSize=7.5, leading=10)
+    table_header_style = ParagraphStyle('TableHeader', parent=normal, fontName='Vera-Bold', fontSize=7, leading=8.5,
+                                         textColor=colors.white, alignment=1)
 
     elements = []
 
@@ -102,7 +104,7 @@ def generate_deal_pdf(deal):
 
     right_cell = [
         Paragraph("TEKLİF", doc_title_style),
-        Spacer(1, 2*mm),
+        Spacer(1, 4*mm),
         Paragraph(f"Teklif No: {deal.display_no}", doc_meta_style),
         Paragraph(f"Tarih: {deal.deal_date.strftime('%d.%m.%Y') if deal.deal_date else deal.created_at.strftime('%d.%m.%Y')}", doc_meta_style),
     ]
@@ -155,7 +157,9 @@ def generate_deal_pdf(deal):
     # ===== URUN TABLOSU =====
     delivery_str = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
     if deal.items:
-        data = [['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', 'Fiyat', 'Teslim Tarihi']]
+        col_widths = [3.6*cm, 2.1*cm, 1.2*cm, 1.2*cm, 1.4*cm, 1.6*cm, 1.3*cm, 1.7*cm, 2.0*cm]
+        headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', 'Fiyat', 'Teslim\nTarihi']
+        data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style) for h in headers]]
         for item in deal.items:
             data.append([
                 Paragraph(item.description, small),
@@ -165,16 +169,18 @@ def generate_deal_pdf(deal):
                 f"{item.unit_price:,.2f}",
                 delivery_str
             ])
-        table = Table(data, colWidths=[4*cm, 2.3*cm, 1.3*cm, 1.3*cm, 1.5*cm, 1.7*cm, 1.5*cm, 1.8*cm, 1.8*cm])
+        table = Table(data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 1), (-1, -1), 'Vera'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+            ('FONTSIZE', (0, 1), (-1, -1), 7.5),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+            ('TOPPADDING', (0, 0), (-1, 0), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
         ]))
         elements.append(table)
 
