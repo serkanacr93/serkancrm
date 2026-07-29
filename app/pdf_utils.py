@@ -77,9 +77,9 @@ def _get_company_settings_for_pdf():
 def generate_deal_pdf(deal):
     """Siparis Sozlesmesi formatinda teklif PDF'i. Fiyat/urun kalemleri
     tekliften gelir. Vade/Pesinat/Bakiye Deal alanlarindan geliyor (bos ise
-    noktali cizgi kalir). Kagit Cinsi/Boy/En/Korukyapi/Sedef/Selefon/Gofre/
-    Varak/Renk sutunlari DealItem'da yapisal olarak tutulmadigi icin '-' ile
-    doldurulur, elle doldurulmak uzere PDF'te yer kaplar."""
+    noktali cizgi kalir). Kagit Cinsi/Boy/En/Renk sutunlari DealItem'da
+    yapisal olarak tutulmadigi icin '-' ile doldurulur, elle doldurulmak
+    uzere PDF'te yer kaplar. AÇIKLAMA kutusu deal.notes'tan doldurulur."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.3*cm, leftMargin=1.3*cm, topMargin=1.3*cm, bottomMargin=1.3*cm)
 
@@ -186,22 +186,20 @@ def generate_deal_pdf(deal):
     elements.append(Spacer(1, 5*mm))
 
     # ===== URUN TABLOSU =====
-    # Kagit Cinsi/Boy/En/Korukyapi/Sedef/Selefon/Gofre/Varak/Renk DealItem'da
-    # yapisal olarak tutulmuyor (teklif olusturma akisina dokunulmadi) -
-    # bu yuzden '-' ile doldurulur, elle PDF uzerinde not edilebilir.
+    # Kagit Cinsi/Boy/En/Renk DealItem'da yapisal olarak tutulmuyor (teklif
+    # olusturma akisina dokunulmadi) - bu yuzden '-' ile doldurulur, elle
+    # PDF uzerinde not edilebilir.
     delivery_str = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
     if deal.items:
-        table_small = ParagraphStyle('TableSmall', parent=small, fontSize=6.5, leading=8)
-        table_header_style_small = ParagraphStyle('TableHeaderSmall', parent=table_header_style, fontSize=6, leading=7.5)
-        col_widths = [2.4*cm, 1.6*cm, 0.85*cm, 0.85*cm, 0.85*cm, 0.85*cm, 0.95*cm, 0.95*cm, 0.85*cm, 0.85*cm,
-                      0.95*cm, 1.15*cm, 0.95*cm, 1.3*cm, 1.4*cm]
-        headers = ['Ürün Cinsi', 'Kağıt\nCinsi', 'Boy', 'En', 'Körük', 'Sedef', 'Selefon\nM', 'Selefon\nP',
-                   'Gofre', 'Varak', 'Renk', 'Miktar', 'Birim', 'Fiyat', 'Teslim\nTarihi']
-        data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style_small) for h in headers]]
+        table_small = ParagraphStyle('TableSmall', parent=small, fontSize=8, leading=10)
+        table_header_style_normal = ParagraphStyle('TableHeaderNormal', parent=table_header_style, fontSize=8, leading=10)
+        col_widths = [4.3*cm, 2.3*cm, 1.2*cm, 1.2*cm, 1.4*cm, 1.7*cm, 1.4*cm, 1.9*cm, 1.9*cm]
+        headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', 'Fiyat', 'Teslim\nTarihi']
+        data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style_normal) for h in headers]]
         for item in deal.items:
             data.append([
                 Paragraph(item.description, table_small),
-                '-', '-', '-', '-', '-', '-', '-', '-', '-', '-',
+                '-', '-', '-', '-',
                 f"{item.quantity:.2f}",
                 item.unit,
                 f"{item.unit_price:,.2f}",
@@ -214,11 +212,11 @@ def generate_deal_pdf(deal):
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 1), (-1, -1), 'Vera'),
-            ('FONTSIZE', (0, 1), (-1, -1), 6.5),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
-            ('TOPPADDING', (0, 0), (-1, 0), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 3),
+            ('TOPPADDING', (0, 0), (-1, 0), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
         ]))
         elements.append(table)
 
@@ -245,13 +243,26 @@ def generate_deal_pdf(deal):
     elements.append(Paragraph("<i>Fiyatlarımıza yürürlükteki K.D.V oranları ilave edilecektir.</i>", normal))
     elements.append(Spacer(1, 4*mm))
 
-    # ===== ACIKLAMA (bos, elle doldurulacak) =====
+    # ===== ACIKLAMA (deal.notes'tan doldurulur, bossa bos kutu kalir) =====
     elements.append(Paragraph("AÇIKLAMA", box_heading))
-    aciklama_table = Table([['']], colWidths=[17.2*cm], rowHeights=[2*cm])
-    aciklama_table.setStyle(TableStyle([
-        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-    ]))
+    if deal.notes:
+        from xml.sax.saxutils import escape
+        notes_paragraph = Paragraph(escape(deal.notes).replace('\n', '<br/>'), normal)
+        aciklama_table = Table([[notes_paragraph]], colWidths=[17.2*cm])
+        aciklama_table.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+    else:
+        aciklama_table = Table([['']], colWidths=[17.2*cm], rowHeights=[2*cm])
+        aciklama_table.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
     elements.append(aciklama_table)
     elements.append(Spacer(1, 4*mm))
 
