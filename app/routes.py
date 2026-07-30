@@ -10,6 +10,20 @@ from werkzeug.utils import secure_filename
 import openpyxl
 import os
 import uuid
+from sqlalchemy.exc import IntegrityError
+
+def _customers_with_activity_subquery():
+    """'Islem yapilmis' musteri id'lerinin birlesimi - sadece Deal (teklif)
+    degil, DailyReport (gorusme/rapor), Payment, Invoice, CustomerVisit
+    kayitlarindan herhangi biri de gercek bir islem sayilir. Onceden sadece
+    Deal kontrol ediliyordu, bu yuzden cok sayida musterinin gorusme/odeme
+    kaydi olmasina ragmen 'hic islem yapilmamis' listesinde kaliyordu."""
+    return db.session.query(Deal.customer_id).union(
+        db.session.query(Invoice.customer_id),
+        db.session.query(Payment.customer_id),
+        db.session.query(CustomerVisit.customer_id),
+        db.session.query(DailyReport.customer_id).filter(DailyReport.customer_id.isnot(None)),
+    )
 
 def _get_company_settings():
     """Tekil satir (id=1) - yoksa varsayilan degerlerle olusturur."""
@@ -368,7 +382,7 @@ def register_routes(app):
 
         never_transacted_count = Customer.query.filter(
             Customer.status != 'musteri_degil',
-            ~Customer.id.in_(db.session.query(Deal.customer_id))
+            ~Customer.id.in_(_customers_with_activity_subquery())
         ).count()
 
         dormant_cutoff = datetime.utcnow() - timedelta(days=90)
@@ -452,7 +466,7 @@ def register_routes(app):
         page = request.args.get('page', 1, type=int)
         query = Customer.query.filter(
             Customer.status != 'musteri_degil',
-            ~Customer.id.in_(db.session.query(Deal.customer_id))
+            ~Customer.id.in_(_customers_with_activity_subquery())
         ).order_by(Customer.created_at.desc())
         pagination = query.paginate(page=page, per_page=50, error_out=False)
         return render_template('customers_never_transacted.html', customers=pagination.items, pagination=pagination)
@@ -655,9 +669,18 @@ def register_routes(app):
             key=lambda p: p.due_date or date.max
         )
 
+        # Son gorusme tarihi: gunluk rapor / teklif / musteri ziyareti
+        # kayitlarindan en guncel olani (Is 2).
+        contact_dates = [r.report_date for r in daily_reports]
+        contact_dates += [d.deal_date or d.created_at.date() for d in deals]
+        contact_dates += [v.visit_date for v in customer.visits]
+        last_contact_date = max(contact_dates) if contact_dates else None
+        days_since_contact = (date.today() - last_contact_date).days if last_contact_date else None
+
         return render_template('customer_detail.html', customer=customer, deals=deals,
                              statements=statements, total_debit=total_debit, total_credit=total_credit,
-                             daily_reports=daily_reports, pending_productions=pending_productions)
+                             daily_reports=daily_reports, pending_productions=pending_productions,
+                             last_contact_date=last_contact_date, days_since_contact=days_since_contact)
 
     @app.route('/customers/<int:id>/edit', methods=['GET', 'POST'])
     @login_required
@@ -1041,7 +1064,7 @@ def register_routes(app):
                 )
                 db.session.add(prod_item)
             
-            statement = CustomerStatement(customer_id=deal.customer_id, deal_id=deal.id, type='satis', amount=deal.value,
+            statement = CustomerStatement(customer_id=deal.customer_id, deal_id=deal.id, type='borc', amount=deal.value,
                                          description=f'Satış: {deal.title} (KDV Dahil: {deal.value:,.2f} ₺)')
             db.session.add(statement)
             
@@ -1130,6 +1153,60 @@ def register_routes(app):
                 'address': r.company_address or r.address or ''
             })
         return jsonify(result)
+
+    @app.route('/api/customers/quick-add', methods=['POST'])
+    @login_required
+    def quick_add_customer():
+        """Musteri aramasi sonuc bulamadiginda (Is 3), ayri sayfaya gitmeden
+        isim VE/VEYA telefon ile minimal bir musteri kaydi olusturur. Diger
+        alanlar bos birakilir, sonra edit_customer'dan tamamlanabilir.
+        Ayni telefona ya da ayni ad-soyad'a (unique_customer_name kisiti)
+        sahip bir musteri zaten varsa, yeni kayit acmak yerine mevcut
+        musteriyi dondurur - boylece kaza ile duplikasyon olusmaz."""
+        data = request.get_json(silent=True) or request.form
+        name = (data.get('name') or '').strip()
+        phone = (data.get('phone') or '').strip()
+
+        if not name and not phone:
+            return jsonify({'error': 'İsim veya telefon numarasından en az biri gerekli.'}), 400
+
+        if phone:
+            existing = Customer.query.filter_by(phone=phone).first()
+            if existing:
+                return jsonify({
+                    'id': existing.id, 'name': existing.display_name, 'phone': existing.phone or '',
+                    'email': existing.email or '', 'company_name': existing.company_name or '',
+                    'tax_id': existing.tax_id or '', 'address': existing.company_address or existing.address or '',
+                    'reused_existing': True,
+                }), 200
+
+        first_name, last_name = None, None
+        if name:
+            parts = name.split(None, 1)
+            first_name = parts[0]
+            last_name = parts[1] if len(parts) > 1 else None
+
+        customer = Customer(first_name=first_name, last_name=last_name, phone=phone or None, status='aktif')
+        db.session.add(customer)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            existing = Customer.query.filter_by(first_name=first_name, last_name=last_name).first()
+            if existing:
+                return jsonify({
+                    'id': existing.id, 'name': existing.display_name, 'phone': existing.phone or '',
+                    'email': existing.email or '', 'company_name': existing.company_name or '',
+                    'tax_id': existing.tax_id or '', 'address': existing.company_address or existing.address or '',
+                    'reused_existing': True,
+                }), 200
+            return jsonify({'error': 'Bu isimde bir müşteri zaten var. Lütfen arayarak seçin veya telefon numarası ekleyin.'}), 409
+
+        return jsonify({
+            'id': customer.id, 'name': customer.display_name, 'phone': customer.phone or '',
+            'email': '', 'company_name': '', 'tax_id': '', 'address': '',
+            'reused_existing': False,
+        }), 201
 
     @app.route('/deals/export/excel')
     @login_required
@@ -1767,12 +1844,22 @@ def register_routes(app):
             
             db.session.flush()
             invoice.calculate_totals()
+
+            # On odeme (avans) uzlastirmasi: bu teklife bagli, henuz hicbir
+            # faturaya baglanmamis Payment kayitlari isaretlenmisse, yeni
+            # faturaya baglanir (artik invoice.paid_amount'a dahil olurlar).
+            unlinked_payments = Payment.query.filter_by(deal_id=deal.id, invoice_id=None).all()
+            for payment in unlinked_payments:
+                if request.form.get(f'link_payment_{payment.id}'):
+                    payment.invoice_id = invoice.id
+
             db.session.commit()
-            
+
             flash(f'{invoice.display_no} - {inv_type} başarıyla oluşturuldu!', 'success')
             return redirect(url_for('invoice_detail', id=invoice.id))
-        
-        return render_template('create_invoice_from_deal.html', deal=deal)
+
+        unlinked_payments = Payment.query.filter_by(deal_id=deal.id, invoice_id=None).all()
+        return render_template('create_invoice_from_deal.html', deal=deal, unlinked_payments=unlinked_payments)
 
     @app.route('/visits')
     @login_required
@@ -2064,8 +2151,23 @@ def register_routes(app):
             query = query.filter(Payment.status == status_filter)
         
         payments = query.order_by(Payment.payment_date.desc()).all()
-        return render_template('payments.html', payments=payments, 
-                             customer_search=customer_search, status_filter=status_filter)
+
+        # Tahsilat ozeti - sadece 'fatura' tipi belgeler uzerinden (irsaliyenin
+        # tahsilati olmaz). Invoice.paid_amount/remaining_amount Payment.status
+        # == 'odendi' olan kayitlar uzerinden hesaplanir (bkz. models.py).
+        all_invoices = Invoice.query.filter_by(type='fatura').all()
+        total_invoiced = sum(inv.total for inv in all_invoices)
+        total_collected = sum(inv.paid_amount for inv in all_invoices)
+        total_outstanding = total_invoiced - total_collected
+        pending_invoices = sorted(
+            (inv for inv in all_invoices if inv.remaining_amount > 0.01),
+            key=lambda inv: inv.date
+        )
+
+        return render_template('payments.html', payments=payments,
+                             customer_search=customer_search, status_filter=status_filter,
+                             total_invoiced=total_invoiced, total_collected=total_collected,
+                             total_outstanding=total_outstanding, pending_invoices=pending_invoices)
 
     @app.route('/payments/add', methods=['GET', 'POST'])
     @login_required
@@ -2074,6 +2176,7 @@ def register_routes(app):
             payment = Payment(
                 customer_id=int(request.form['customer_id']),
                 invoice_id=int(request.form['invoice_id']) if request.form.get('invoice_id') else None,
+                deal_id=int(request.form['deal_id']) if request.form.get('deal_id') else None,
                 amount=float(request.form['amount']),
                 payment_date=datetime.strptime(request.form['payment_date'], '%Y-%m-%d').date() if request.form.get('payment_date') else datetime.now().date(),
                 payment_method=request.form.get('payment_method'),
@@ -2083,18 +2186,40 @@ def register_routes(app):
                 user_id=current_user.id
             )
             db.session.add(payment)
+            db.session.flush()
+
+            # Odeme 'odendi' ise Cari Hesap Ekstresi'ne otomatik 'alacak' kaydi
+            # dus - payment_id ile iliskili, odeme silinince bu da silinir.
+            if payment.status == 'odendi':
+                if payment.invoice_id:
+                    ref = payment.invoice.display_no
+                elif payment.deal_id:
+                    ref = f'{payment.deal.display_no} (Ön Ödeme)'
+                else:
+                    ref = 'Genel'
+                statement = CustomerStatement(
+                    customer_id=payment.customer_id, payment_id=payment.id, type='alacak',
+                    amount=payment.amount, description=f'Tahsilat: {ref}'
+                )
+                db.session.add(statement)
+
             db.session.commit()
             flash('Ödeme kaydedildi!', 'success')
             return redirect(url_for('payments'))
-        
-        customers = Customer.query.order_by(Customer.company_name, Customer.last_name).all()
-        invoices = Invoice.query.order_by(Invoice.date.desc()).all()
-        return render_template('add_payment.html', customers=customers, invoices=invoices, today=datetime.now().date())
+
+        prefill_invoice_id = request.args.get('invoice_id', type=int)
+        prefill_invoice = Invoice.query.get(prefill_invoice_id) if prefill_invoice_id else None
+        prefill_customer_id = request.args.get('customer_id', type=int) or (prefill_invoice.customer_id if prefill_invoice else None)
+        prefill_customer = Customer.query.get(prefill_customer_id) if prefill_customer_id else None
+
+        return render_template('add_payment.html', today=datetime.now().date(),
+                             prefill_customer=prefill_customer, prefill_invoice=prefill_invoice)
 
     @app.route('/payments/<int:id>/delete', methods=['POST'])
     @login_required
     def delete_payment(id):
         payment = Payment.query.get_or_404(id)
+        CustomerStatement.query.filter_by(payment_id=payment.id).delete()
         db.session.delete(payment)
         db.session.commit()
         flash('Ödeme kaydı silindi!', 'success')
@@ -2115,6 +2240,27 @@ def register_routes(app):
                 'invoice_no': p.invoice.display_no if p.invoice else '-'
             })
         return jsonify(result)
+
+    @app.route('/api/customers/<int:customer_id>/open-records')
+    @login_required
+    def customer_open_records(customer_id):
+        """Odeme formunda musteri secilince, o musteriye baglanabilecek acik
+        kayitlari doner: kalan bakiyesi olan faturalar ve henuz faturaya
+        donusturulmemis kazanilan teklifler (on odeme/avans hedefi)."""
+        invoices = Invoice.query.filter_by(customer_id=customer_id, type='fatura').all()
+        open_invoices = [{
+            'id': inv.id, 'display_no': inv.display_no,
+            'total': inv.total, 'remaining': inv.remaining_amount
+        } for inv in invoices if inv.remaining_amount > 0.01]
+
+        invoiced_deal_ids = {inv.deal_id for inv in invoices}
+        won_deals = Deal.query.filter_by(customer_id=customer_id, stage='kazanilan').all()
+        open_deals = [{
+            'id': d.id, 'display_no': d.display_no,
+            'value': d.value, 'pesinat': d.pesinat or ''
+        } for d in won_deals if d.id not in invoiced_deal_ids]
+
+        return jsonify({'invoices': open_invoices, 'deals': open_deals})
 
     @app.route('/potential-customers')
     @login_required

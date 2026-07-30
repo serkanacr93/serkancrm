@@ -30,6 +30,27 @@
 
 <div class="row">
     <div class="col-md-4">
+        <div class="card mb-4 shadow-sm {{ 'border-danger' if days_since_contact is not none and days_since_contact >= 45 else 'border-warning' if days_since_contact is not none and days_since_contact >= 30 else '' }}">
+            <div class="card-header {{ 'bg-danger text-white' if days_since_contact is not none and days_since_contact >= 45 else 'bg-warning' if days_since_contact is not none and days_since_contact >= 30 else 'bg-light' }}">
+                <i class="bi bi-clock-history"></i> Son Görüşme
+            </div>
+            <div class="card-body">
+                {% if last_contact_date %}
+                <h6 class="mb-1">{{ last_contact_date.strftime('%d.%m.%Y') }}</h6>
+                <span class="badge {{ 'bg-danger' if days_since_contact >= 45 else 'bg-warning text-dark' if days_since_contact >= 30 else 'bg-success' }}">
+                    {% if days_since_contact == 0 %}Bugün görüşüldü{% else %}{{ days_since_contact }} gün önce görüşüldü{% endif %}
+                </span>
+                {% if days_since_contact >= 30 %}
+                <div class="small mt-2 {{ 'text-danger' if days_since_contact >= 45 else 'text-warning' }}">
+                    <i class="bi bi-exclamation-triangle"></i> Uzun süredir görüşme yapılmadı, takip edilmeli.
+                </div>
+                {% endif %}
+                {% else %}
+                <span class="text-muted">Henüz bir görüşme/işlem kaydı yok.</span>
+                {% endif %}
+            </div>
+        </div>
+
         {% if customer.company_name %}
         <div class="card mb-4 shadow-sm">
             <div class="card-header bg-primary text-white">
