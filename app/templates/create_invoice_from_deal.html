@@ -102,6 +102,25 @@
                 </div>
             </div>
 
+            {% if unlinked_payments %}
+            <div class="card mb-4 border-info">
+                <div class="card-header bg-info text-white">
+                    <i class="bi bi-cash-coin"></i> Alınan Ön Ödemeler
+                </div>
+                <div class="card-body">
+                    <p class="small mb-3">Bu tekliften alınan, henüz bir faturaya bağlanmamış ödemeler bulundu. İşaretlerseniz bu fatura ile ilişkilendirilir ve ödenen tutara dahil olur.</p>
+                    {% for p in unlinked_payments %}
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="link_payment_{{ p.id }}" id="link_payment_{{ p.id }}" checked>
+                        <label class="form-check-label small" for="link_payment_{{ p.id }}">
+                            {{ "{:,.2f}".format(p.amount) }} ₺ - {{ p.payment_date.strftime('%d.%m.%Y') }}{% if p.payment_method %} ({{ p.payment_method }}){% endif %}
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
             {% if not deal.customer.company_name or not deal.customer.tax_id %}
             <div class="card mb-4 border-warning">
                 <div class="card-header bg-warning text-dark">

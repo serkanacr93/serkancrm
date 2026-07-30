@@ -133,6 +133,22 @@
     </div>
 
     <div class="col-md-4">
+        {% set _advance_payments = deal.payments|selectattr('status', 'equalto', 'odendi')|selectattr('invoice_id', 'equalto', none)|list %}
+        {% if deal.stage == 'kazanilan' and _advance_payments %}
+        <div class="card mb-4 shadow-sm border-info">
+            <div class="card-header bg-info text-white">
+                <i class="bi bi-cash-coin"></i> Alınan Ön Ödeme
+            </div>
+            <div class="card-body">
+                <h4 class="text-success mb-2">{{ "{:,.2f}".format(_advance_payments|sum(attribute='amount')) }} ₺</h4>
+                <small class="text-muted">Henüz bir faturaya bağlanmamış, fatura kesildiğinde otomatik olarak bağlanabilir.</small>
+                <a href="{{ url_for('customer_detail', id=deal.customer_id) }}" class="btn btn-sm btn-outline-info w-100 mt-2">
+                    <i class="bi bi-eye"></i> Müşterinin Ödemeleri
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card mb-4 shadow-sm">
             <div class="card-header bg-success text-white">
                 <i class="bi bi-person"></i> Müşteri Bilgileri

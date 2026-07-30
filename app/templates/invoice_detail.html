@@ -109,6 +109,44 @@
     </div>
 
     <div class="col-md-4">
+        {% if invoice.type == 'fatura' %}
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-cash-stack"></i> Ödeme Durumu</span>
+                <span class="badge bg-{{ 'success' if invoice.payment_status == 'odendi' else 'warning' if invoice.payment_status == 'kismi_odendi' else 'danger' }}">
+                    {{ 'Ödendi' if invoice.payment_status == 'odendi' else ('Kısmi Ödendi' if invoice.payment_status == 'kismi_odendi' else 'Ödenmedi') }}
+                </span>
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless table-sm mb-3">
+                    <tr><th>Ödenen:</th><td class="text-success">{{ "{:,.2f}".format(invoice.paid_amount) }} ₺</td></tr>
+                    <tr><th>Kalan:</th><td class="text-danger"><strong>{{ "{:,.2f}".format(invoice.remaining_amount) }} ₺</strong></td></tr>
+                </table>
+                {% if invoice.payments %}
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm">
+                        <thead><tr><th>Tarih</th><th>Tutar</th><th>Durum</th></tr></thead>
+                        <tbody>
+                            {% for p in invoice.payments %}
+                            <tr>
+                                <td>{{ p.payment_date.strftime('%d.%m.%Y') }}</td>
+                                <td>{{ "{:,.2f}".format(p.amount) }} ₺</td>
+                                <td><span class="badge bg-{{ 'success' if p.status == 'odendi' else 'warning' if p.status == 'beklemede' else 'danger' }}">{{ p.status }}</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+                {% if invoice.remaining_amount > 0.01 %}
+                <a href="{{ url_for('add_payment', invoice_id=invoice.id) }}" class="btn btn-success w-100">
+                    <i class="bi bi-plus-circle"></i> Ödeme Ekle
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card mb-4 shadow-sm">
             <div class="card-header bg-success text-white">
                 <i class="bi bi-person"></i> Müşteri Bilgileri

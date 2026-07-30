@@ -325,6 +325,9 @@ class CustomerStatement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
     deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=True)
+    # Bu ekstre kaydi bir Payment'tan otomatik olusturulduysa iliskilendirir -
+    # odeme silinince bagli ekstre kaydinin da silinebilmesi icin.
+    payment_id = db.Column(db.Integer, db.ForeignKey('payment.id'), nullable=True)
     type = db.Column(db.String(20), nullable=False)
     amount = db.Column(db.Float, nullable=False)
     description = db.Column(db.Text)
@@ -353,6 +356,23 @@ class Invoice(db.Model):
         if self.invoice_no:
             return f'{prefix}{self.invoice_no:05d}'
         return f'{prefix}{self.id:05d}'
+
+    @property
+    def paid_amount(self):
+        return sum(p.amount for p in self.payments if p.status == 'odendi')
+
+    @property
+    def remaining_amount(self):
+        return self.total - self.paid_amount
+
+    @property
+    def payment_status(self):
+        paid = self.paid_amount
+        if paid <= 0:
+            return 'odenmedi'
+        if paid >= self.total:
+            return 'odendi'
+        return 'kismi_odendi'
 
     def calculate_totals(self):
         self.subtotal = sum(item.total_price for item in self.items)
@@ -460,6 +480,9 @@ class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
     invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=True)
+    # Faturadan once teklif asamasinda alinan on odemeyi (avans) izlemek icin -
+    # invoice_id ile birlikte de olabilir (once deal_id'li avans, sonra faturaya baglanir).
+    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=True)
     amount = db.Column(db.Float, nullable=False)
     payment_date = db.Column(db.Date, default=datetime.utcnow)
     payment_method = db.Column(db.String(50))  # nakit, kredi_karti, havale, cek
@@ -468,9 +491,10 @@ class Payment(db.Model):
     status = db.Column(db.String(20), default='beklemede')  # beklemede, odendi, iptal
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    
+
     customer = db.relationship('Customer', backref='payments')
     invoice = db.relationship('Invoice', backref='payments')
+    deal = db.relationship('Deal', backref='payments')
     user = db.relationship('User', backref='payments')
 
     def __repr__(self):

@@ -12,34 +12,42 @@
             <div class="card-body">
                 <form method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" id="invoice_id" name="invoice_id" value="{{ prefill_invoice.id if prefill_invoice else '' }}">
+                    <input type="hidden" id="deal_id" name="deal_id" value="">
+
                     <div class="mb-3 position-relative">
                         <label for="customer_search" class="form-label">Müşteri <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..." autocomplete="off" required>
-                        <input type="hidden" id="customer_id" name="customer_id">
+                        <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..."
+                               autocomplete="off" required
+                               {% if prefill_customer %}value="{{ prefill_customer.display_name }}" readonly{% endif %}>
+                        <input type="hidden" id="customer_id" name="customer_id" value="{{ prefill_customer.id if prefill_customer else '' }}">
                         <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
                     </div>
-                    
+
                     <div class="mb-3">
-                        <label for="invoice_id" class="form-label">Fatura (Opsiyonel)</label>
-                        <select class="form-select" id="invoice_id" name="invoice_id">
-                            <option value="">Fatura Seçin</option>
-                            {% for invoice in invoices %}
-                            <option value="{{ invoice.id }}">{{ invoice.display_no }} - {{ invoice.customer.display_name }}</option>
-                            {% endfor %}
+                        <label for="linked_record" class="form-label">Bağlı Kayıt (Opsiyonel)</label>
+                        {% if prefill_invoice %}
+                        <input type="text" class="form-control" value="Fatura: {{ prefill_invoice.display_no }} (Kalan: {{ '{:,.2f}'.format(prefill_invoice.remaining_amount) }} ₺)" readonly>
+                        {% else %}
+                        <select class="form-select" id="linked_record" disabled>
+                            <option value="">Önce müşteri seçin</option>
                         </select>
+                        <div class="form-text">Fatura seçilirse tutar kalan bakiyeyle, teklif seçilirse peşinatla otomatik doldurulur (elle değiştirilebilir).</div>
+                        {% endif %}
                     </div>
-                    
+
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="amount" class="form-label">Tutar (₺) <span class="text-danger">*</span></label>
-                            <input type="number" step="0.01" class="form-control" id="amount" name="amount" required>
+                            <input type="number" step="0.01" class="form-control" id="amount" name="amount" required
+                                   {% if prefill_invoice %}value="{{ '%.2f'|format(prefill_invoice.remaining_amount) }}"{% endif %}>
                         </div>
                         <div class="col-md-6">
                             <label for="payment_date" class="form-label">Ödeme Tarihi</label>
                             <input type="date" class="form-control" id="payment_date" name="payment_date" value="{{ today.strftime('%Y-%m-%d') }}" required>
                         </div>
                     </div>
-                    
+
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="payment_method" class="form-label">Ödeme Yöntemi</label>
@@ -56,7 +64,7 @@
                             <input type="text" class="form-control" id="reference_no" name="reference_no" placeholder="Örn: Fiş no, Havale no">
                         </div>
                     </div>
-                    
+
                     <div class="mb-3">
                         <label for="status" class="form-label">Durum</label>
                         <select class="form-select" id="status" name="status">
@@ -65,12 +73,12 @@
                             <option value="iptal">İptal</option>
                         </select>
                     </div>
-                    
+
                     <div class="mb-3">
                         <label for="notes" class="form-label">Notlar</label>
                         <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Ödeme ile ilgili notlar"></textarea>
                     </div>
-                    
+
                     <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                         <a href="{{ url_for('payments') }}" class="btn btn-secondary me-md-2">
                             <i class="bi bi-x-circle"></i> İptal
@@ -86,6 +94,72 @@
 </div>
 <script src="{{ url_for('static', filename='js/customer-search.js') }}"></script>
 <script>
-initCustomerSearch({ inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results' });
+var linkedSelect = document.getElementById('linked_record');
+var invoiceIdInput = document.getElementById('invoice_id');
+var dealIdInput = document.getElementById('deal_id');
+var amountInput = document.getElementById('amount');
+
+function loadOpenRecords(customerId) {
+    if (!linkedSelect) return;
+    linkedSelect.disabled = true;
+    linkedSelect.innerHTML = '<option value="">Yükleniyor...</option>';
+    fetch('/api/customers/' + customerId + '/open-records')
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            linkedSelect.innerHTML = '<option value="">Yok (Genel Ödeme)</option>';
+            if (data.invoices.length) {
+                var og = document.createElement('optgroup');
+                og.label = 'Açık Faturalar';
+                data.invoices.forEach(function (inv) {
+                    var opt = document.createElement('option');
+                    opt.value = 'inv:' + inv.id;
+                    opt.dataset.amount = inv.remaining.toFixed(2);
+                    opt.textContent = inv.display_no + ' - Kalan: ' + inv.remaining.toFixed(2) + ' ₺';
+                    og.appendChild(opt);
+                });
+                linkedSelect.appendChild(og);
+            }
+            if (data.deals.length) {
+                var ogd = document.createElement('optgroup');
+                ogd.label = 'Teklifler (Ön Ödeme)';
+                data.deals.forEach(function (d) {
+                    var opt = document.createElement('option');
+                    opt.value = 'deal:' + d.id;
+                    var pesinatNum = parseFloat((d.pesinat || '').replace(/[^0-9.,]/g, '').replace(',', '.'));
+                    opt.dataset.amount = isNaN(pesinatNum) ? '' : pesinatNum.toFixed(2);
+                    opt.textContent = d.display_no + (d.pesinat ? ' - Peşinat: ' + d.pesinat : '');
+                    ogd.appendChild(opt);
+                });
+                linkedSelect.appendChild(ogd);
+            }
+            linkedSelect.disabled = false;
+        });
+}
+
+if (linkedSelect) {
+    linkedSelect.addEventListener('change', function () {
+        var val = this.value;
+        invoiceIdInput.value = '';
+        dealIdInput.value = '';
+        if (val.indexOf('inv:') === 0) {
+            invoiceIdInput.value = val.slice(4);
+        } else if (val.indexOf('deal:') === 0) {
+            dealIdInput.value = val.slice(5);
+        }
+        var selected = this.selectedOptions[0];
+        if (selected && selected.dataset.amount) {
+            amountInput.value = selected.dataset.amount;
+        }
+    });
+}
+
+initCustomerSearch({
+    inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results',
+    onSelect: function (c) { loadOpenRecords(c.id); }
+});
+
+{% if prefill_customer and not prefill_invoice %}
+loadOpenRecords({{ prefill_customer.id }});
+{% endif %}
 </script>
 {% endblock %}

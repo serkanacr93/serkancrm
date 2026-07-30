@@ -50,6 +50,7 @@
                         <th>Ara Toplam</th>
                         <th>KDV</th>
                         <th>Toplam</th>
+                        <th>Ödeme Durumu</th>
                         <th>İşlem</th>
                     </tr>
                 </thead>
@@ -63,6 +64,15 @@
                         <td>{{ "{:,.2f}".format(inv.subtotal) }} ₺</td>
                         <td>{{ "{:,.2f}".format(inv.vat_amount) }} ₺</td>
                         <td><strong>{{ "{:,.2f}".format(inv.total) }} ₺</strong></td>
+                        <td>
+                            {% if inv.type == 'fatura' %}
+                            <span class="badge bg-{{ 'success' if inv.payment_status == 'odendi' else 'warning' if inv.payment_status == 'kismi_odendi' else 'danger' }}">
+                                {{ 'Ödendi' if inv.payment_status == 'odendi' else ('Kısmi Ödendi' if inv.payment_status == 'kismi_odendi' else 'Ödenmedi') }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
                         <td>
                             <a href="{{ url_for('invoice_detail', id=inv.id) }}" class="btn btn-sm btn-outline-primary">
                                 <i class="bi bi-eye"></i>
