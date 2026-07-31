@@ -102,6 +102,12 @@
             <div class="card-header"><i class="bi bi-clipboard-data"></i> İş Emri Detayları</div>
             <div class="card-body">
                 <p class="text-muted small">Bu bilgiler İş Emri PDF'inde gösterilir (fiyat içermez).</p>
+                {% if production.specs_missing %}
+                <div class="alert alert-warning py-2">
+                    <i class="bi bi-exclamation-triangle"></i> Kağıt Cinsi ve/veya Ölçü bilgisi eksik - İş Emri PDF'inde
+                    bu satırlar "-" olarak görünecek. PDF'i yazdırmadan önce aşağıdan doldurmanız önerilir.
+                </div>
+                {% endif %}
                 <form method="POST" action="{{ url_for('update_production_item_specs', id=production.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="table-responsive">

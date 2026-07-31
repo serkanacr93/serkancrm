@@ -67,20 +67,24 @@ class Customer(db.Model):
     last_name = db.Column(db.String(50))
     email = db.Column(db.String(120), unique=True, nullable=True)
     __table_args__ = (db.UniqueConstraint('first_name', 'last_name', name='unique_customer_name'),)
-    phone = db.Column(db.String(20))
-    
+    # 20 karakter gercek kullanimda cok dar kaliyordu - satis ekibi bazen
+    # tek alana birden fazla telefon/vergi no yapistiriyor, bu da INSERT/UPDATE
+    # aninda StringDataRightTruncation hatasiyla teklif olusturmayi tamamen
+    # kirıyordu (bkz. Is A). 50/30'a genisletildi - veri kaybi olmadan.
+    phone = db.Column(db.String(50))
+
     company_name = db.Column(db.String(200))
     tax_office = db.Column(db.String(100))
-    tax_id = db.Column(db.String(20))
+    tax_id = db.Column(db.String(30))
     trade_registry = db.Column(db.String(50))
-    company_phone = db.Column(db.String(20))
+    company_phone = db.Column(db.String(50))
     company_address = db.Column(db.Text)
     company_email = db.Column(db.String(120))
     company_website = db.Column(db.String(200))
-    
+
     contact_person = db.Column(db.String(100))
     contact_title = db.Column(db.String(50))
-    contact_phone = db.Column(db.String(20))
+    contact_phone = db.Column(db.String(50))
     contact_email = db.Column(db.String(120))
     
     address = db.Column(db.Text)
@@ -107,6 +111,25 @@ class Customer(db.Model):
     def is_new_customer(self):
         return Deal.query.filter_by(customer_id=self.id, stage='kazanilan').count() <= 1
 
+    @property
+    def total_invoiced(self):
+        """Cari hesap (Is F) - GERCEK Invoice kayitlarindan canli hesaplanir,
+        onbellege alinmaz. Sadece 'fatura' tipi belgeler tutar sayilir
+        (irsaliyenin bedeli yoktur)."""
+        return sum(inv.total for inv in Invoice.query.filter_by(customer_id=self.id, type='fatura').all())
+
+    @property
+    def total_collected(self):
+        """Musteriye ait, 'odendi' durumundaki TUM Payment kayitlarinin toplami
+        (fatura/teklif baglantisindan bagimsiz - gercek tahsil edilen nakit)."""
+        return sum(p.amount for p in self.payments if p.status == 'odendi')
+
+    @property
+    def balance(self):
+        """Kalan Bakiye = Faturalanan - Tahsil Edilen. Pozitif: musteriden
+        alacagimiz var. Sifir/negatif: odeme tamam ya da fazla odenmis."""
+        return self.total_invoiced - self.total_collected
+
     def __repr__(self):
         return f'<Customer {self.display_name}>'
 
@@ -128,6 +151,12 @@ class Deal(db.Model):
     vade_gun = db.Column(db.String(50))
     pesinat = db.Column(db.String(100))
     bakiye_odemesi = db.Column(db.String(100))
+    # Odeme takvimi (Is D) - teklif onaylanip uretime aktarilirken (approve_deal)
+    # zorunlu olarak istenir, yukaridaki serbest metin alanlarindan farkli
+    # olarak yapisal ve zorunludur - musteriyle kesinlesmis odeme planini temsil eder.
+    pesinat_orani = db.Column(db.Float, nullable=True)  # yuzde, orn. 50.0
+    pesinat_tarihi = db.Column(db.Date, nullable=True)  # beklenen veya gerceklesen odeme tarihi
+    bakiye_tarihi = db.Column(db.Date, nullable=True)  # bakiyenin beklenen odeme tarihi
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -166,6 +195,33 @@ class Deal(db.Model):
         if self.valid_until:
             return (self.valid_until - datetime.now().date()).days
         return None
+
+    @property
+    def pesinat_tutari(self):
+        """Onaylanirken girilen pesinat oranindan (yuzde) hesaplanan tutar."""
+        if self.pesinat_orani is None:
+            return None
+        return self.value * (self.pesinat_orani / 100)
+
+    @property
+    def bakiye_tutari(self):
+        if self.pesinat_orani is None:
+            return None
+        return self.value - self.pesinat_tutari
+
+    @property
+    def paid_amount(self):
+        """Bu teklife (avans/pesinat asamasinda) baglanmis, 'odendi' durumundaki
+        Payment kayitlarinin toplami - Is E'de sevkiyat oncesi odeme kontrolu icin kullanilir."""
+        return sum(p.amount for p in self.payments if p.status == 'odendi')
+
+    @property
+    def outstanding_amount(self):
+        return max(0, self.value - self.paid_amount)
+
+    @property
+    def payment_complete(self):
+        return self.outstanding_amount <= 0.01
 
     def __repr__(self):
         return f'<Deal {self.title}>'
@@ -236,6 +292,14 @@ class Production(db.Model):
     @property
     def latest_shipment(self):
         return max(self.shipments, key=lambda s: s.created_at) if self.shipments else None
+
+    @property
+    def specs_missing(self):
+        """Kagit Cinsi/Olcu gibi is emri spesifikasyonlari teklif olusturulurken
+        degil, uretim asamasinda atolye tarafindan elle giriliyor - hicbir
+        yerde zorunlu tutulmuyor, bu yuzden bazi uretimlerde unutuluyor (Is B).
+        Bu, o durumu goze carpar hale getirmek icin kullanilir."""
+        return any(not item.kagit_tipi or not item.olcu for item in self.items)
 
 class ProductionItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -463,7 +527,7 @@ class DailyReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     report_date = db.Column(db.Date, default=datetime.utcnow, nullable=False)
     customer_name = db.Column(db.String(100), nullable=False)
-    phone = db.Column(db.String(20))
+    phone = db.Column(db.String(50))
     notes = db.Column(db.Text)
     status = db.Column(db.String(20), default='takip_edilecek')  # tamamlandi, fiyat_verilecek, takip_edilecek
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -510,7 +574,7 @@ class PotentialCustomer(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     company_name = db.Column(db.String(200), nullable=False)
-    phone = db.Column(db.String(20))
+    phone = db.Column(db.String(50))
     address = db.Column(db.Text)
     city = db.Column(db.String(100))
     sector = db.Column(db.String(50))
@@ -542,7 +606,7 @@ class CompanySettings(db.Model):
     email = db.Column(db.String(120))
     website = db.Column(db.String(200))
     tax_office = db.Column(db.String(100))
-    tax_id = db.Column(db.String(20))
+    tax_id = db.Column(db.String(30))
     logo_data = db.Column(db.LargeBinary)
     logo_mimetype = db.Column(db.String(50))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

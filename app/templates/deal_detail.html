@@ -133,6 +133,36 @@
     </div>
 
     <div class="col-md-4">
+        {% if deal.pesinat_orani is not none %}
+        <div class="card mb-4 shadow-sm border-{{ 'success' if deal.payment_complete else 'warning' }}">
+            <div class="card-header bg-{{ 'success' if deal.payment_complete else 'warning' }} {{ 'text-white' if deal.payment_complete else 'text-dark' }}">
+                <i class="bi bi-calendar-check"></i> Ödeme Takvimi
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless table-sm mb-2">
+                    <tr><th>Peşinat:</th><td>%{{ deal.pesinat_orani }} = {{ "{:,.2f}".format(deal.pesinat_tutari) }} ₺</td></tr>
+                    <tr><th>Peşinat Tarihi:</th><td>{{ deal.pesinat_tarihi.strftime('%d.%m.%Y') if deal.pesinat_tarihi else '-' }}</td></tr>
+                    <tr><th>Bakiye:</th><td>{{ "{:,.2f}".format(deal.bakiye_tutari) }} ₺</td></tr>
+                    <tr><th>Bakiye Tarihi:</th><td>{{ deal.bakiye_tarihi.strftime('%d.%m.%Y') if deal.bakiye_tarihi else '-' }}</td></tr>
+                </table>
+                <hr class="my-2">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>Tahsil Edilen:</span>
+                    <strong class="text-success">{{ "{:,.2f}".format(deal.paid_amount) }} ₺</strong>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>Kalan:</span>
+                    <strong class="{{ 'text-success' if deal.payment_complete else 'text-danger' }}">{{ "{:,.2f}".format(deal.outstanding_amount) }} ₺</strong>
+                </div>
+                {% if deal.payment_complete %}
+                <div class="small text-success mt-2"><i class="bi bi-check-circle"></i> Ödeme tamamlandı.</div>
+                {% else %}
+                <div class="small text-warning mt-2"><i class="bi bi-exclamation-triangle"></i> Bekleyen ödeme var.</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
         {% set _advance_payments = deal.payments|selectattr('status', 'equalto', 'odendi')|selectattr('invoice_id', 'equalto', none)|list %}
         {% if deal.stage == 'kazanilan' and _advance_payments %}
         <div class="card mb-4 shadow-sm border-info">

@@ -28,6 +28,39 @@
     </div>
 </div>
 
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm {{ 'border-danger' if customer.balance > 0.01 else 'border-success' }}">
+            <div class="card-header {{ 'bg-danger text-white' if customer.balance > 0.01 else 'bg-success text-white' }}">
+                <i class="bi bi-wallet2"></i> Cari Hesap
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-4">
+                        <h6 class="text-muted mb-1">Toplam Faturalanan</h6>
+                        <h4>{{ "{:,.2f}".format(customer.total_invoiced) }} ₺</h4>
+                    </div>
+                    <div class="col-md-4">
+                        <h6 class="text-muted mb-1">Toplam Tahsil Edilen</h6>
+                        <h4 class="text-success">{{ "{:,.2f}".format(customer.total_collected) }} ₺</h4>
+                    </div>
+                    <div class="col-md-4">
+                        <h6 class="text-muted mb-1">Kalan Bakiye</h6>
+                        <h4 class="{{ 'text-danger' if customer.balance > 0.01 else 'text-success' }}">
+                            {{ "{:,.2f}".format(customer.balance) }} ₺
+                            {% if customer.balance > 0.01 %}
+                            <span class="badge bg-danger">Alacaklıyız</span>
+                            {% else %}
+                            <span class="badge bg-success">Tamam</span>
+                            {% endif %}
+                        </h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row">
     <div class="col-md-4">
         <div class="card mb-4 shadow-sm {{ 'border-danger' if days_since_contact is not none and days_since_contact >= 45 else 'border-warning' if days_since_contact is not none and days_since_contact >= 30 else '' }}">
@@ -154,6 +187,7 @@
                                         <th>Toplam</th>
                                         <th>Durum</th>
                                         <th>Geçerlilik</th>
+                                        <th>Ödeme Takvimi</th>
                                         <th>İşlem</th>
                                     </tr>
                                 </thead>
@@ -174,6 +208,19 @@
                                                 {% elif deal.is_expiring_soon %}
                                                     <span class="badge bg-warning">{{ deal.days_until_expire }} gün</span>
                                                 {% endif %}
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if deal.pesinat_orani is not none %}
+                                                {% if deal.payment_complete %}
+                                                <span class="badge bg-success" title="Kalan: 0 ₺">Tamamlandı</span>
+                                                {% else %}
+                                                <span class="badge bg-danger" title="Bakiye tarihi: {{ deal.bakiye_tarihi.strftime('%d.%m.%Y') if deal.bakiye_tarihi else '-' }}">
+                                                    Kalan {{ "{:,.2f}".format(deal.outstanding_amount) }} ₺
+                                                </span>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="text-muted small">-</span>
                                             {% endif %}
                                         </td>
                                         <td>

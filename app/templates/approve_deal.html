@@ -10,34 +10,61 @@
     </a>
 </div>
 
-<div class="row">
-    <div class="col-md-7">
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-primary text-white">
-                <i class="bi bi-file-earmark-text"></i> {{ deal.title }}
+<form method="POST" action="{{ url_for('approve_deal', id=deal.id) }}"
+      onsubmit="return confirm('Bu teklifi onaylayıp üretime aktarmak istediğinize emin misiniz?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row">
+        <div class="col-md-7">
+            <div class="card mb-4 shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <i class="bi bi-file-earmark-text"></i> {{ deal.title }}
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless mb-0">
+                        <tr><th>Müşteri:</th><td>
+                            {% if deal.customer.company_name %}{{ deal.customer.company_name }} - {% endif %}{{ deal.customer.first_name }} {{ deal.customer.last_name }}
+                        </td></tr>
+                        <tr><th>Ara Toplam:</th><td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td></tr>
+                        <tr><th>KDV (%{{ deal.vat_rate }}):</th><td>{{ "{:,.2f}".format(deal.vat_amount) }} ₺</td></tr>
+                        <tr><th>Genel Toplam:</th><td><strong>{{ "{:,.2f}".format(deal.value) }} ₺</strong></td></tr>
+                    </table>
+                </div>
             </div>
-            <div class="card-body">
-                <table class="table table-borderless mb-0">
-                    <tr><th>Müşteri:</th><td>
-                        {% if deal.customer.company_name %}{{ deal.customer.company_name }} - {% endif %}{{ deal.customer.first_name }} {{ deal.customer.last_name }}
-                    </td></tr>
-                    <tr><th>Ara Toplam:</th><td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td></tr>
-                    <tr><th>KDV (%{{ deal.vat_rate }}):</th><td>{{ "{:,.2f}".format(deal.vat_amount) }} ₺</td></tr>
-                    <tr><th>Genel Toplam:</th><td><strong>{{ "{:,.2f}".format(deal.value) }} ₺</strong></td></tr>
-                </table>
+
+            <div class="card mb-4 shadow-sm border-warning">
+                <div class="card-header bg-warning text-dark">
+                    <i class="bi bi-calendar-check"></i> Ödeme Takvimi <span class="text-danger">*</span>
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted">Üretime aktarmadan önce müşteriyle kesinleşen ödeme planı girilmelidir - zorunludur.</p>
+                    <div class="mb-3">
+                        <label for="pesinat_orani" class="form-label">Peşinat Oranı (%) <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" min="0" max="100" class="form-control" id="pesinat_orani"
+                               name="pesinat_orani" placeholder="Örn: 50"
+                               value="{{ form_data.pesinat_orani if form_data else '' }}" required>
+                        <small class="text-muted">Toplam {{ "{:,.2f}".format(deal.value) }} ₺ üzerinden peşinat tutarı hesaplanır.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="pesinat_tarihi" class="form-label">Peşinat Ödeme Tarihi <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control" id="pesinat_tarihi" name="pesinat_tarihi"
+                               value="{{ form_data.pesinat_tarihi if form_data else '' }}" required>
+                        <small class="text-muted">Peşinat zaten alındıysa gerçekleşen tarihi, alınmadıysa beklenen tarihi girin.</small>
+                    </div>
+                    <div class="mb-0">
+                        <label for="bakiye_tarihi" class="form-label">Bakiye Ödeme Tarihi (Beklenen) <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control" id="bakiye_tarihi" name="bakiye_tarihi"
+                               value="{{ form_data.bakiye_tarihi if form_data else '' }}" required>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
 
-    <div class="col-md-5">
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-success text-white">
-                <i class="bi bi-percent"></i> Prim Oranı
-            </div>
-            <div class="card-body">
-                <form method="POST" action="{{ url_for('approve_deal', id=deal.id) }}"
-                      onsubmit="return confirm('Bu teklifi onaylayıp üretime aktarmak istediğinize emin misiniz?')">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-5">
+            <div class="card mb-4 shadow-sm">
+                <div class="card-header bg-success text-white">
+                    <i class="bi bi-percent"></i> Prim Oranı
+                </div>
+                <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label">Prim Oranı Seçin</label>
                         <select class="form-select" name="commission_rate" required>
@@ -54,9 +81,9 @@
                             <i class="bi bi-check-circle"></i> Onayla ve Üretime Aktar
                         </button>
                     </div>
-                </form>
+                </div>
             </div>
         </div>
     </div>
-</div>
+</form>
 {% endblock %}

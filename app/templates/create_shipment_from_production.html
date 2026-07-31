@@ -8,6 +8,19 @@
     <a href="{{ url_for('production_detail', id=production.id) }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Üretime Dön</a>
 </div>
 
+{% set _deal = production.deal %}
+{% if _deal.pesinat_orani is not none and not _deal.payment_complete %}
+<div class="alert alert-danger d-flex align-items-center shadow-sm">
+    <i class="bi bi-exclamation-triangle-fill me-2 fs-4"></i>
+    <div>
+        <strong>Bu müşteride bekleyen ödeme var</strong> -
+        {{ "{:,.2f}".format(_deal.outstanding_amount) }} ₺,
+        bakiye tarihi: {{ _deal.bakiye_tarihi.strftime('%d.%m.%Y') if _deal.bakiye_tarihi else '-' }}.
+        <br><small class="text-muted">Bu bir uyarıdır, sevkiyatı engellemez - isterseniz yine de devam edebilirsiniz.</small>
+    </div>
+</div>
+{% endif %}
+
 <div class="row">
     <div class="col-md-8">
         <div class="card mb-4">

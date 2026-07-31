@@ -37,6 +37,24 @@
     </div>
 </div>
 
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-info">
+            <div class="card-body text-center">
+                <h6 class="text-muted mb-1">
+                    <i class="bi bi-graph-up-arrow"></i> Beklenen Toplam Tahsilat
+                    <span class="text-muted small">(açık teklifler + bekleyen faturalar - ileriye dönük tahmin)</span>
+                </h6>
+                <h3 class="text-info">{{ "{:,.2f}".format(expected_total_receivable) }} ₺</h3>
+                <small class="text-muted">
+                    Açık/bekleyen teklifler: {{ "{:,.2f}".format(total_open_deals_value) }} ₺
+                    + Faturalardan kalan bakiye: {{ "{:,.2f}".format(total_outstanding) }} ₺
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% if pending_invoices %}
 <div class="card mb-4 shadow-sm border-danger">
     <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">

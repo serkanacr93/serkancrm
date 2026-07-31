@@ -494,6 +494,46 @@ def register_routes(app):
                 for c, d in pagination.items]
         return render_template('customers_dormant.html', rows=rows, pagination=pagination)
 
+    @app.route('/cari-hesap-ozeti')
+    @login_required
+    def cari_hesap_ozeti():
+        """Is F: musteri bazli cari hesap ozeti. Performans icin (1600+ musteri)
+        Customer.total_invoiced/total_collected property'lerini tek tek her
+        musteride cagirmak yerine (N+1 sorgu), toplam tutarlari 2 GROUP BY
+        sorgusuyla topluca cekip Python tarafinda esler - sonuc matematiksel
+        olarak Customer property'leriyle birebir ayni (ayni Invoice/Payment
+        kayitlarindan, canli hesaplanir, onbelleklenmez)."""
+        filter_type = request.args.get('filter', '')
+
+        invoiced_rows = db.session.query(
+            Invoice.customer_id, db.func.sum(Invoice.total)
+        ).filter(Invoice.type == 'fatura').group_by(Invoice.customer_id).all()
+        invoiced_map = {cid: total or 0 for cid, total in invoiced_rows}
+
+        collected_rows = db.session.query(
+            Payment.customer_id, db.func.sum(Payment.amount)
+        ).filter(Payment.status == 'odendi').group_by(Payment.customer_id).all()
+        collected_map = {cid: total or 0 for cid, total in collected_rows}
+
+        customers = Customer.query.filter(Customer.status != 'musteri_degil').all()
+        rows = []
+        for c in customers:
+            invoiced = invoiced_map.get(c.id, 0)
+            collected = collected_map.get(c.id, 0)
+            balance = invoiced - collected
+            rows.append({'customer': c, 'invoiced': invoiced, 'collected': collected, 'balance': balance})
+
+        if filter_type == 'borclu':
+            rows = [r for r in rows if r['balance'] > 0.01]
+        elif filter_type == 'alacakli':
+            rows = [r for r in rows if r['balance'] < -0.01]
+        elif filter_type == 'sifir':
+            rows = [r for r in rows if -0.01 <= r['balance'] <= 0.01]
+
+        rows.sort(key=lambda r: abs(r['balance']), reverse=True)
+
+        return render_template('cari_hesap_ozeti.html', rows=rows, filter_type=filter_type)
+
     @app.route('/customers/add', methods=['GET', 'POST'])
     @login_required
     def add_customer():
@@ -1043,9 +1083,43 @@ def register_routes(app):
             return redirect(url_for('deals'))
 
         if request.method == 'POST':
+            # Is D: odeme takvimi zorunlu - pesinat orani, pesinat tarihi ve
+            # bakiye tarihi girilmeden teklif uretime aktarilamaz.
+            pesinat_orani_raw = request.form.get('pesinat_orani', '').strip()
+            pesinat_tarihi_raw = request.form.get('pesinat_tarihi', '').strip()
+            bakiye_tarihi_raw = request.form.get('bakiye_tarihi', '').strip()
+
+            form_errors = []
+            pesinat_orani = None
+            if not pesinat_orani_raw:
+                form_errors.append('Peşinat oranı girilmelidir.')
+            else:
+                try:
+                    pesinat_orani = float(pesinat_orani_raw)
+                    if not (0 <= pesinat_orani <= 100):
+                        form_errors.append('Peşinat oranı 0-100 arasında olmalıdır.')
+                except ValueError:
+                    form_errors.append('Peşinat oranı geçerli bir sayı olmalıdır.')
+            if not pesinat_tarihi_raw:
+                form_errors.append('Peşinat ödeme tarihi girilmelidir.')
+            if not bakiye_tarihi_raw:
+                form_errors.append('Bakiye ödeme tarihi girilmelidir.')
+
+            if form_errors:
+                for err in form_errors:
+                    flash(err, 'danger')
+                prev_sales = Deal.query.filter(Deal.customer_id == deal.customer_id, Deal.stage == 'kazanilan', Deal.id != deal.id).count()
+                suggested_rate = 1.5 if prev_sales == 0 else 1.0
+                return render_template('approve_deal.html', deal=deal, suggested_rate=suggested_rate,
+                                        form_data=request.form)
+
+            deal.pesinat_orani = pesinat_orani
+            deal.pesinat_tarihi = datetime.strptime(pesinat_tarihi_raw, '%Y-%m-%d').date()
+            deal.bakiye_tarihi = datetime.strptime(bakiye_tarihi_raw, '%Y-%m-%d').date()
+
             deal.stage = 'kazanilan'
             deal.user_id = current_user.id
-            
+
             production = Production(deal_id=deal.id, status='uretimde', start_date=datetime.now().date(),
                                      due_date=deal.expected_close)
             db.session.add(production)
@@ -2164,10 +2238,20 @@ def register_routes(app):
             key=lambda inv: inv.date
         )
 
+        # Is C: mevcut odeme kayitlarindan bagimsiz, ileriye donuk bir
+        # "beklenen toplam tahsilat" ozeti - acik/bekleyen tekliflerin
+        # (henuz kazanilmamis, kaybedilmemis, revize edilmemis) toplam
+        # degeri + faturalarin kalan bakiyesi.
+        open_deals = Deal.query.filter(Deal.stage.notin_(['kazanilan', 'kaybedilen', 'revize'])).all()
+        total_open_deals_value = sum(d.value for d in open_deals)
+        expected_total_receivable = total_open_deals_value + total_outstanding
+
         return render_template('payments.html', payments=payments,
                              customer_search=customer_search, status_filter=status_filter,
                              total_invoiced=total_invoiced, total_collected=total_collected,
-                             total_outstanding=total_outstanding, pending_invoices=pending_invoices)
+                             total_outstanding=total_outstanding, pending_invoices=pending_invoices,
+                             total_open_deals_value=total_open_deals_value,
+                             expected_total_receivable=expected_total_receivable)
 
     @app.route('/payments/add', methods=['GET', 'POST'])
     @login_required

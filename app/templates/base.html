@@ -40,6 +40,7 @@
                             <li><a class="dropdown-item {% if request.endpoint == 'reports' %}active{% endif %}" href="{{ url_for('reports') }}"><i class="bi bi-bar-chart"></i> Raporlar</a></li>
                             <li><a class="dropdown-item {% if 'daily_report' in request.endpoint %}active{% endif %}" href="{{ url_for('daily_reports') }}"><i class="bi bi-journal-text"></i> Günlük Rapor</a></li>
                             <li><a class="dropdown-item {% if 'payment' in request.endpoint %}active{% endif %}" href="{{ url_for('payments') }}"><i class="bi bi-cash-stack"></i> Ödemeler</a></li>
+                            <li><a class="dropdown-item {% if request.endpoint == 'cari_hesap_ozeti' %}active{% endif %}" href="{{ url_for('cari_hesap_ozeti') }}"><i class="bi bi-wallet2"></i> Cari Hesap Özeti</a></li>
                             {% if current_user.is_admin %}
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item {% if 'user' in request.endpoint %}active{% endif %}" href="{{ url_for('users') }}"><i class="bi bi-person-gear"></i> Kullanıcılar</a></li>

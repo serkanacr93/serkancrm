@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Cari Hesap Özeti - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-wallet2"></i> Cari Hesap Özeti <span class="badge bg-secondary">{{ rows|length }}</span></h2>
+</div>
+
+<div class="card mb-4 shadow-sm">
+    <div class="card-body">
+        <div class="btn-group" role="group">
+            <a href="{{ url_for('cari_hesap_ozeti') }}" class="btn btn-outline-secondary {{ 'active' if not filter_type }}">Tümü</a>
+            <a href="{{ url_for('cari_hesap_ozeti', filter='borclu') }}" class="btn btn-outline-danger {{ 'active' if filter_type == 'borclu' }}">Sadece Borçlular (Alacaklıyız)</a>
+            <a href="{{ url_for('cari_hesap_ozeti', filter='alacakli') }}" class="btn btn-outline-success {{ 'active' if filter_type == 'alacakli' }}">Fazla Ödeyenler</a>
+            <a href="{{ url_for('cari_hesap_ozeti', filter='sifir') }}" class="btn btn-outline-secondary {{ 'active' if filter_type == 'sifir' }}">Bakiyesi Sıfır</a>
+        </div>
+    </div>
+</div>
+
+{% if rows %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Müşteri</th>
+                        <th class="text-end">Toplam Faturalanan</th>
+                        <th class="text-end">Toplam Tahsil Edilen</th>
+                        <th class="text-end">Kalan Bakiye</th>
+                        <th>İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in rows %}
+                    <tr>
+                        <td><a href="{{ url_for('customer_detail', id=r.customer.id) }}">{{ r.customer.display_name }}</a></td>
+                        <td class="text-end">{{ "{:,.2f}".format(r.invoiced) }} ₺</td>
+                        <td class="text-end text-success">{{ "{:,.2f}".format(r.collected) }} ₺</td>
+                        <td class="text-end">
+                            <strong class="{{ 'text-danger' if r.balance > 0.01 else 'text-success' }}">
+                                {{ "{:,.2f}".format(r.balance) }} ₺
+                            </strong>
+                            {% if r.balance > 0.01 %}
+                            <span class="badge bg-danger">Alacaklıyız</span>
+                            {% elif r.balance < -0.01 %}
+                            <span class="badge bg-info">Fazla Ödeme</span>
+                            {% else %}
+                            <span class="badge bg-success">Tamam</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('customer_detail', id=r.customer.id) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Bu filtreye uyan müşteri bulunmuyor.
+</div>
+{% endif %}
+{% endblock %}
