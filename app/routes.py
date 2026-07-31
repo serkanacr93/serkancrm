@@ -2,6 +2,7 @@ from flask import render_template, request, redirect, url_for, flash, send_file,
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
+from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -120,6 +121,27 @@ def _next_invoice_no():
     bir numarayla cakisabiliyordu (bkz. deal_no / revise_deal bug'i)."""
     max_no = db.session.query(db.func.max(Invoice.invoice_no)).scalar()
     return (max_no or 0) + 1
+
+def _musteri_no_max():
+    """Mevcut en buyuk musteri_no'nun sayisal kismini dondurur (Is 2).
+    String siralama yerine Python'da gercek int max hesaplar - 4 haneyi
+    astiginda (9999+) string siralamanin bozulmasindan etkilenmez."""
+    all_nos = db.session.query(Customer.musteri_no).filter(Customer.musteri_no.isnot(None)).all()
+    max_n = 0
+    for (no,) in all_nos:
+        if no and no.startswith('M-'):
+            try:
+                max_n = max(max_n, int(no[2:]))
+            except ValueError:
+                pass
+    return max_n
+
+def _next_musteri_no():
+    """Tekil musteri olusturma noktalari icin - toplu ice aktarimda (CSV/
+    Excel/VCF) bunun yerine _musteri_no_max() bir kez cagrilip donen int
+    dongude elle artirilmali (ayni flush icinde tekrar tekrar DB sorgulamak,
+    hicbiri henuz commit olmadigi icin hep ayni degeri dondurur)."""
+    return f'M-{_musteri_no_max() + 1:04d}'
 
 _TR_LOWER_MAP = str.maketrans({
     'ş': 's', 'Ş': 's', 'ğ': 'g', 'Ğ': 'g', 'ı': 'i', 'I': 'i', 'İ': 'i',
@@ -548,6 +570,7 @@ def register_routes(app):
                 return render_template('add_customer.html')
             
             customer = Customer(
+                musteri_no=_next_musteri_no(),
                 first_name=first_name or None,
                 last_name=last_name or None,
                 email=request.form.get('email') or None,
@@ -591,21 +614,24 @@ def register_routes(app):
                 import io
                 stream = io.StringIO(file.stream.read().decode('utf-8-sig'))
                 reader = csv.DictReader(stream)
+                next_musteri_n = _musteri_no_max()
                 for i, row in enumerate(reader, 1):
                     try:
                         first_name = (row.get('Ad') or row.get('ad') or row.get('first_name') or '').strip()
                         last_name = (row.get('Soyad') or row.get('soyad') or row.get('last_name') or '').strip()
                         phone = (row.get('Telefon') or row.get('telefon') or row.get('phone') or row.get('GSM') or '').strip()
-                        
+
                         if not first_name and not last_name and not phone:
                             continue
-                        
+
                         existing = Customer.query.filter_by(first_name=first_name, last_name=last_name).first()
                         if existing:
                             skipped += 1
                             continue
-                        
+
+                        next_musteri_n += 1
                         customer = Customer(
+                            musteri_no=f'M-{next_musteri_n:04d}',
                             first_name=first_name or None,
                             last_name=last_name or None,
                             phone=phone or None,
@@ -632,22 +658,25 @@ def register_routes(app):
                 wb = openpyxl.load_workbook(file)
                 ws = wb.active
                 headers = [cell.value for cell in ws[1]]
+                next_musteri_n = _musteri_no_max()
                 for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
                     try:
                         row_dict = dict(zip(headers, [str(v or '') for v in row]))
                         first_name = (row_dict.get('Ad') or row_dict.get('ad') or row_dict.get('first_name') or '').strip()
                         last_name = (row_dict.get('Soyad') or row_dict.get('soyad') or row_dict.get('last_name') or '').strip()
                         phone = (row_dict.get('Telefon') or row_dict.get('telefon') or row_dict.get('phone') or row_dict.get('GSM') or '').strip()
-                        
+
                         if not first_name and not last_name and not phone:
                             continue
-                        
+
                         existing = Customer.query.filter_by(first_name=first_name, last_name=last_name).first()
                         if existing:
                             skipped += 1
                             continue
-                        
+
+                        next_musteri_n += 1
                         customer = Customer(
+                            musteri_no=f'M-{next_musteri_n:04d}',
                             first_name=first_name or None,
                             last_name=last_name or None,
                             phone=phone or None,
@@ -721,6 +750,70 @@ def register_routes(app):
                              statements=statements, total_debit=total_debit, total_credit=total_credit,
                              daily_reports=daily_reports, pending_productions=pending_productions,
                              last_contact_date=last_contact_date, days_since_contact=days_since_contact)
+
+    @app.route('/customers/<int:id>/import-statement-pdf', methods=['POST'])
+    @login_required
+    def import_statement_pdf(id):
+        """Is 1: eski cari ekstre PDF'ini (Tarih/Aciklama/Borc/Alacak/Bakiye
+        tablosu) dogrudan CustomerStatement'a isler - onizleme ekrani yok.
+        Mukerrer (ayni musteri+tarih+tutar+tur) satirlar atlanir."""
+        customer = Customer.query.get_or_404(id)
+        file = request.files.get('statement_pdf')
+        if not file or not file.filename:
+            flash('Lütfen bir PDF dosyası seçin.', 'danger')
+            return redirect(url_for('customer_detail', id=id))
+        if not file.filename.lower().endswith('.pdf'):
+            flash('Sadece PDF dosyası yükleyebilirsiniz.', 'danger')
+            return redirect(url_for('customer_detail', id=id))
+
+        try:
+            rows, pdf_last_balance = parse_statement_pdf(file.stream)
+        except Exception as e:
+            flash(f'PDF okunamadı: {e}', 'danger')
+            return redirect(url_for('customer_detail', id=id))
+
+        if not rows:
+            flash('PDF içinde Tarih/Borç/Alacak sütunlarına sahip bir tablo bulunamadı.', 'warning')
+            return redirect(url_for('customer_detail', id=id))
+
+        added = 0
+        skipped = 0
+        for r in rows:
+            row_dt = datetime.combine(r['date'], datetime.min.time())
+            duplicate = CustomerStatement.query.filter(
+                CustomerStatement.customer_id == id,
+                CustomerStatement.type == r['type'],
+                db.func.abs(CustomerStatement.amount - r['amount']) < 0.01,
+                db.func.date(CustomerStatement.created_at) == r['date']
+            ).first()
+            if duplicate:
+                skipped += 1
+                continue
+            stmt = CustomerStatement(
+                customer_id=id, type=r['type'], amount=r['amount'],
+                description=r['description'] or ('Borç (PDF)' if r['type'] == 'borc' else 'Alacak (PDF)'),
+                created_at=row_dt, source='pdf_import'
+            )
+            db.session.add(stmt)
+            added += 1
+        db.session.commit()
+
+        all_statements = CustomerStatement.query.filter_by(customer_id=id).all()
+        total_debit = sum(s.amount for s in all_statements if s.type == 'borc')
+        total_credit = sum(s.amount for s in all_statements if s.type == 'alacak')
+        computed_balance = total_debit - total_credit
+
+        flash(f'{added} satır eklendi, {skipped} satır mükerrer olduğu için atlandı.',
+              'success' if added else 'info')
+
+        if pdf_last_balance is not None and abs(computed_balance - pdf_last_balance) > 1.0:
+            flash(
+                f"Dikkat: PDF'teki son bakiye ({pdf_last_balance:,.2f} ₺) ile sistemin "
+                f"hesapladığı bakiye ({computed_balance:,.2f} ₺) arasında fark var - "
+                f"PDF formatını veya mevcut ekstre kayıtlarını kontrol edin.", 'warning'
+            )
+
+        return redirect(url_for('customer_detail', id=id))
 
     @app.route('/customers/<int:id>/edit', methods=['GET', 'POST'])
     @login_required
@@ -913,14 +1006,15 @@ def register_routes(app):
                     unit=request.form.get(f'unit_{i}', 'adet'),
                     unit_price=price,
                     total_price=qty * price,
+                    urun_tipi=request.form.get(f'urun_tipi_{i}', 'uretim'),
                     deal_id=deal.id
                 )
                 db.session.add(item)
                 i += 1
-            
+
             db.session.flush()
             deal.calculate_totals()
-            
+
             reminder = Reminder(
                 customer_id=deal.customer_id,
                 deal_id=deal.id,
@@ -974,7 +1068,8 @@ def register_routes(app):
                 qty = float(request.form[f'qty_{i}'])
                 price = float(request.form[f'price_{i}'])
                 item = DealItem(description=request.form[f'desc_{i}'], quantity=qty, unit=request.form.get(f'unit_{i}', 'adet'),
-                               unit_price=price, total_price=qty * price, deal_id=deal.id)
+                               unit_price=price, total_price=qty * price,
+                               urun_tipi=request.form.get(f'urun_tipi_{i}', 'uretim'), deal_id=deal.id)
                 db.session.add(item)
                 i += 1
             
@@ -1066,7 +1161,8 @@ def register_routes(app):
         db.session.flush()
         for item in deal.items:
             db.session.add(DealItem(description=item.description, quantity=item.quantity, unit=item.unit,
-                                   unit_price=item.unit_price, total_price=item.total_price, deal_id=new_deal.id))
+                                   unit_price=item.unit_price, total_price=item.total_price,
+                                   urun_tipi=item.urun_tipi, deal_id=new_deal.id))
         db.session.flush()
         new_deal.calculate_totals()
         deal.stage = 'revize'
@@ -1134,7 +1230,9 @@ def register_routes(app):
                     planned_quantity=item.quantity,
                     produced_quantity=0,
                     unit=item.unit,
-                    status='bekleniyor'
+                    status='bekleniyor',
+                    urun_tipi=item.urun_tipi,
+                    ticaret_durumu='siparis_edildi' if item.urun_tipi == 'ticaret' else None
                 )
                 db.session.add(prod_item)
             
@@ -1260,7 +1358,7 @@ def register_routes(app):
             first_name = parts[0]
             last_name = parts[1] if len(parts) > 1 else None
 
-        customer = Customer(first_name=first_name, last_name=last_name, phone=phone or None, status='aktif')
+        customer = Customer(musteri_no=_next_musteri_no(), first_name=first_name, last_name=last_name, phone=phone or None, status='aktif')
         db.session.add(customer)
         try:
             db.session.commit()
@@ -1305,6 +1403,32 @@ def register_routes(app):
         productions = Production.query.order_by(Production.created_at.desc()).all()
         return render_template('production_list.html', productions=productions)
 
+    @app.route('/uretim-planlama')
+    @login_required
+    def uretim_planlama():
+        """Is 5 - temel uretim planlama altyapisi: su an 'Uretimde' durumundaki
+        TUM is emri kalemlerini (ticaret haric) taban_olcusu degerine gore
+        gruplar. Otomatik gruplama yeterli - elle duzenleme sonraki asama."""
+        items = ProductionItem.query.join(Production).filter(
+            Production.status == 'uretimde',
+            ProductionItem.urun_tipi != 'ticaret'
+        ).all()
+
+        groups = {}
+        for item in items:
+            key = item.taban_olcusu or 'Belirtilmemiş'
+            groups.setdefault(key, []).append(item)
+
+        # Belirtilmemiş her zaman en sonda, digerleri alfabetik
+        sorted_keys = sorted(k for k in groups if k != 'Belirtilmemiş')
+        if 'Belirtilmemiş' in groups:
+            sorted_keys.append('Belirtilmemiş')
+
+        grouped = [(k, groups[k]) for k in sorted_keys]
+
+        return render_template('uretim_planlama.html', grouped=grouped,
+                                today=datetime.now().date(), total_items=len(items))
+
     @app.route('/production/<int:id>')
     @login_required
     def production_detail(id):
@@ -1323,9 +1447,29 @@ def register_routes(app):
             item.kagit_tipi = request.form.get(f'kagit_{item.id}', '').strip() or None
             item.gramaj = request.form.get(f'gramaj_{item.id}', '').strip() or None
             item.kac_kg = request.form.get(f'kackg_{item.id}', '').strip() or None
+            if f'taban_olcusu_{item.id}' in request.form:
+                item.taban_olcusu = request.form.get(f'taban_olcusu_{item.id}', '').strip() or None
         db.session.commit()
         flash('İş emri bilgileri kaydedildi!', 'success')
         return redirect(url_for('production_detail', id=id))
+
+    @app.route('/production/item/<int:item_id>/ticaret-durumu', methods=['POST'])
+    @login_required
+    def update_ticaret_durumu(item_id):
+        """Is 4 - 'ticaret' tipi kalemler icin basit 2 durumlu takip (uretim
+        is emri surecine dahil edilmez)."""
+        item = ProductionItem.query.get_or_404(item_id)
+        if item.urun_tipi != 'ticaret':
+            flash('Bu kalem ticaret tipi değil.', 'danger')
+            return redirect(url_for('production_detail', id=item.production_id))
+        new_status = request.form.get('ticaret_durumu')
+        if new_status not in ('siparis_edildi', 'teslime_hazir'):
+            flash('Geçersiz durum.', 'danger')
+            return redirect(url_for('production_detail', id=item.production_id))
+        item.ticaret_durumu = new_status
+        db.session.commit()
+        flash('Ticaret ürünü durumu güncellendi!', 'success')
+        return redirect(url_for('production_detail', id=item.production_id))
 
     @app.route('/production/<int:id>/tasarim-yukle', methods=['POST'])
     @login_required
@@ -2003,7 +2147,8 @@ def register_routes(app):
                 
                 count = 0
                 current_customer = {}
-                
+                next_musteri_n = _musteri_no_max()
+
                 for line in lines:
                     line = line.strip()
                     if line.startswith('BEGIN:VCARD'):
@@ -2013,15 +2158,17 @@ def register_routes(app):
                             name_parts = current_customer.get('name', '').split()
                             first_name = name_parts[0] if name_parts else None
                             last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else None
-                            
+
                             # Aynı isimde müşteri var mı kontrol et
                             existing = Customer.query.filter_by(first_name=first_name, last_name=last_name).first()
                             if existing:
                                 skipped += 1
                                 current_customer = {}
                                 continue
-                            
+
+                            next_musteri_n += 1
                             customer = Customer(
+                                musteri_no=f'M-{next_musteri_n:04d}',
                                 first_name=first_name,
                                 last_name=last_name,
                                 phone=current_customer.get('phone'),
@@ -2158,6 +2305,7 @@ def register_routes(app):
                             last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
                             
                             new_customer = Customer(
+                                musteri_no=_next_musteri_no(),
                                 first_name=first_name,
                                 last_name=last_name or None,
                                 phone=phone
@@ -2257,12 +2405,40 @@ def register_routes(app):
     @login_required
     def add_payment():
         if request.method == 'POST':
+            customer_id = int(request.form['customer_id'])
+            amount = float(request.form['amount'])
+            payment_date = datetime.strptime(request.form['payment_date'], '%Y-%m-%d').date() if request.form.get('payment_date') else datetime.now().date()
+
+            # Is 3: mukerrer odeme koruma - ayni musteri+tutar+tarihte, son
+            # birkac saniye icinde eklenmis bir odeme varsa (kullanicinin
+            # yanlislikla iki kez "Kaydet"e basmasi gibi) direkt kaydetmek
+            # yerine onay istenir. confirm_duplicate=1 geldiyse kullanici
+            # zaten uyariyi gorup bilerek devam etmis demektir.
+            if not request.form.get('confirm_duplicate'):
+                recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
+                recent_duplicate = Payment.query.filter(
+                    Payment.customer_id == customer_id,
+                    Payment.amount == amount,
+                    Payment.payment_date == payment_date,
+                    Payment.created_at >= recent_cutoff
+                ).first()
+                if recent_duplicate:
+                    prefill_customer = Customer.query.get(customer_id)
+                    flash(
+                        f'Bu ödeme az önce eklenmiş görünüyor ({prefill_customer.display_name if prefill_customer else ""} - '
+                        f'{amount:,.2f} ₺, {payment_date.strftime("%d.%m.%Y")}). Yine de eklemek istiyorsanız '
+                        f'aşağıdaki "Yine de Ekle" butonuna basın.', 'warning'
+                    )
+                    return render_template('add_payment.html', today=datetime.now().date(),
+                                            prefill_customer=prefill_customer, prefill_invoice=None,
+                                            duplicate_warning=True, form_data=request.form)
+
             payment = Payment(
-                customer_id=int(request.form['customer_id']),
+                customer_id=customer_id,
                 invoice_id=int(request.form['invoice_id']) if request.form.get('invoice_id') else None,
                 deal_id=int(request.form['deal_id']) if request.form.get('deal_id') else None,
-                amount=float(request.form['amount']),
-                payment_date=datetime.strptime(request.form['payment_date'], '%Y-%m-%d').date() if request.form.get('payment_date') else datetime.now().date(),
+                amount=amount,
+                payment_date=payment_date,
                 payment_method=request.form.get('payment_method'),
                 reference_no=request.form.get('reference_no'),
                 notes=request.form.get('notes'),
@@ -2540,6 +2716,7 @@ def register_routes(app):
             return redirect(url_for('potential_customers'))
 
         customer = Customer(
+            musteri_no=_next_musteri_no(),
             company_name=pc.company_name,
             phone=pc.phone,
             address=pc.address,

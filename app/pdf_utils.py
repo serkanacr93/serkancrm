@@ -526,12 +526,15 @@ def generate_is_emri_pdf(production, copy_label=None):
             pass
 
     # ===== 7) Tablo: Kagit Cinsi | Kac Kg | Baski Rengi | Olcu | Planlanan | Gerceklesen =====
+    # Is 4: 'ticaret' tipi kalemler atolyede uretilmedigi icin bu dahili
+    # uretim talimatina dahil edilmez (ayri, basit bir durumla takip edilir).
     elements.append(Paragraph("ÜRÜN KALEMLERİ", heading_style))
 
-    if production.items:
+    uretim_items = production.uretim_items
+    if uretim_items:
         headers = ['Kağıt Cinsi', 'Kaç Kg', 'Baskı Rengi', 'Ölçü', 'Planlanan Adet', 'Gerçekleşen Adet']
         data = [[Paragraph(h, table_header_style) for h in headers]]
-        for item in production.items:
+        for item in uretim_items:
             kagit_cell = item.kagit_tipi or item.description
             if item.kagit_tipi and item.description:
                 kagit_cell = f"{item.kagit_tipi}<br/><font size=6>{item.description}</font>"

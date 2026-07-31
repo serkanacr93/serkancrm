@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Üretim Planlama - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 no-print">
+    <h2><i class="bi bi-diagram-3"></i> Üretim Planlama <span class="badge bg-secondary">{{ total_items }} kalem</span></h2>
+    <button type="button" class="btn btn-outline-primary" onclick="window.print()">
+        <i class="bi bi-printer"></i> Yazdır / PDF Al
+    </button>
+</div>
+
+<div class="print-header d-none d-print-block mb-3">
+    <h3>Üretim Planı - {{ today.strftime('%d.%m.%Y') }}</h3>
+</div>
+
+{% if grouped %}
+{% for taban_olcusu, items in grouped %}
+<div class="card mb-4 shadow-sm plan-group">
+    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-rulers"></i> Taban Ölçüsü: {{ taban_olcusu }}</span>
+        <span class="badge bg-light text-dark">{{ items|length }} kalem</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-bordered mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Teklif No</th>
+                        <th>Müşteri</th>
+                        <th>Açıklama</th>
+                        <th>Kağıt Tipi</th>
+                        <th>Ölçü</th>
+                        <th>Planlanan</th>
+                        <th class="no-print">İş Emri</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>{{ item.production.deal.display_no }}</td>
+                        <td>{{ item.production.deal.customer.display_name }}</td>
+                        <td>{{ item.description }}</td>
+                        <td>{{ item.kagit_tipi or '-' }}</td>
+                        <td>{{ item.olcu or '-' }}</td>
+                        <td>{{ item.planned_quantity }} {{ item.unit }}</td>
+                        <td class="no-print">
+                            <a href="{{ url_for('production_detail', id=item.production_id) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="alert alert-info no-print">
+    <i class="bi bi-info-circle"></i> Şu an "Üretimde" durumunda kalem bulunmuyor.
+</div>
+{% endif %}
+
+<style>
+@media print {
+    .no-print, .navbar, nav { display: none !important; }
+    .card { break-inside: avoid; border: 1px solid #333 !important; }
+    .card-header { background: #333 !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+{% endblock %}

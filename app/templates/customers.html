@@ -58,7 +58,7 @@
             <table class="table table-hover">
                 <thead class="table-dark">
                     <tr>
-                        <th>#</th>
+                        <th>Müşteri No</th>
                         <th>Firma / Müşteri</th>
                         <th>Yetkili</th>
                         <th>Telefon</th>
@@ -71,7 +71,7 @@
                 <tbody>
                     {% for customer in customers %}
                     <tr>
-                        <td>{{ customer.id }}</td>
+                        <td>{{ customer.musteri_no or customer.id }}</td>
                         <td>
                             <a href="{{ url_for('customer_detail', id=customer.id) }}">
                                 {% if customer.company_name %}

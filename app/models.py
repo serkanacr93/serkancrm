@@ -63,6 +63,12 @@ class Commission(db.Model):
 
 class Customer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    # Is 2 - otomatik, benzersiz, siral musteri numarasi (M-0001, M-0002, ...).
+    # routes.py'deki _next_musteri_no()/_musteri_no_max() ile atanir - burada
+    # DB-seviyesinde default YOK, cunku toplu ice aktarimlarda (CSV/Excel/VCF)
+    # ayni flush icinde her satirin ayni "sonraki" degeri gormesini onlemek
+    # icin Python tarafinda tek bir sayacla artiriliyor.
+    musteri_no = db.Column(db.String(10), unique=True, nullable=True)
     first_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50))
     email = db.Column(db.String(120), unique=True, nullable=True)
@@ -234,6 +240,9 @@ class DealItem(db.Model):
     unit_price = db.Column(db.Float, nullable=False)
     total_price = db.Column(db.Float, nullable=False)
     deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=False)
+    # Is 4 - 'uretim': kendi atolyemizde uretiliyor (Is Emri surecine dahil).
+    # 'ticaret': hazir alinip satiliyor (uretim asama takibi atlanir).
+    urun_tipi = db.Column(db.String(20), default='uretim', nullable=False)
 
 # Uretim asama akisi: basit 3 durumlu siralama. 'iptal' bilincli olarak bu
 # akisin disinda tutulur (sadece edit_production'dan elle secilir).
@@ -294,12 +303,21 @@ class Production(db.Model):
         return max(self.shipments, key=lambda s: s.created_at) if self.shipments else None
 
     @property
+    def uretim_items(self):
+        return [i for i in self.items if i.urun_tipi != 'ticaret']
+
+    @property
+    def ticaret_items(self):
+        return [i for i in self.items if i.urun_tipi == 'ticaret']
+
+    @property
     def specs_missing(self):
         """Kagit Cinsi/Olcu gibi is emri spesifikasyonlari teklif olusturulurken
         degil, uretim asamasinda atolye tarafindan elle giriliyor - hicbir
         yerde zorunlu tutulmuyor, bu yuzden bazi uretimlerde unutuluyor (Is B).
-        Bu, o durumu goze carpar hale getirmek icin kullanilir."""
-        return any(not item.kagit_tipi or not item.olcu for item in self.items)
+        Bu, o durumu goze carpar hale getirmek icin kullanilir. Is 4: 'ticaret'
+        tipi kalemler atolyede uretilmedigi icin bu kontrolun disinda tutulur."""
+        return any(not item.kagit_tipi or not item.olcu for item in self.uretim_items)
 
 class ProductionItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -321,8 +339,20 @@ class ProductionItem(db.Model):
     gramaj = db.Column(db.String(50))
     kac_kg = db.Column(db.String(50))
 
+    # Is 4 - DealItem.urun_tipi'nden approve_deal aninda kopyalanir.
+    # 'ticaret' ise atolye uretim akisina (Uretimde/Hazir spesifikasyonlari)
+    # girmez, bunun yerine basit ticaret_durumu ile takip edilir.
+    urun_tipi = db.Column(db.String(20), default='uretim', nullable=False)
+    ticaret_durumu = db.Column(db.String(20), nullable=True)  # siparis_edildi / teslime_hazir
+
+    # Is 5 - ayni olcudeki is emri kalemlerini gruplamak icin serbest metin
+    # (orn. "12x20"). Uretim planlama altyapisi (bkz. /uretim-planlama).
+    taban_olcusu = db.Column(db.String(50), nullable=True)
+
     @property
     def is_produced(self):
+        if self.urun_tipi == 'ticaret':
+            return self.ticaret_durumu == 'teslime_hazir'
         return self.produced_quantity >= self.planned_quantity
 
 CARRIER_OPTIONS = ['Aras Kargo', 'MNG Kargo', 'Yurtiçi Kargo', 'UPS', 'Sürat Kargo', 'Elden Teslim', 'Diğer']
@@ -396,6 +426,10 @@ class CustomerStatement(db.Model):
     amount = db.Column(db.Float, nullable=False)
     description = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Is 1 (PDF cari ekstre ice aktarim) - elle/otomatik olusturulanlardan
+    # ayirt etmek icin. 'pdf_import' ise created_at, PDF'teki gercek islem
+    # tarihidir (import aninin degil).
+    source = db.Column(db.String(20), default='manuel', nullable=False)
 
 class Invoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)

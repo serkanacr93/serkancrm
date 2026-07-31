@@ -116,11 +116,12 @@
                         <table class="table table-bordered" id="items-table">
                             <thead class="table-dark">
                                 <tr>
-                                    <th style="width: 35%">Açıklama</th>
-                                    <th style="width: 15%">Miktar</th>
-                                    <th style="width: 15%">Birim</th>
-                                    <th style="width: 17%">Birim Fiyat (₺)</th>
-                                    <th style="width: 18%">Toplam (₺)</th>
+                                    <th style="width: 28%">Açıklama</th>
+                                    <th style="width: 12%">Miktar</th>
+                                    <th style="width: 12%">Birim</th>
+                                    <th style="width: 14%">Birim Fiyat (₺)</th>
+                                    <th style="width: 14%">Toplam (₺)</th>
+                                    <th style="width: 15%">Tip</th>
                                     <th style="width: 5%"></th>
                                 </tr>
                             </thead>
@@ -140,6 +141,12 @@
                                     </td>
                                     <td><input type="number" class="form-control form-control-sm item-price" name="price_0" min="0" step="0.01" required></td>
                                     <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
+                                    <td>
+                                        <select class="form-select form-select-sm" name="urun_tipi_0" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır.">
+                                            <option value="uretim">Üretim</option>
+                                            <option value="ticaret">Ticaret</option>
+                                        </select>
+                                    </td>
                                     <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
                                 </tr>
                             </tbody>
@@ -147,17 +154,17 @@
                                 <tr class="table-light">
                                     <td colspan="4" class="text-end"><strong>Ara Toplam:</strong></td>
                                     <td><strong id="subtotal">0,00 ₺</strong></td>
-                                    <td></td>
+                                    <td colspan="2"></td>
                                 </tr>
                                 <tr class="table-light">
                                     <td colspan="4" class="text-end"><strong>KDV (<span id="vat-rate-display">20</span>%):</strong></td>
                                     <td><strong id="vat-amount">0,00 ₺</strong></td>
-                                    <td></td>
+                                    <td colspan="2"></td>
                                 </tr>
                                 <tr class="table-success">
                                     <td colspan="4" class="text-end"><strong>GENEL TOPLAM:</strong></td>
                                     <td><strong id="grand-total">0,00 ₺</strong></td>
-                                    <td></td>
+                                    <td colspan="2"></td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -270,6 +277,12 @@ document.getElementById('add-item').addEventListener('click', function() {
         </td>
         <td><input type="number" class="form-control form-control-sm item-price" name="price_${itemCount}" min="0" step="0.01" required></td>
         <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
+        <td>
+            <select class="form-select form-select-sm" name="urun_tipi_${itemCount}" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır.">
+                <option value="uretim">Üretim</option>
+                <option value="ticaret">Ticaret</option>
+            </select>
+        </td>
         <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
     `;
     tbody.appendChild(row);

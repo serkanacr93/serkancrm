@@ -38,7 +38,9 @@
                 </span>
             </div>
             <div class="card-body">
-                {% if production.status == 'uretimde' %}
+                {% if not production.uretim_items %}
+                <p class="text-muted small mb-0">Bu iş emrinde üretim tipi kalem yok (tümü ticaret ürünü - aşağıda ayrıca gösteriliyor).</p>
+                {% elif production.status == 'uretimde' %}
                 <form method="POST" action="{{ url_for('mark_production_ready', id=production.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="table-responsive">
@@ -52,7 +54,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                {% for item in production.items %}
+                                {% for item in production.uretim_items %}
                                 <tr>
                                     <td>{{ item.description }}</td>
                                     <td>{{ item.planned_quantity }}</td>
@@ -83,7 +85,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for item in production.items %}
+                            {% for item in production.uretim_items %}
                             <tr>
                                 <td>{{ item.description }}</td>
                                 <td>{{ item.planned_quantity }}</td>
@@ -98,6 +100,54 @@
             </div>
         </div>
 
+        {% if production.ticaret_items %}
+        <div class="card mb-4 shadow-sm border-info">
+            <div class="card-header bg-info text-white">
+                <i class="bi bi-bag-check"></i> Ticaret Ürünleri (üretim iş emri sürecine dahil değil)
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Açıklama</th>
+                                <th>Miktar</th>
+                                <th>Durum</th>
+                                <th>İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in production.ticaret_items %}
+                            <tr>
+                                <td>{{ item.description }}</td>
+                                <td>{{ item.planned_quantity }} {{ item.unit }}</td>
+                                <td>
+                                    <span class="badge bg-{{ 'success' if item.ticaret_durumu == 'teslime_hazir' else 'secondary' }}">
+                                        {{ 'Teslime Hazır' if item.ticaret_durumu == 'teslime_hazir' else 'Sipariş Edildi' }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <form method="POST" action="{{ url_for('update_ticaret_durumu', item_id=item.id) }}" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        {% if item.ticaret_durumu == 'teslime_hazir' %}
+                                        <input type="hidden" name="ticaret_durumu" value="siparis_edildi">
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary">Sipariş Edildi Olarak İşaretle</button>
+                                        {% else %}
+                                        <input type="hidden" name="ticaret_durumu" value="teslime_hazir">
+                                        <button type="submit" class="btn btn-sm btn-outline-success">Teslime Hazır Olarak İşaretle</button>
+                                        {% endif %}
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if production.uretim_items %}
         <div class="card mb-4 shadow-sm">
             <div class="card-header"><i class="bi bi-clipboard-data"></i> İş Emri Detayları</div>
             <div class="card-body">
@@ -120,10 +170,11 @@
                                     <th>Kağıt Tipi</th>
                                     <th>Gramaj</th>
                                     <th>Kaç Kg</th>
+                                    <th>Taban Ölçüsü</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {% for item in production.items %}
+                                {% for item in production.uretim_items %}
                                 <tr>
                                     <td>{{ item.description }}</td>
                                     <td><input type="text" class="form-control form-control-sm" name="olcu_{{ item.id }}" value="{{ item.olcu or '' }}"></td>
@@ -131,6 +182,7 @@
                                     <td><input type="text" class="form-control form-control-sm" name="kagit_{{ item.id }}" value="{{ item.kagit_tipi or '' }}"></td>
                                     <td><input type="text" class="form-control form-control-sm" name="gramaj_{{ item.id }}" value="{{ item.gramaj or '' }}"></td>
                                     <td><input type="text" class="form-control form-control-sm" name="kackg_{{ item.id }}" value="{{ item.kac_kg or '' }}"></td>
+                                    <td><input type="text" class="form-control form-control-sm" name="taban_olcusu_{{ item.id }}" value="{{ item.taban_olcusu or '' }}" placeholder="Örn: 12x20" title="Üretim planlama sayfasında bu değere göre gruplanır"></td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -142,6 +194,7 @@
                 </form>
             </div>
         </div>
+        {% endif %}
 
         <div class="card mb-4 shadow-sm">
             <div class="card-header"><i class="bi bi-image"></i> Tasarım Görseli</div>

@@ -11,6 +11,7 @@
         {% else %}
         <i class="bi bi-person"></i> {{ customer.first_name }} {{ customer.last_name }}
         {% endif %}
+        {% if customer.musteri_no %}<span class="badge bg-secondary fs-6 align-middle">{{ customer.musteri_no }}</span>{% endif %}
     </h2>
     <div>
         <a href="{{ url_for('customer_statement_pdf', id=customer.id) }}" class="btn btn-info" target="_blank">
@@ -19,6 +20,15 @@
         <a href="{{ url_for('add_payment') }}?customer_id={{ customer.id }}" class="btn btn-success">
             <i class="bi bi-cash"></i> Ödeme Ekle
         </a>
+        <form method="POST" action="{{ url_for('import_statement_pdf', id=customer.id) }}"
+              enctype="multipart/form-data" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="file" name="statement_pdf" accept="application/pdf" id="statement_pdf_input"
+                   style="display:none" onchange="if(this.value){ this.form.submit(); }">
+            <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('statement_pdf_input').click()">
+                <i class="bi bi-file-earmark-arrow-up"></i> Eski Cari Ekstre Yükle (PDF)
+            </button>
+        </form>
         <a href="{{ url_for('edit_customer', id=customer.id) }}" class="btn btn-warning">
             <i class="bi bi-pencil"></i> Düzenle
         </a>
@@ -125,7 +135,8 @@
             </div>
             <div class="card-body">
                 <table class="table table-borderless mb-0">
-                    <tr><th width="100">Durum:</th><td><span class="badge bg-{{ 'success' if customer.status == 'aktif' else 'secondary' }}">{{ customer.status }}</span></td></tr>
+                    <tr><th width="100">Müşteri No:</th><td>{{ customer.musteri_no or '-' }}</td></tr>
+                    <tr><th>Durum:</th><td><span class="badge bg-{{ 'success' if customer.status == 'aktif' else 'secondary' }}">{{ customer.status }}</span></td></tr>
                     <tr><th>E-posta:</th><td>{{ customer.email or '-' }}</td></tr>
                     <tr><th>Telefon:</th><td>{{ customer.phone or '-' }}</td></tr>
                     <tr><th>Kayıt:</th><td>{{ customer.created_at.strftime('%d.%m.%Y') }}</td></tr>
@@ -247,7 +258,7 @@
                         <div class="table-responsive">
                             <table class="table table-hover">
                                 <thead class="table-dark">
-                                    <tr><th>Tarih</th><th>Tür</th><th>Açıklama</th><th>Tutar</th></tr>
+                                    <tr><th>Tarih</th><th>Tür</th><th>Açıklama</th><th>Tutar</th><th>Kaynak</th></tr>
                                 </thead>
                                 <tbody>
                                     {% for s in statements %}
@@ -256,13 +267,20 @@
                                         <td><span class="badge bg-{{ 'danger' if s.type == 'borc' else 'success' }}">{{ s.type|upper }}</span></td>
                                         <td>{{ s.description or '-' }}</td>
                                         <td>{{ "{:,.2f}".format(s.amount) }} ₺</td>
+                                        <td>
+                                            {% if s.source == 'pdf_import' %}
+                                            <span class="badge bg-secondary"><i class="bi bi-file-earmark-arrow-up"></i> PDF İçe Aktarım</span>
+                                            {% else %}
+                                            <span class="text-muted small">-</span>
+                                            {% endif %}
+                                        </td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
                                 <tfoot class="table-light">
-                                    <tr><td colspan="3"><strong>Toplam Borç:</strong></td><td><strong class="text-danger">{{ "{:,.2f}".format(total_debit) }} ₺</strong></td></tr>
-                                    <tr><td colspan="3"><strong>Toplam Alacak:</strong></td><td><strong class="text-success">{{ "{:,.2f}".format(total_credit) }} ₺</strong></td></tr>
-                                    <tr class="table-warning"><td colspan="3"><strong>Bakiye:</strong></td><td><strong>{{ "{:,.2f}".format(total_debit - total_credit) }} ₺</strong></td></tr>
+                                    <tr><td colspan="4"><strong>Toplam Borç:</strong></td><td><strong class="text-danger">{{ "{:,.2f}".format(total_debit) }} ₺</strong></td></tr>
+                                    <tr><td colspan="4"><strong>Toplam Alacak:</strong></td><td><strong class="text-success">{{ "{:,.2f}".format(total_credit) }} ₺</strong></td></tr>
+                                    <tr class="table-warning"><td colspan="4"><strong>Bakiye:</strong></td><td><strong>{{ "{:,.2f}".format(total_debit - total_credit) }} ₺</strong></td></tr>
                                 </tfoot>
                             </table>
                         </div>
