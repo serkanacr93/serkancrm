@@ -5,9 +5,14 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4 no-print">
     <h2><i class="bi bi-diagram-3"></i> Üretim Planlama <span class="badge bg-secondary">{{ total_items }} kalem</span></h2>
-    <button type="button" class="btn btn-outline-primary" onclick="window.print()">
-        <i class="bi bi-printer"></i> Yazdır / PDF Al
-    </button>
+    <div>
+        <a href="{{ url_for('add_manual_planning_entry') }}" class="btn btn-success">
+            <i class="bi bi-plus-circle"></i> Manuel Kayıt Ekle
+        </a>
+        <button type="button" class="btn btn-outline-primary" onclick="window.print()">
+            <i class="bi bi-printer"></i> Yazdır / PDF Al
+        </button>
+    </div>
 </div>
 
 <div class="print-header d-none d-print-block mb-3">
@@ -15,40 +20,65 @@
 </div>
 
 {% if grouped %}
-{% for taban_olcusu, items in grouped %}
+{% for g in grouped %}
 <div class="card mb-4 shadow-sm plan-group">
     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-rulers"></i> Taban Ölçüsü: {{ taban_olcusu }}</span>
-        <span class="badge bg-light text-dark">{{ items|length }} kalem</span>
+        <span><i class="bi bi-rulers"></i> {{ g.key }} — Aynı Kalıp/Ölçü</span>
+        <span class="badge bg-light text-dark">{{ g.rows|length }} kalem</span>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-bordered mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>Teklif No</th>
                         <th>Müşteri</th>
-                        <th>Açıklama</th>
-                        <th>Kağıt Tipi</th>
-                        <th>Ölçü</th>
-                        <th>Planlanan</th>
-                        <th class="no-print">İş Emri</th>
+                        <th>Teklif No</th>
+                        <th>Adet</th>
+                        <th>Teslim Tarihi</th>
+                        <th>Kaynak</th>
+                        <th class="no-print">İşlem</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for item in items %}
+                    {% for row in g.rows %}
                     <tr>
-                        <td>{{ item.production.deal.display_no }}</td>
-                        <td>{{ item.production.deal.customer.display_name }}</td>
-                        <td>{{ item.description }}</td>
-                        <td>{{ item.kagit_tipi or '-' }}</td>
-                        <td>{{ item.olcu or '-' }}</td>
-                        <td>{{ item.planned_quantity }} {{ item.unit }}</td>
+                        <td>{{ row.customer_name }}</td>
+                        <td>{{ row.deal_no or '-' }}</td>
+                        <td>{{ "{:,.0f}".format(row.quantity) }} {{ row.unit }}</td>
+                        <td>{{ row.delivery_date.strftime('%d.%m.%Y') if row.delivery_date else '-' }}</td>
+                        <td>
+                            {% if row.kind == 'manual' %}
+                            <span class="badge bg-info text-dark">Manuel</span>
+                            {% else %}
+                            <span class="text-muted small">Sistem</span>
+                            {% endif %}
+                        </td>
                         <td class="no-print">
-                            <a href="{{ url_for('production_detail', id=item.production_id) }}" class="btn btn-sm btn-outline-primary">
+                            {% if row.kind == 'production' %}
+                            <a href="{{ url_for('production_detail', id=row.production_id) }}" class="btn btn-sm btn-outline-primary">
                                 <i class="bi bi-eye"></i>
                             </a>
+                            {% else %}
+                            <form method="POST" action="{{ url_for('delete_manual_planning_entry', id=row.manual_id) }}"
+                                  onsubmit="return confirm('Bu manuel kaydı silmek istediğinize emin misiniz?')" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                            </form>
+                            {% endif %}
                         </td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="plan-total-row">
+                        <td colspan="2" class="text-end"><strong>TOPLAM</strong></td>
+                        <td colspan="4"><strong>{{ g.totals_display }}</strong></td>
+                    </tr>
+                    {% for _ in range(3) %}
+                    <tr class="plan-empty-row">
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td colspan="2" class="no-print"></td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -59,11 +89,20 @@
 {% endfor %}
 {% else %}
 <div class="alert alert-info no-print">
-    <i class="bi bi-info-circle"></i> Şu an "Üretimde" durumunda kalem bulunmuyor.
+    <i class="bi bi-info-circle"></i> Şu an "Üretimde" durumunda kalem veya manuel kayıt bulunmuyor.
 </div>
 {% endif %}
 
 <style>
+.plan-total-row td {
+    background-color: #fd7e14 !important;
+    color: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+.plan-empty-row td {
+    height: 1.8em;
+}
 @media print {
     .no-print, .navbar, nav { display: none !important; }
     .card { break-inside: avoid; border: 1px solid #333 !important; }

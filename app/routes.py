@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search
@@ -1403,31 +1403,145 @@ def register_routes(app):
         productions = Production.query.order_by(Production.created_at.desc()).all()
         return render_template('production_list.html', productions=productions)
 
+    def _planning_group_key(item):
+        """Gramaj bazli gruplama - gramaj yoksa daha once elle girilmis
+        taban_olcusu'ne, o da yoksa ham olcu metnine dusulur (Is 2)."""
+        return item.gramaj or item.taban_olcusu or item.olcu or None
+
     @app.route('/uretim-planlama')
     @login_required
     def uretim_planlama():
-        """Is 5 - temel uretim planlama altyapisi: su an 'Uretimde' durumundaki
-        TUM is emri kalemlerini (ticaret haric) taban_olcusu degerine gore
-        gruplar. Otomatik gruplama yeterli - elle duzenleme sonraki asama."""
+        """Su an 'Uretimde' durumundaki TUM is emri kalemlerini (ticaret haric)
+        gramaj (yoksa olcu) degerine gore gruplar; ayni gruba, sistemde
+        formal bir teklifi olmayan ManuelPlanningEntry kayitlari da eklenir.
+        Her grubun toplam adedi ve baski ustasina yazdirilacak bos satirlar
+        gosterilir (Is 2)."""
         items = ProductionItem.query.join(Production).filter(
             Production.status == 'uretimde',
             ProductionItem.urun_tipi != 'ticaret'
         ).all()
+        manual_entries = ManualPlanningEntry.query.order_by(ManualPlanningEntry.created_at.asc()).all()
 
         groups = {}
         for item in items:
-            key = item.taban_olcusu or 'Belirtilmemiş'
-            groups.setdefault(key, []).append(item)
+            key = _planning_group_key(item) or 'Belirtilmemiş'
+            row = {
+                'kind': 'production',
+                'customer_name': item.production.deal.customer.display_name,
+                'deal_no': item.production.deal.display_no,
+                'description': item.description,
+                'quantity': item.planned_quantity,
+                'unit': item.unit,
+                'delivery_date': item.production.due_date,
+                'production_id': item.production_id,
+            }
+            groups.setdefault(key, []).append(row)
+
+        for entry in manual_entries:
+            key = entry.group_key or 'Belirtilmemiş'
+            row = {
+                'kind': 'manual',
+                'customer_name': entry.customer.display_name if entry.customer else entry.customer_name,
+                'deal_no': None,
+                'description': entry.notes,
+                'quantity': entry.quantity,
+                'unit': entry.unit,
+                'delivery_date': entry.delivery_date,
+                'manual_id': entry.id,
+            }
+            groups.setdefault(key, []).append(row)
 
         # Belirtilmemiş her zaman en sonda, digerleri alfabetik
         sorted_keys = sorted(k for k in groups if k != 'Belirtilmemiş')
         if 'Belirtilmemiş' in groups:
             sorted_keys.append('Belirtilmemiş')
 
-        grouped = [(k, groups[k]) for k in sorted_keys]
+        grouped = []
+        for k in sorted_keys:
+            rows = groups[k]
+            # Bir grup icinde birim karisik olabilir (orn. bazi kalemler kg,
+            # bazilari adet) - tek bir toplamda birlestirmek yaniltici olur,
+            # bu yuzden birim basina ayri toplam hesaplanir.
+            totals_by_unit = {}
+            for r in rows:
+                totals_by_unit[r['unit']] = totals_by_unit.get(r['unit'], 0) + r['quantity']
+            totals_display = ', '.join(f"{qty:,.0f} {unit}" for unit, qty in totals_by_unit.items())
+            grouped.append({'key': k, 'rows': rows, 'totals_display': totals_display})
+
+        existing_group_keys = sorted(k for k in groups if k != 'Belirtilmemiş')
 
         return render_template('uretim_planlama.html', grouped=grouped,
-                                today=datetime.now().date(), total_items=len(items))
+                                today=datetime.now().date(), total_items=len(items) + len(manual_entries),
+                                existing_group_keys=existing_group_keys)
+
+    @app.route('/uretim-planlama/manuel-ekle', methods=['GET', 'POST'])
+    @login_required
+    def add_manual_planning_entry():
+        """Is 2 - sistemde formal bir teklifi olmayan (orn. telefonla gelen)
+        bir siparisi elle uretim planina ekler."""
+        if request.method == 'POST':
+            group_key = request.form.get('group_key', '').strip()
+            customer_name = request.form.get('customer_name', '').strip()
+            customer_id = request.form.get('customer_id') or None
+            quantity_raw = request.form.get('quantity', '').strip()
+            unit = request.form.get('unit', 'adet').strip() or 'adet'
+            delivery_date_raw = request.form.get('delivery_date', '').strip()
+
+            errors = []
+            if not group_key:
+                errors.append('Gramaj/Ölçü grubu girilmelidir.')
+            if not customer_name and not customer_id:
+                errors.append('Müşteri adı girilmeli veya mevcut bir müşteri seçilmelidir.')
+            quantity = None
+            if not quantity_raw:
+                errors.append('Adet girilmelidir.')
+            else:
+                try:
+                    quantity = float(quantity_raw)
+                    if quantity <= 0:
+                        errors.append('Adet 0\'dan büyük olmalıdır.')
+                except ValueError:
+                    errors.append('Adet geçerli bir sayı olmalıdır.')
+
+            if errors:
+                for err in errors:
+                    flash(err, 'danger')
+                return redirect(url_for('add_manual_planning_entry'))
+
+            customer = Customer.query.get(int(customer_id)) if customer_id else None
+            entry = ManualPlanningEntry(
+                group_key=group_key,
+                customer_name=customer.display_name if customer else customer_name,
+                customer_id=customer.id if customer else None,
+                quantity=quantity,
+                unit=unit,
+                delivery_date=datetime.strptime(delivery_date_raw, '%Y-%m-%d').date() if delivery_date_raw else None,
+                notes=request.form.get('notes', '').strip() or None,
+                user_id=current_user.id
+            )
+            db.session.add(entry)
+            db.session.commit()
+            flash('Manuel kayıt üretim planına eklendi!', 'success')
+            return redirect(url_for('uretim_planlama'))
+
+        existing_group_keys = sorted({
+            _planning_group_key(item) for item in
+            ProductionItem.query.join(Production).filter(
+                Production.status == 'uretimde',
+                ProductionItem.urun_tipi != 'ticaret'
+            ).all() if _planning_group_key(item)
+        })
+        return render_template('add_manual_planning_entry.html', today=datetime.now().date(),
+                                existing_group_keys=existing_group_keys)
+
+    @app.route('/uretim-planlama/manuel/<int:id>/sil', methods=['POST'])
+    @login_required
+    def delete_manual_planning_entry(id):
+        entry = ManualPlanningEntry.query.get_or_404(id)
+        db.session.delete(entry)
+        db.session.commit()
+        flash('Manuel kayıt silindi!', 'success')
+        return redirect(url_for('uretim_planlama'))
 
     @app.route('/production/<int:id>')
     @login_required

@@ -355,6 +355,25 @@ class ProductionItem(db.Model):
             return self.ticaret_durumu == 'teslime_hazir'
         return self.produced_quantity >= self.planned_quantity
 
+class ManualPlanningEntry(db.Model):
+    """Is 2 - /uretim-planlama sayfasinda, sistemde formal bir teklifi
+    olmayan (orn. telefonla gelen) siparisleri elle bir gramaj/olcu grubuna
+    eklemek icin. Gercek ProductionItem kayitlarindan 'Manuel' etiketiyle
+    ayirt edilir, herhangi bir Deal/Production'a bagli degildir."""
+    id = db.Column(db.Integer, primary_key=True)
+    group_key = db.Column(db.String(100), nullable=False)  # gramaj/olcu grup degeri - ilgili banda eklenir
+    customer_name = db.Column(db.String(200), nullable=False)  # serbest metin
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)  # opsiyonel, mevcut musteri secilebilir
+    quantity = db.Column(db.Float, nullable=False)
+    unit = db.Column(db.String(20), default='adet')
+    delivery_date = db.Column(db.Date, nullable=True)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    customer = db.relationship('Customer')
+    user = db.relationship('User')
+
 CARRIER_OPTIONS = ['Aras Kargo', 'MNG Kargo', 'Yurtiçi Kargo', 'UPS', 'Sürat Kargo', 'Elden Teslim', 'Diğer']
 
 SHIPMENT_STATUSES = [
