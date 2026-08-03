@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search
@@ -1549,7 +1549,8 @@ def register_routes(app):
         production = Production.query.get_or_404(id)
         shipments = Shipment.query.filter_by(production_id=id).order_by(Shipment.created_at.desc()).all()
         return render_template('production_detail.html', production=production, shipments=shipments,
-                                today=datetime.now().date(), stages=PRODUCTION_STAGES)
+                                today=datetime.now().date(), stages=PRODUCTION_STAGES,
+                                ticaret_stages=TICARET_STAGES)
 
     @app.route('/production/<int:id>/update-specs', methods=['POST'])
     @login_required
@@ -1570,20 +1571,155 @@ def register_routes(app):
     @app.route('/production/item/<int:item_id>/ticaret-durumu', methods=['POST'])
     @login_required
     def update_ticaret_durumu(item_id):
-        """Is 4 - 'ticaret' tipi kalemler icin basit 2 durumlu takip (uretim
-        is emri surecine dahil edilmez)."""
+        """'ticaret' tipi kalemler icin 3 durumlu takip (Siparis Edildi ->
+        Tedarik Edildi -> Teslime Hazir) - uretim is emri surecine dahil
+        edilmez. Ayni TICARET_STAGE_KEYS /tedarik-takip sayfasinda da
+        kullanilir, ikisi senkron kalir (tek kaynak: bu alan)."""
         item = ProductionItem.query.get_or_404(item_id)
         if item.urun_tipi != 'ticaret':
             flash('Bu kalem ticaret tipi değil.', 'danger')
             return redirect(url_for('production_detail', id=item.production_id))
         new_status = request.form.get('ticaret_durumu')
-        if new_status not in ('siparis_edildi', 'teslime_hazir'):
+        if new_status not in TICARET_STAGE_KEYS:
             flash('Geçersiz durum.', 'danger')
             return redirect(url_for('production_detail', id=item.production_id))
         item.ticaret_durumu = new_status
         db.session.commit()
         flash('Ticaret ürünü durumu güncellendi!', 'success')
         return redirect(url_for('production_detail', id=item.production_id))
+
+    @app.route('/tedarik-takip')
+    @login_required
+    def tedarik_takip():
+        """Ticaret tipi (hazir alinip satilan) TUM urun kalemlerini merkezi
+        bir sayfada listeler - production_detail'deki gomulu takipten farkli
+        olarak tum musteri/teklifler tek yerde gorulur. Ayni ticaret_durumu
+        alanini kullandigi icin durum degisiklikleri iki sayfada da senkron
+        gorunur (tek kaynak - ayri bir kopya alan yok)."""
+        items = ProductionItem.query.join(Production).filter(
+            ProductionItem.urun_tipi == 'ticaret'
+        ).order_by(Production.created_at.desc()).all()
+        manual_entries = ManualTedarikEntry.query.order_by(ManualTedarikEntry.created_at.desc()).all()
+
+        def _next_stage(durum):
+            try:
+                idx = TICARET_STAGE_KEYS.index(durum)
+            except ValueError:
+                idx = -1
+            if idx < 0 or idx >= len(TICARET_STAGE_KEYS) - 1:
+                return None
+            next_key = TICARET_STAGE_KEYS[idx + 1]
+            return {'key': next_key, 'label': TICARET_STAGE_LABELS[next_key]}
+
+        rows = []
+        for item in items:
+            durum = item.ticaret_durumu or 'siparis_edildi'
+            rows.append({
+                'kind': 'production',
+                'customer_name': item.production.deal.customer.display_name,
+                'deal_no': item.production.deal.display_no,
+                'urun': item.description,
+                'quantity': item.planned_quantity,
+                'unit': item.unit,
+                'delivery_date': item.production.due_date,
+                'durum': durum,
+                'durum_label': TICARET_STAGE_LABELS.get(durum, durum),
+                'next_stage': _next_stage(durum),
+                'item_id': item.id,
+                'production_id': item.production_id,
+            })
+        for entry in manual_entries:
+            rows.append({
+                'kind': 'manual',
+                'customer_name': entry.customer.display_name if entry.customer else entry.customer_name,
+                'deal_no': None,
+                'urun': entry.urun,
+                'quantity': entry.quantity,
+                'unit': entry.unit,
+                'delivery_date': entry.delivery_date,
+                'durum': entry.durum,
+                'durum_label': TICARET_STAGE_LABELS.get(entry.durum, entry.durum),
+                'next_stage': _next_stage(entry.durum),
+                'manual_id': entry.id,
+            })
+
+        return render_template('tedarik_takip.html', rows=rows, stages=TICARET_STAGES,
+                                today=datetime.now().date())
+
+    @app.route('/tedarik-takip/manuel-ekle', methods=['GET', 'POST'])
+    @login_required
+    def add_manual_tedarik_entry():
+        """Sistemde formal bir teklifi olmayan bir tedarik kalemini elle
+        /tedarik-takip listesine ekler."""
+        if request.method == 'POST':
+            customer_name = request.form.get('customer_name', '').strip()
+            customer_id = request.form.get('customer_id') or None
+            urun = request.form.get('urun', '').strip()
+            quantity_raw = request.form.get('quantity', '').strip()
+            unit = request.form.get('unit', 'adet').strip() or 'adet'
+            delivery_date_raw = request.form.get('delivery_date', '').strip()
+
+            errors = []
+            if not customer_name and not customer_id:
+                errors.append('Müşteri adı girilmeli veya mevcut bir müşteri seçilmelidir.')
+            if not urun:
+                errors.append('Ürün girilmelidir.')
+            quantity = None
+            if not quantity_raw:
+                errors.append('Adet girilmelidir.')
+            else:
+                try:
+                    quantity = float(quantity_raw)
+                    if quantity <= 0:
+                        errors.append('Adet 0\'dan büyük olmalıdır.')
+                except ValueError:
+                    errors.append('Adet geçerli bir sayı olmalıdır.')
+
+            if errors:
+                for err in errors:
+                    flash(err, 'danger')
+                return redirect(url_for('add_manual_tedarik_entry'))
+
+            customer = Customer.query.get(int(customer_id)) if customer_id else None
+            entry = ManualTedarikEntry(
+                customer_name=customer.display_name if customer else customer_name,
+                customer_id=customer.id if customer else None,
+                urun=urun,
+                quantity=quantity,
+                unit=unit,
+                delivery_date=datetime.strptime(delivery_date_raw, '%Y-%m-%d').date() if delivery_date_raw else None,
+                durum='siparis_edildi',
+                notes=request.form.get('notes', '').strip() or None,
+                user_id=current_user.id
+            )
+            db.session.add(entry)
+            db.session.commit()
+            flash('Manuel kayıt tedarik takibine eklendi!', 'success')
+            return redirect(url_for('tedarik_takip'))
+
+        return render_template('add_manual_tedarik_entry.html', today=datetime.now().date())
+
+    @app.route('/tedarik-takip/manuel/<int:id>/durum', methods=['POST'])
+    @login_required
+    def update_manual_tedarik_durum(id):
+        entry = ManualTedarikEntry.query.get_or_404(id)
+        new_status = request.form.get('durum')
+        if new_status not in TICARET_STAGE_KEYS:
+            flash('Geçersiz durum.', 'danger')
+            return redirect(url_for('tedarik_takip'))
+        entry.durum = new_status
+        db.session.commit()
+        flash('Durum güncellendi!', 'success')
+        return redirect(url_for('tedarik_takip'))
+
+    @app.route('/tedarik-takip/manuel/<int:id>/sil', methods=['POST'])
+    @login_required
+    def delete_manual_tedarik_entry(id):
+        entry = ManualTedarikEntry.query.get_or_404(id)
+        db.session.delete(entry)
+        db.session.commit()
+        flash('Manuel kayıt silindi!', 'success')
+        return redirect(url_for('tedarik_takip'))
 
     @app.route('/production/<int:id>/tasarim-yukle', methods=['POST'])
     @login_required

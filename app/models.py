@@ -254,6 +254,19 @@ PRODUCTION_STAGES = [
 PRODUCTION_STAGE_KEYS = [key for key, _ in PRODUCTION_STAGES]
 PRODUCTION_STAGE_LABELS = dict(PRODUCTION_STAGES)
 
+# Ticaret tipi (hazir alinip satilan) urunler icin ayri, basit 3 durumlu
+# akis - uretim asama takibine (yukaridaki PRODUCTION_STAGES) hic girmez.
+# ProductionItem.ticaret_durumu ve ManualTedarikEntry.durum bu anahtarlari
+# kullanir - /tedarik-takip sayfasi ve production_detail'deki gomulu takip
+# ayni degerleri paylasarak senkron kalir.
+TICARET_STAGES = [
+    ('siparis_edildi', 'Sipariş Edildi'),
+    ('tedarik_edildi', 'Tedarik Edildi'),
+    ('teslime_hazir', 'Teslime Hazır'),
+]
+TICARET_STAGE_KEYS = [key for key, _ in TICARET_STAGES]
+TICARET_STAGE_LABELS = dict(TICARET_STAGES)
+
 class Production(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), unique=True, nullable=False)
@@ -367,6 +380,26 @@ class ManualPlanningEntry(db.Model):
     quantity = db.Column(db.Float, nullable=False)
     unit = db.Column(db.String(20), default='adet')
     delivery_date = db.Column(db.Date, nullable=True)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    customer = db.relationship('Customer')
+    user = db.relationship('User')
+
+class ManualTedarikEntry(db.Model):
+    """/tedarik-takip sayfasinda, sistemde formal bir teklifi olmayan bir
+    ticaret (hazir alinip satilan) kalemini elle listeye eklemek icin.
+    Gercek ProductionItem (urun_tipi='ticaret') kayitlarindan 'Manuel'
+    etiketiyle ayirt edilir, herhangi bir Deal/Production'a bagli degildir."""
+    id = db.Column(db.Integer, primary_key=True)
+    customer_name = db.Column(db.String(200), nullable=False)  # serbest metin
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)  # opsiyonel, mevcut musteri secilebilir
+    urun = db.Column(db.String(200), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    unit = db.Column(db.String(20), default='adet')
+    delivery_date = db.Column(db.Date, nullable=True)
+    durum = db.Column(db.String(20), default='siparis_edildi', nullable=False)  # TICARET_STAGE_KEYS
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)

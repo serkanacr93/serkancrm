@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Tedarik Takip - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 no-print">
+    <h2><i class="bi bi-truck"></i> Tedarik Takip <span class="badge bg-secondary">{{ rows|length }} kalem</span></h2>
+    <div>
+        <a href="{{ url_for('add_manual_tedarik_entry') }}" class="btn btn-success">
+            <i class="bi bi-plus-circle"></i> Manuel Kayıt Ekle
+        </a>
+        <button type="button" class="btn btn-outline-primary" onclick="window.print()">
+            <i class="bi bi-printer"></i> Yazdır / PDF Al
+        </button>
+    </div>
+</div>
+
+<div class="print-header d-none d-print-block mb-3">
+    <h3>Tedarik Takip - {{ today.strftime('%d.%m.%Y') }}</h3>
+</div>
+
+<p class="text-muted small no-print">
+    Ticaret tipi (kendi atölyemizde üretilmeyen, hazır alınıp satılan) ürün kalemleri - üretim iş emri sürecine dahil değildir.
+</p>
+
+{% if rows %}
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Müşteri</th>
+                        <th>Ürün</th>
+                        <th>Adet</th>
+                        <th>Teslim Tarihi</th>
+                        <th>Kaynak</th>
+                        <th>Durum</th>
+                        <th class="no-print">İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>{{ row.customer_name }}</td>
+                        <td>
+                            {{ row.urun }}
+                            {% if row.deal_no %}<br><small class="text-muted">{{ row.deal_no }}</small>{% endif %}
+                        </td>
+                        <td>{{ "{:,.0f}".format(row.quantity) }} {{ row.unit }}</td>
+                        <td>{{ row.delivery_date.strftime('%d.%m.%Y') if row.delivery_date else '-' }}</td>
+                        <td>
+                            {% if row.kind == 'manual' %}
+                            <span class="badge bg-info text-dark">Manuel</span>
+                            {% else %}
+                            <span class="text-muted small">Sistem</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-{{ 'danger' if row.durum == 'siparis_edildi' else 'warning text-dark' if row.durum == 'tedarik_edildi' else 'success' }}">
+                                {{ row.durum_label }}
+                            </span>
+                        </td>
+                        <td class="no-print">
+                            <div class="d-flex gap-1">
+                                {% if row.next_stage %}
+                                <form method="POST" action="{{ url_for('update_ticaret_durumu', item_id=row.item_id) if row.kind == 'production' else url_for('update_manual_tedarik_durum', id=row.manual_id) }}" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="{{ 'ticaret_durumu' if row.kind == 'production' else 'durum' }}" value="{{ row.next_stage.key }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-primary" title="{{ row.next_stage.label }} yap">
+                                        <i class="bi bi-arrow-right-circle"></i> {{ row.next_stage.label }}
+                                    </button>
+                                </form>
+                                {% endif %}
+                                {% if row.kind == 'production' %}
+                                <a href="{{ url_for('production_detail', id=row.production_id) }}" class="btn btn-sm btn-outline-secondary" title="Üretim Detayı">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                {% else %}
+                                <form method="POST" action="{{ url_for('delete_manual_tedarik_entry', id=row.manual_id) }}"
+                                      onsubmit="return confirm('Bu manuel kaydı silmek istediğinize emin misiniz?')" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info no-print">
+    <i class="bi bi-info-circle"></i> Şu an tedarik takibinde bir kalem veya manuel kayıt bulunmuyor.
+</div>
+{% endif %}
+
+<style>
+@media print {
+    .no-print, .navbar, nav { display: none !important; }
+    .card { break-inside: avoid; border: 1px solid #333 !important; }
+    .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+{% endblock %}

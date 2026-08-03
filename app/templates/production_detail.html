@@ -102,8 +102,9 @@
 
         {% if production.ticaret_items %}
         <div class="card mb-4 shadow-sm border-info">
-            <div class="card-header bg-info text-white">
-                <i class="bi bi-bag-check"></i> Ticaret Ürünleri (üretim iş emri sürecine dahil değil)
+            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-bag-check"></i> Ticaret Ürünleri (üretim iş emri sürecine dahil değil)</span>
+                <a href="{{ url_for('tedarik_takip') }}" class="btn btn-sm btn-light">Tüm Tedarik Takibi</a>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
@@ -118,24 +119,23 @@
                         </thead>
                         <tbody>
                             {% for item in production.ticaret_items %}
+                            {% set durum = item.ticaret_durumu or 'siparis_edildi' %}
                             <tr>
                                 <td>{{ item.description }}</td>
                                 <td>{{ item.planned_quantity }} {{ item.unit }}</td>
                                 <td>
-                                    <span class="badge bg-{{ 'success' if item.ticaret_durumu == 'teslime_hazir' else 'secondary' }}">
-                                        {{ 'Teslime Hazır' if item.ticaret_durumu == 'teslime_hazir' else 'Sipariş Edildi' }}
+                                    <span class="badge bg-{{ 'danger' if durum == 'siparis_edildi' else 'warning text-dark' if durum == 'tedarik_edildi' else 'success' }}">
+                                        {{ ticaret_stages|selectattr('0', 'equalto', durum)|map(attribute='1')|first or durum }}
                                     </span>
                                 </td>
                                 <td>
-                                    <form method="POST" action="{{ url_for('update_ticaret_durumu', item_id=item.id) }}" class="d-inline">
+                                    <form method="POST" action="{{ url_for('update_ticaret_durumu', item_id=item.id) }}" class="d-flex gap-1">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        {% if item.ticaret_durumu == 'teslime_hazir' %}
-                                        <input type="hidden" name="ticaret_durumu" value="siparis_edildi">
-                                        <button type="submit" class="btn btn-sm btn-outline-secondary">Sipariş Edildi Olarak İşaretle</button>
-                                        {% else %}
-                                        <input type="hidden" name="ticaret_durumu" value="teslime_hazir">
-                                        <button type="submit" class="btn btn-sm btn-outline-success">Teslime Hazır Olarak İşaretle</button>
-                                        {% endif %}
+                                        <select name="ticaret_durumu" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+                                            {% for key, label in ticaret_stages %}
+                                            <option value="{{ key }}" {{ 'selected' if key == durum }}>{{ label }}</option>
+                                            {% endfor %}
+                                        </select>
                                     </form>
                                 </td>
                             </tr>
