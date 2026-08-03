@@ -377,6 +377,7 @@ class ManualPlanningEntry(db.Model):
     group_key = db.Column(db.String(100), nullable=False)  # gramaj/olcu grup degeri - ilgili banda eklenir
     customer_name = db.Column(db.String(200), nullable=False)  # serbest metin
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)  # opsiyonel, mevcut musteri secilebilir
+    urun = db.Column(db.String(200), nullable=False)  # hangi urun oldugu - /uretim-planlama tablosunda gosterilir
     quantity = db.Column(db.Float, nullable=False)
     unit = db.Column(db.String(20), default='adet')
     delivery_date = db.Column(db.Date, nullable=True)

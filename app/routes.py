@@ -1443,7 +1443,7 @@ def register_routes(app):
                 'kind': 'manual',
                 'customer_name': entry.customer.display_name if entry.customer else entry.customer_name,
                 'deal_no': None,
-                'description': entry.notes,
+                'description': entry.urun,
                 'quantity': entry.quantity,
                 'unit': entry.unit,
                 'delivery_date': entry.delivery_date,
@@ -1483,6 +1483,7 @@ def register_routes(app):
             group_key = request.form.get('group_key', '').strip()
             customer_name = request.form.get('customer_name', '').strip()
             customer_id = request.form.get('customer_id') or None
+            urun = request.form.get('urun', '').strip()
             quantity_raw = request.form.get('quantity', '').strip()
             unit = request.form.get('unit', 'adet').strip() or 'adet'
             delivery_date_raw = request.form.get('delivery_date', '').strip()
@@ -1492,6 +1493,8 @@ def register_routes(app):
                 errors.append('Gramaj/Ölçü grubu girilmelidir.')
             if not customer_name and not customer_id:
                 errors.append('Müşteri adı girilmeli veya mevcut bir müşteri seçilmelidir.')
+            if not urun:
+                errors.append('Ürün girilmelidir.')
             quantity = None
             if not quantity_raw:
                 errors.append('Adet girilmelidir.')
@@ -1513,6 +1516,7 @@ def register_routes(app):
                 group_key=group_key,
                 customer_name=customer.display_name if customer else customer_name,
                 customer_id=customer.id if customer else None,
+                urun=urun,
                 quantity=quantity,
                 unit=unit,
                 delivery_date=datetime.strptime(delivery_date_raw, '%Y-%m-%d').date() if delivery_date_raw else None,

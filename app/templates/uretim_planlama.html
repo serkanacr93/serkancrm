@@ -32,6 +32,7 @@
                 <thead class="table-light">
                     <tr>
                         <th>Müşteri</th>
+                        <th>Ürün</th>
                         <th>Teklif No</th>
                         <th>Adet</th>
                         <th>Teslim Tarihi</th>
@@ -43,6 +44,7 @@
                     {% for row in g.rows %}
                     <tr>
                         <td>{{ row.customer_name }}</td>
+                        <td>{{ row.description or '-' }}</td>
                         <td>{{ row.deal_no or '-' }}</td>
                         <td>{{ "{:,.0f}".format(row.quantity) }} {{ row.unit }}</td>
                         <td>{{ row.delivery_date.strftime('%d.%m.%Y') if row.delivery_date else '-' }}</td>
@@ -69,11 +71,12 @@
                     </tr>
                     {% endfor %}
                     <tr class="plan-total-row">
-                        <td colspan="2" class="text-end"><strong>TOPLAM</strong></td>
+                        <td colspan="3" class="text-end"><strong>TOPLAM</strong></td>
                         <td colspan="4"><strong>{{ g.totals_display }}</strong></td>
                     </tr>
                     {% for _ in range(3) %}
                     <tr class="plan-empty-row">
+                        <td>&nbsp;</td>
                         <td>&nbsp;</td>
                         <td>&nbsp;</td>
                         <td>&nbsp;</td>
