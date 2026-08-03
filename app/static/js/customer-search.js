@@ -85,6 +85,7 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
                         return;
                     }
                     selectCustomer(r.body);
+                    if (typeof opts.onQuickAdd === 'function') opts.onQuickAdd(r.body);
                 })
                 .catch(function () {
                     errorEl.textContent = 'Bağlantı hatası, tekrar deneyin.';

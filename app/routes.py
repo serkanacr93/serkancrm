@@ -26,6 +26,50 @@ def _customers_with_activity_subquery():
         db.session.query(DailyReport.customer_id).filter(DailyReport.customer_id.isnot(None)),
     )
 
+TAKIP_GEREKEN_GUN = 60
+
+def _last_contact_subquery():
+    """Musteri basina 'son irtibat tarihi' - Gunluk Rapor/Teklif/Odeme
+    kaynaklarindan EN SON olani (musteri takip donguleri icin). Hicbir
+    kaynakta kaydi olmayan musteriler bu subquery'de hic gorunmez -
+    cagiran taraf bunu outerjoin+NULL kontrolu ile 'hic irtibat yok'
+    olarak ele almali."""
+    deal_sub = db.session.query(
+        Deal.customer_id.label('customer_id'),
+        db.func.max(db.cast(Deal.created_at, db.Date)).label('last_contact')
+    ).group_by(Deal.customer_id)
+    report_sub = db.session.query(
+        DailyReport.customer_id.label('customer_id'),
+        db.func.max(DailyReport.report_date).label('last_contact')
+    ).filter(DailyReport.customer_id.isnot(None)).group_by(DailyReport.customer_id)
+    payment_sub = db.session.query(
+        Payment.customer_id.label('customer_id'),
+        db.func.max(Payment.payment_date).label('last_contact')
+    ).group_by(Payment.customer_id)
+
+    combined = deal_sub.union_all(report_sub, payment_sub).subquery()
+    return db.session.query(
+        combined.c.customer_id.label('customer_id'),
+        db.func.max(combined.c.last_contact).label('last_contact')
+    ).group_by(combined.c.customer_id).subquery()
+
+def _takip_gerekiyor_query():
+    """60 gunluk takip dongusu: son irtibatin (Gunluk Rapor/Teklif/Odeme)
+    uzerinden TAKIP_GEREKEN_GUN gunden fazla gecmis (veya hic irtibat
+    kaydi olmayan) musterileri dondurur. Gercek zamanli hesaplanir,
+    onbelleklenmez - her cagrida guncel veriye gore calisir."""
+    cutoff = date.today() - timedelta(days=TAKIP_GEREKEN_GUN)
+    last_contact = _last_contact_subquery()
+    return db.session.query(Customer, last_contact.c.last_contact).outerjoin(
+        last_contact, Customer.id == last_contact.c.customer_id
+    ).filter(
+        Customer.status != 'musteri_degil',
+        db.or_(
+            last_contact.c.last_contact.is_(None),
+            last_contact.c.last_contact < cutoff
+        )
+    ).order_by(last_contact.c.last_contact.asc().nullsfirst())
+
 def _get_company_settings():
     """Tekil satir (id=1) - yoksa varsayilan degerlerle olusturur."""
     settings = CompanySettings.query.get(1)
@@ -337,7 +381,12 @@ def register_routes(app):
         production_cycle_customers.sort(key=lambda x: x['days_remaining'])
         production_cycle_customers = production_cycle_customers[:10]
 
+        # 60 gunluk takip dongusu (bkz. _takip_gerekiyor_query) - gercek
+        # zamanli hesaplanir, her istekte guncel veriye gore calisir.
+        takip_gerekiyor_count = _takip_gerekiyor_query().count()
+
         return render_template('index.html',
+                             takip_gerekiyor_count=takip_gerekiyor_count,
                              customers=customers, 
                              deals=deals,
                              total_value=total_value,
@@ -419,9 +468,11 @@ def register_routes(app):
             last_deal_subq2.c.last_deal_at < dormant_cutoff
         ).count()
 
+        takip_gerekiyor_count = _takip_gerekiyor_query().count()
+
         return render_template('customers.html', customers=customers, search=search, pagination=pagination,
                                 not_customer_count=not_customer_count, never_transacted_count=never_transacted_count,
-                                dormant_count=dormant_count)
+                                dormant_count=dormant_count, takip_gerekiyor_count=takip_gerekiyor_count)
 
     @app.route('/customers/<int:id>/mark-not-customer', methods=['POST'])
     @login_required
@@ -515,6 +566,24 @@ def register_routes(app):
         rows = [{'customer': c, 'last_deal_at': d, 'days_inactive': (datetime.utcnow() - d).days}
                 for c, d in pagination.items]
         return render_template('customers_dormant.html', rows=rows, pagination=pagination)
+
+    @app.route('/customers/takip-gerekiyor')
+    @login_required
+    def takip_gerekiyor_customers():
+        """60 gunluk takip dongusu (bkz. _takip_gerekiyor_query) - Gunluk
+        Rapor/Teklif/Odeme'den hicbirinde son TAKIP_GEREKEN_GUN gun icinde
+        irtibat kaydi olmayan musteriler. Hic irtibat kaydi olmayanlar en
+        basta (NULL'lar once), sonra en eski irtibat once siralanir."""
+        page = request.args.get('page', 1, type=int)
+        today = date.today()
+        pagination = _takip_gerekiyor_query().paginate(page=page, per_page=50, error_out=False)
+        rows = [{
+            'customer': customer,
+            'last_contact': last_contact,
+            'days_since': (today - last_contact).days if last_contact else None,
+        } for customer, last_contact in pagination.items]
+        return render_template('customers_takip_gerekiyor.html', rows=rows, pagination=pagination,
+                                takip_gereken_gun=TAKIP_GEREKEN_GUN)
 
     @app.route('/cari-hesap-ozeti')
     @login_required
@@ -1379,6 +1448,38 @@ def register_routes(app):
             'email': '', 'company_name': '', 'tax_id': '', 'address': '',
             'reused_existing': False,
         }), 201
+
+    @app.route('/api/daily-reports/quick-add', methods=['POST'])
+    @login_required
+    def quick_add_daily_report():
+        """Dashboard'daki 'Bugun Kiminle Gorustun?' kutusu icin - secilen
+        (veya /api/customers/quick-add ile az once olusturulan) musteri
+        icin bugunun tarihiyle tek satirlik bir Gunluk Rapor kaydi acar.
+        Bu kayit, TAKIP_GEREKEN_GUN dongusunde o musterinin son irtibat
+        tarihini otomatik sifirlar (bkz. _last_contact_subquery)."""
+        data = request.get_json(silent=True) or {}
+        customer_id = data.get('customer_id')
+        notes = (data.get('notes') or '').strip()
+
+        if not customer_id:
+            return jsonify({'error': 'Müşteri seçilmelidir.'}), 400
+        customer = Customer.query.get(customer_id)
+        if not customer:
+            return jsonify({'error': 'Müşteri bulunamadı.'}), 404
+
+        report = DailyReport(
+            report_date=date.today(),
+            customer_name=customer.display_name,
+            phone=customer.phone,
+            notes=notes,
+            status='tamamlandi',
+            user_id=current_user.id,
+            customer_id=customer.id,
+        )
+        db.session.add(report)
+        db.session.commit()
+
+        return jsonify({'success': True, 'id': report.id, 'customer_name': customer.display_name}), 201
 
     @app.route('/deals/export/excel')
     @login_required

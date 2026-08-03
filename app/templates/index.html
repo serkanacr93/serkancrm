@@ -21,6 +21,16 @@
 </div>
 {% endif %}
 
+{% if takip_gerekiyor_count %}
+<div class="alert alert-danger d-flex align-items-center justify-content-between mb-4">
+    <div class="d-flex align-items-center">
+        <i class="bi bi-bell-fill me-2 fs-4"></i>
+        <div><strong>{{ takip_gerekiyor_count }} müşteri 60+ gündür takip edilmiyor!</strong> Son irtibat: Günlük Rapor, Teklif veya Ödeme kaydı.</div>
+    </div>
+    <a href="{{ url_for('takip_gerekiyor_customers') }}" class="btn btn-sm btn-danger text-nowrap ms-3">Listeyi Gör</a>
+</div>
+{% endif %}
+
 {% if low_stock_products %}
 <div class="alert alert-danger mb-4">
     <div class="d-flex align-items-center mb-2">
@@ -37,6 +47,35 @@
     </ul>
 </div>
 {% endif %}
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-primary">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-chat-dots"></i> Bugün Kiminle Görüştün?
+            </div>
+            <div class="card-body">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="row g-2">
+                    <div class="col-md-5 position-relative">
+                        <input type="text" id="today_contact_search" class="form-control" placeholder="Müşteri adı yazın..." autocomplete="off">
+                        <input type="hidden" id="today_contact_customer_id">
+                        <div id="today_contact_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 260px; overflow-y:auto; display:none;"></div>
+                    </div>
+                    <div class="col-md-4">
+                        <input type="text" id="today_contact_note" class="form-control" placeholder="Not (opsiyonel)">
+                    </div>
+                    <div class="col-md-3">
+                        <button type="button" id="today_contact_submit" class="btn btn-success w-100" disabled>
+                            <i class="bi bi-plus-lg"></i> Ekle
+                        </button>
+                    </div>
+                </div>
+                <div id="today_contact_feedback" class="mt-2 small"></div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="row mb-4">
     <div class="col-6 col-md-2 mb-3 mb-md-0"><div class="card border-primary h-100 shadow-sm"><div class="card-body text-center"><div class="text-primary"><i class="bi bi-people fs-1"></i></div><h3 class="mt-2 mb-0">{{ customers }}</h3><small class="text-muted">Müşteri</small></div></div></div>
@@ -256,5 +295,80 @@ fetch('/api/chart-data')
             options: { responsive: true, scales: { y: { beginAtZero: true } } }
         });
     });
+</script>
+
+<script src="{{ url_for('static', filename='js/customer-search.js') }}"></script>
+<script>
+(function () {
+    var searchInput = document.getElementById('today_contact_search');
+    var hiddenId = document.getElementById('today_contact_customer_id');
+    var noteInput = document.getElementById('today_contact_note');
+    var submitBtn = document.getElementById('today_contact_submit');
+    var feedback = document.getElementById('today_contact_feedback');
+    var csrfInput = document.querySelector('input[name=csrf_token]');
+
+    function resetBox() {
+        searchInput.value = '';
+        hiddenId.value = '';
+        noteInput.value = '';
+        submitBtn.disabled = true;
+        searchInput.focus();
+    }
+
+    function submitReport(customerId, customerName) {
+        submitBtn.disabled = true;
+        feedback.className = 'mt-2 small text-muted';
+        feedback.textContent = 'Ekleniyor...';
+        fetch('/api/daily-reports/quick-add', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfInput ? csrfInput.value : ''
+            },
+            body: JSON.stringify({ customer_id: customerId, notes: noteInput.value.trim() })
+        })
+            .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+            .then(function (r) {
+                if (!r.ok) {
+                    feedback.className = 'mt-2 small text-danger';
+                    feedback.textContent = r.body.error || 'Eklenemedi.';
+                    submitBtn.disabled = false;
+                    return;
+                }
+                feedback.className = 'mt-2 small text-success';
+                feedback.textContent = '✓ Eklendi: ' + (customerName || r.body.customer_name);
+                resetBox();
+            })
+            .catch(function () {
+                feedback.className = 'mt-2 small text-danger';
+                feedback.textContent = 'Bağlantı hatası, tekrar deneyin.';
+                submitBtn.disabled = false;
+            });
+    }
+
+    initCustomerSearch({
+        inputId: 'today_contact_search',
+        hiddenIdInputId: 'today_contact_customer_id',
+        resultsId: 'today_contact_results',
+        allowQuickAdd: true,
+        onSelect: function () {
+            submitBtn.disabled = false;
+        },
+        onClear: function () {
+            submitBtn.disabled = true;
+        },
+        onQuickAdd: function (c) {
+            // Yeni musteri olusturulup secildi - ayri bir "Ekle" tikina
+            // gerek kalmadan gorusme kaydini hemen ayni akista olustur.
+            submitReport(c.id, c.name);
+        }
+    });
+
+    submitBtn.addEventListener('click', function () {
+        var customerId = hiddenId.value;
+        if (!customerId) return;
+        submitReport(customerId, searchInput.value);
+    });
+})();
 </script>
 {% endblock %}

@@ -17,6 +17,9 @@
         <a href="{{ url_for('dormant_customers') }}" class="btn btn-outline-warning">
             <i class="bi bi-moon"></i> Uyuyan Müşteriler <span class="badge bg-dark">{{ dormant_count }}</span>
         </a>
+        <a href="{{ url_for('takip_gerekiyor_customers') }}" class="btn btn-outline-danger">
+            <i class="bi bi-bell"></i> Takip Gerekiyor (60+ gün) <span class="badge bg-dark">{{ takip_gerekiyor_count }}</span>
+        </a>
         <a href="{{ url_for('import_customers_vcf') }}" class="btn btn-info">
             <i class="bi bi-phone"></i> VCF İçe Aktar
         </a>
