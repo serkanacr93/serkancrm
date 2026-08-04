@@ -12,6 +12,7 @@ import openpyxl
 import os
 import uuid
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 from flask_wtf.csrf import generate_csrf
 
 def _customers_with_activity_subquery():
@@ -779,7 +780,9 @@ def register_routes(app):
     @login_required
     def customer_detail(id):
         customer = Customer.query.get_or_404(id)
-        deals = Deal.query.filter_by(customer_id=id).order_by(Deal.created_at.desc()).all()
+        deals = Deal.query.filter_by(customer_id=id).options(
+            joinedload(Deal.production).joinedload(Production.shipments)
+        ).order_by(Deal.created_at.desc()).all()
         statements = CustomerStatement.query.filter_by(customer_id=id).order_by(CustomerStatement.created_at.desc()).all()
         total_debit = sum(s.amount for s in statements if s.type == 'borc')
         total_credit = sum(s.amount for s in statements if s.type == 'alacak')
@@ -1027,6 +1030,7 @@ def register_routes(app):
             )).join(Customer)
         if stage_filter:
             query = query.filter(Deal.stage == stage_filter)
+        query = query.options(joinedload(Deal.customer))
         pagination = query.order_by(Deal.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
         deals = pagination.items
         return render_template('deals.html', deals=deals, search=search, stage_filter=stage_filter,
@@ -1096,8 +1100,10 @@ def register_routes(app):
             db.session.commit()
             flash(f'Teklif oluşturuldu! KDV dahil: {deal.value:,.2f} ₺', 'success')
             return redirect(url_for('deal_detail', id=deal.id))
-        customers = Customer.query.order_by(Customer.company_name, Customer.last_name).all()
-        return render_template('add_deal.html', customers=customers, today=datetime.now().date(), 
+        # Not: customers listesi burada kasitli olarak cekilmiyor - form
+        # merkezi musteri arama bilesenini (customer-search.js) kullaniyor,
+        # 1690+ satirlik bir <select> hic render edilmiyor (performans).
+        return render_template('add_deal.html', today=datetime.now().date(),
                              expire_date=datetime.now().date() + timedelta(days=7))
 
     @app.route('/deals/<int:id>')
@@ -1513,7 +1519,8 @@ def register_routes(app):
     @app.route('/production')
     @login_required
     def production_list():
-        productions = Production.query.order_by(Production.created_at.desc()).all()
+        productions = Production.query.options(joinedload(Production.deal).joinedload(Deal.customer)) \
+            .order_by(Production.created_at.desc()).all()
         return render_template('production_list.html', productions=productions)
 
     def _planning_group_key(item):
@@ -1529,11 +1536,14 @@ def register_routes(app):
         formal bir teklifi olmayan ManuelPlanningEntry kayitlari da eklenir.
         Her grubun toplam adedi ve baski ustasina yazdirilacak bos satirlar
         gosterilir (Is 2)."""
-        items = ProductionItem.query.join(Production).filter(
+        items = ProductionItem.query.join(Production).options(
+            joinedload(ProductionItem.production).joinedload(Production.deal).joinedload(Deal.customer)
+        ).filter(
             Production.status == 'uretimde',
             ProductionItem.urun_tipi != 'ticaret'
         ).all()
-        manual_entries = ManualPlanningEntry.query.order_by(ManualPlanningEntry.created_at.asc()).all()
+        manual_entries = ManualPlanningEntry.query.options(joinedload(ManualPlanningEntry.customer)) \
+            .order_by(ManualPlanningEntry.created_at.asc()).all()
 
         groups = {}
         for item in items:
@@ -1713,10 +1723,13 @@ def register_routes(app):
         olarak tum musteri/teklifler tek yerde gorulur. Ayni ticaret_durumu
         alanini kullandigi icin durum degisiklikleri iki sayfada da senkron
         gorunur (tek kaynak - ayri bir kopya alan yok)."""
-        items = ProductionItem.query.join(Production).filter(
+        items = ProductionItem.query.join(Production).options(
+            joinedload(ProductionItem.production).joinedload(Production.deal).joinedload(Deal.customer)
+        ).filter(
             ProductionItem.urun_tipi == 'ticaret'
         ).order_by(Production.created_at.desc()).all()
-        manual_entries = ManualTedarikEntry.query.order_by(ManualTedarikEntry.created_at.desc()).all()
+        manual_entries = ManualTedarikEntry.query.options(joinedload(ManualTedarikEntry.customer)) \
+            .order_by(ManualTedarikEntry.created_at.desc()).all()
 
         def _next_stage(durum):
             try:
@@ -2007,7 +2020,9 @@ def register_routes(app):
     @app.route('/shipments')
     @login_required
     def shipment_list():
-        shipments = Shipment.query.order_by(Shipment.created_at.desc()).all()
+        shipments = Shipment.query.options(
+            joinedload(Shipment.production).joinedload(Production.deal).joinedload(Deal.customer)
+        ).order_by(Shipment.created_at.desc()).all()
         return render_template('shipment_list.html', shipments=shipments)
 
     @app.route('/shipments/<int:id>/edit', methods=['GET', 'POST'])
@@ -2140,9 +2155,11 @@ def register_routes(app):
             db.session.commit()
             flash('Görev eklendi!', 'success')
             return redirect(url_for('tasks'))
-        customers = Customer.query.order_by(Customer.last_name).all()
+        # customers listesi kullanilmiyor - form merkezi musteri arama
+        # bilesenini kullaniyor (customer-search.js), deals kucuk bir
+        # <select> icin gerekli, o yuzden korundu.
         deals = Deal.query.order_by(Deal.title).all()
-        return render_template('add_task.html', customers=customers, deals=deals)
+        return render_template('add_task.html', deals=deals)
 
     @app.route('/tasks/<int:id>/complete', methods=['POST'])
     @login_required
@@ -2475,8 +2492,9 @@ def register_routes(app):
         if phone:
             customer = Customer.query.filter_by(phone=phone).first()
         
-        customers = Customer.query.order_by(Customer.company_name, Customer.last_name).all()
-        return render_template('add_visit.html', customers=customers, phone=phone, customer=customer)
+        # Not: customers listesi kullanilmiyor - form merkezi musteri arama
+        # bilesenini kullaniyor (customer-search.js).
+        return render_template('add_visit.html', phone=phone, customer=customer)
     
     @app.route('/api/customers/by-phone')
     @login_required

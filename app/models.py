@@ -77,7 +77,7 @@ class Customer(db.Model):
     # tek alana birden fazla telefon/vergi no yapistiriyor, bu da INSERT/UPDATE
     # aninda StringDataRightTruncation hatasiyla teklif olusturmayi tamamen
     # kirıyordu (bkz. Is A). 50/30'a genisletildi - veri kaybi olmadan.
-    phone = db.Column(db.String(50))
+    phone = db.Column(db.String(50), index=True)
 
     company_name = db.Column(db.String(200))
     tax_office = db.Column(db.String(100))
@@ -98,7 +98,7 @@ class Customer(db.Model):
     # Musterinin varsayilan tasarim gorseli - dosya yolu (static/uploads/tasarimlar/...),
     # is emri PDF'inde gosterilir, uretim bazinda edit_production'dan override edilebilir.
     tasarim_gorseli = db.Column(db.String(300), nullable=True)
-    status = db.Column(db.String(20), default='aktif')
+    status = db.Column(db.String(20), default='aktif', index=True)
     siparis_dongusu_gun = db.Column(db.Integer, default=120, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -147,7 +147,7 @@ class Deal(db.Model):
     vat_rate = db.Column(db.Float, nullable=False, default=20)
     vat_amount = db.Column(db.Float, nullable=False, default=0)
     value = db.Column(db.Float, nullable=False, default=0)
-    stage = db.Column(db.String(30), default='yeni')
+    stage = db.Column(db.String(30), default='yeni', index=True)
     probability = db.Column(db.Integer, default=0)
     deal_date = db.Column(db.Date, default=datetime.utcnow)
     expected_close = db.Column(db.Date)
@@ -164,7 +164,7 @@ class Deal(db.Model):
     pesinat_tarihi = db.Column(db.Date, nullable=True)  # beklenen veya gerceklesen odeme tarihi
     bakiye_tarihi = db.Column(db.Date, nullable=True)  # bakiyenin beklenen odeme tarihi
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
 
     items = db.relationship('DealItem', backref='deal', lazy=True, cascade='all, delete-orphan')
@@ -239,7 +239,7 @@ class DealItem(db.Model):
     unit = db.Column(db.String(20), default='adet')
     unit_price = db.Column(db.Float, nullable=False)
     total_price = db.Column(db.Float, nullable=False)
-    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=False)
+    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=False, index=True)
     # Is 4 - 'uretim': kendi atolyemizde uretiliyor (Is Emri surecine dahil).
     # 'ticaret': hazir alinip satiliyor (uretim asama takibi atlanir).
     urun_tipi = db.Column(db.String(20), default='uretim', nullable=False)
@@ -270,7 +270,7 @@ TICARET_STAGE_LABELS = dict(TICARET_STAGES)
 class Production(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), unique=True, nullable=False)
-    status = db.Column(db.String(30), default='uretimde')
+    status = db.Column(db.String(30), default='uretimde', index=True)
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
     due_date = db.Column(db.Date, nullable=True)  # teslim tarihi - teklifteki beklenen kapanistan gelir, elle degistirilebilir
@@ -334,7 +334,7 @@ class Production(db.Model):
 
 class ProductionItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    production_id = db.Column(db.Integer, db.ForeignKey('production.id'), nullable=False)
+    production_id = db.Column(db.Integer, db.ForeignKey('production.id'), nullable=False, index=True)
     deal_item_id = db.Column(db.Integer, db.ForeignKey('deal_item.id'), nullable=True)
     description = db.Column(db.String(200), nullable=False)
     planned_quantity = db.Column(db.Float, nullable=False)
@@ -470,7 +470,7 @@ class ShipmentItem(db.Model):
 
 class CustomerStatement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
     deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=True)
     # Bu ekstre kaydi bir Payment'tan otomatik olusturulduysa iliskilendirir -
     # odeme silinince bagli ekstre kaydinin da silinebilmesi icin.
@@ -488,8 +488,8 @@ class Invoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     invoice_no = db.Column(db.Integer, unique=True, nullable=True)
     type = db.Column(db.String(20), nullable=False, default='fatura')  # fatura / irsaliye
-    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=False)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=False, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
     date = db.Column(db.Date, default=datetime.utcnow)
     subtotal = db.Column(db.Float, nullable=False, default=0)
     vat_rate = db.Column(db.Float, nullable=False, default=20)
@@ -597,7 +597,7 @@ class Task(db.Model):
 
 class CustomerVisit(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     visit_date = db.Column(db.Date, default=datetime.utcnow)
     notes = db.Column(db.Text)
@@ -612,14 +612,14 @@ class CustomerVisit(db.Model):
 
 class DailyReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    report_date = db.Column(db.Date, default=datetime.utcnow, nullable=False)
+    report_date = db.Column(db.Date, default=datetime.utcnow, nullable=False, index=True)
     customer_name = db.Column(db.String(100), nullable=False)
     phone = db.Column(db.String(50))
     notes = db.Column(db.Text)
     status = db.Column(db.String(20), default='takip_edilecek')  # tamamlandi, fiyat_verilecek, takip_edilecek
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True, index=True)
     
     user = db.relationship('User', backref='daily_reports')
     customer = db.relationship('Customer', backref='daily_reports')
@@ -629,17 +629,17 @@ class DailyReport(db.Model):
 
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
     invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=True)
     # Faturadan once teklif asamasinda alinan on odemeyi (avans) izlemek icin -
     # invoice_id ile birlikte de olabilir (once deal_id'li avans, sonra faturaya baglanir).
-    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=True)
+    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=True, index=True)
     amount = db.Column(db.Float, nullable=False)
     payment_date = db.Column(db.Date, default=datetime.utcnow)
     payment_method = db.Column(db.String(50))  # nakit, kredi_karti, havale, cek
     reference_no = db.Column(db.String(100))  # ödeme referans no
     notes = db.Column(db.Text)
-    status = db.Column(db.String(20), default='beklemede')  # beklemede, odendi, iptal
+    status = db.Column(db.String(20), default='beklemede', index=True)  # beklemede, odendi, iptal
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
