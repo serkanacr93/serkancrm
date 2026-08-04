@@ -25,6 +25,16 @@ def _clean_for_pdf(text):
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned or text
 
+def _sanitize_pdf_free_text(text):
+    """Serbest metin alanlarinda (Aciklama/Not kutulari) kullanicinin elle
+    yazdigi ' TL' isareti (U+20BA) Vera fontunda glif olarak bulunmuyor -
+    PDF'te bozuk/kare karakter olarak cikiyordu. PDF'in geri kalaninda zaten
+    tutarli sekilde 'TL' metni kullanildigi icin (bkz. Ara Toplam/KDV/Toplam
+    kutulari) ayni donusum burada da uygulanir."""
+    if not text:
+        return text
+    return text.replace('₺', 'TL')
+
 def register_fonts():
     font_dir = os.path.join(os.path.dirname(__file__), 'static', 'fonts')
     pdfmetrics.registerFont(TTFont('Vera', os.path.join(font_dir, 'Vera.ttf')))
@@ -77,9 +87,9 @@ def _get_company_settings_for_pdf():
 def generate_deal_pdf(deal):
     """Siparis Sozlesmesi formatinda teklif PDF'i. Fiyat/urun kalemleri
     tekliften gelir. Vade/Pesinat/Bakiye Deal alanlarindan geliyor (bos ise
-    noktali cizgi kalir). Kagit Cinsi/Boy/En/Renk sutunlari DealItem'da
-    yapisal olarak tutulmadigi icin '-' ile doldurulur, elle doldurulmak
-    uzere PDF'te yer kaplar. AÇIKLAMA kutusu deal.notes'tan doldurulur."""
+    noktali cizgi kalir). Kagit Cinsi/Boy/En/Renk/Teslim Tarihi sutunlari
+    DealItem'dan gelir, doldurulmamis olan alanlar '-' ile gosterilir.
+    AÇIKLAMA kutusu deal.notes'tan doldurulur."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.3*cm, leftMargin=1.3*cm, topMargin=1.3*cm, bottomMargin=1.3*cm)
 
@@ -186,10 +196,11 @@ def generate_deal_pdf(deal):
     elements.append(Spacer(1, 5*mm))
 
     # ===== URUN TABLOSU =====
-    # Kagit Cinsi/Boy/En/Renk DealItem'da yapisal olarak tutulmuyor (teklif
-    # olusturma akisina dokunulmadi) - bu yuzden '-' ile doldurulur, elle
-    # PDF uzerinde not edilebilir.
-    delivery_str = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
+    # Kagit Cinsi/Boy/En/Renk/Teslim Tarihi DealItem'da yapisal olarak
+    # tutuluyor (teklif formundan doldurulur, hepsi opsiyonel) - doluysa
+    # gercek deger, bossa '-' gosterilir. Kalemin kendi teslim tarihi
+    # girilmemisse teklifin genel beklenen kapanis tarihine dusulur.
+    deal_delivery_fallback = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
     if deal.items:
         table_small = ParagraphStyle('TableSmall', parent=small, fontSize=8, leading=10)
         table_header_style_normal = ParagraphStyle('TableHeaderNormal', parent=table_header_style, fontSize=8, leading=10)
@@ -197,13 +208,17 @@ def generate_deal_pdf(deal):
         headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', 'Fiyat', 'Teslim\nTarihi']
         data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style_normal) for h in headers]]
         for item in deal.items:
+            item_delivery_str = item.teslim_tarihi.strftime('%d.%m.%Y') if item.teslim_tarihi else deal_delivery_fallback
             data.append([
-                Paragraph(item.description, table_small),
-                '-', '-', '-', '-',
+                Paragraph(_sanitize_pdf_free_text(item.description), table_small),
+                item.kagit_cinsi or '-',
+                item.boy or '-',
+                item.en or '-',
+                item.renk or '-',
                 f"{item.quantity:.2f}",
                 item.unit,
                 f"{item.unit_price:,.2f}",
-                delivery_str
+                item_delivery_str
             ])
         table = Table(data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
@@ -247,7 +262,7 @@ def generate_deal_pdf(deal):
     elements.append(Paragraph("AÇIKLAMA", box_heading))
     if deal.notes:
         from xml.sax.saxutils import escape
-        notes_paragraph = Paragraph(escape(deal.notes).replace('\n', '<br/>'), normal)
+        notes_paragraph = Paragraph(escape(_sanitize_pdf_free_text(deal.notes)).replace('\n', '<br/>'), normal)
         aciklama_table = Table([[notes_paragraph]], colWidths=[17.2*cm])
         aciklama_table.setStyle(TableStyle([
             ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
@@ -405,7 +420,7 @@ def generate_invoice_pdf(invoice):
     if invoice.notes:
         elements.append(Spacer(1, 5*mm))
         elements.append(Paragraph("NOTLAR", heading_style))
-        elements.append(Paragraph(invoice.notes, normal))
+        elements.append(Paragraph(_sanitize_pdf_free_text(invoice.notes), normal))
 
     doc.build(elements)
     buffer.seek(0)
@@ -687,7 +702,7 @@ def generate_irsaliye_pdf(shipment):
     if shipment.notes:
         elements.append(Spacer(1, 5*mm))
         elements.append(Paragraph("NOTLAR", heading_style))
-        elements.append(Paragraph(shipment.notes, turkish_style))
+        elements.append(Paragraph(_sanitize_pdf_free_text(shipment.notes), turkish_style))
 
     elements.append(Spacer(1, 15*mm))
     signature_data = [

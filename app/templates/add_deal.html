@@ -149,6 +149,17 @@
                                     </td>
                                     <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
                                 </tr>
+                                <tr class="item-specs-row">
+                                    <td colspan="7">
+                                        <div class="row g-1">
+                                            <div class="col"><input type="text" class="form-control form-control-sm" name="kagit_cinsi_0" placeholder="Kağıt Cinsi"></div>
+                                            <div class="col"><input type="text" class="form-control form-control-sm" name="boy_0" placeholder="Boy"></div>
+                                            <div class="col"><input type="text" class="form-control form-control-sm" name="en_0" placeholder="En"></div>
+                                            <div class="col"><input type="text" class="form-control form-control-sm" name="renk_0" placeholder="Renk"></div>
+                                            <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_0" title="Teslim Tarihi"></div>
+                                        </div>
+                                    </td>
+                                </tr>
                             </tbody>
                             <tfoot>
                                 <tr class="table-light">
@@ -285,7 +296,21 @@ document.getElementById('add-item').addEventListener('click', function() {
         </td>
         <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
     `;
+    const specsRow = document.createElement('tr');
+    specsRow.className = 'item-specs-row';
+    specsRow.innerHTML = `
+        <td colspan="7">
+            <div class="row g-1">
+                <div class="col"><input type="text" class="form-control form-control-sm" name="kagit_cinsi_${itemCount}" placeholder="Kağıt Cinsi"></div>
+                <div class="col"><input type="text" class="form-control form-control-sm" name="boy_${itemCount}" placeholder="Boy"></div>
+                <div class="col"><input type="text" class="form-control form-control-sm" name="en_${itemCount}" placeholder="En"></div>
+                <div class="col"><input type="text" class="form-control form-control-sm" name="renk_${itemCount}" placeholder="Renk"></div>
+                <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_${itemCount}" title="Teslim Tarihi"></div>
+            </div>
+        </td>
+    `;
     tbody.appendChild(row);
+    tbody.appendChild(specsRow);
     itemCount++;
     attachEvents();
 });
@@ -294,6 +319,8 @@ document.addEventListener('click', function(e) {
     if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
         const row = e.target.closest('.item-row');
         if (document.querySelectorAll('.item-row').length > 1) {
+            const specsRow = row.nextElementSibling;
+            if (specsRow && specsRow.classList.contains('item-specs-row')) specsRow.remove();
             row.remove();
             calculateTotals();
         }

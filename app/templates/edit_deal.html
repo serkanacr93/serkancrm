@@ -95,6 +95,13 @@
                         <button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button>
                     </div>
                 </div>
+                <div class="row mb-2 g-1 item-specs-row">
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="kagit_cinsi_{{ loop.index0 }}" value="{{ item.kagit_cinsi or '' }}" placeholder="Kağıt Cinsi"></div>
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="boy_{{ loop.index0 }}" value="{{ item.boy or '' }}" placeholder="Boy"></div>
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="en_{{ loop.index0 }}" value="{{ item.en or '' }}" placeholder="En"></div>
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="renk_{{ loop.index0 }}" value="{{ item.renk or '' }}" placeholder="Renk"></div>
+                    <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_{{ loop.index0 }}" value="{{ item.teslim_tarihi.strftime('%Y-%m-%d') if item.teslim_tarihi else '' }}" title="Teslim Tarihi"></div>
+                </div>
                 {% endfor %}
             </div>
             <button type="button" class="btn btn-success btn-sm mb-3" id="add-item">
@@ -148,13 +155,26 @@ document.getElementById('add-item').addEventListener('click', function() {
             <button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button>
         </div>
     `;
+    const specsRow = document.createElement('div');
+    specsRow.className = 'row mb-2 g-1 item-specs-row';
+    specsRow.innerHTML = `
+        <div class="col"><input type="text" class="form-control form-control-sm" name="kagit_cinsi_${itemCount}" placeholder="Kağıt Cinsi"></div>
+        <div class="col"><input type="text" class="form-control form-control-sm" name="boy_${itemCount}" placeholder="Boy"></div>
+        <div class="col"><input type="text" class="form-control form-control-sm" name="en_${itemCount}" placeholder="En"></div>
+        <div class="col"><input type="text" class="form-control form-control-sm" name="renk_${itemCount}" placeholder="Renk"></div>
+        <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_${itemCount}" title="Teslim Tarihi"></div>
+    `;
     container.appendChild(row);
+    container.appendChild(specsRow);
     itemCount++;
 });
 
 document.addEventListener('click', function(e) {
     if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
-        e.target.closest('.item-row').remove();
+        const row = e.target.closest('.item-row');
+        const specsRow = row.nextElementSibling;
+        if (specsRow && specsRow.classList.contains('item-specs-row')) specsRow.remove();
+        row.remove();
     }
 });
 </script>

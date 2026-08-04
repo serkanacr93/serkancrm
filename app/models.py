@@ -244,6 +244,17 @@ class DealItem(db.Model):
     # 'ticaret': hazir alinip satiliyor (uretim asama takibi atlanir).
     urun_tipi = db.Column(db.String(20), default='uretim', nullable=False)
 
+    # Teklif PDF'indeki urun tablosu sutunlari - onceden formda hic yoktu,
+    # PDF'te her zaman '-' gorunuyordu. Hepsi opsiyonel, doldurulmazsa PDF'te
+    # yine '-' kalir. Boy/En, olcu/taban_olcusu ile ayni gerekce ile
+    # (serbest metin, "12x20" gibi kesirli/karisik degerler de girilebilsin
+    # diye) String tutuluyor - Float degil.
+    kagit_cinsi = db.Column(db.String(100), nullable=True)
+    boy = db.Column(db.String(20), nullable=True)
+    en = db.Column(db.String(20), nullable=True)
+    renk = db.Column(db.String(50), nullable=True)
+    teslim_tarihi = db.Column(db.Date, nullable=True)
+
 # Uretim asama akisi: basit 3 durumlu siralama. 'iptal' bilincli olarak bu
 # akisin disinda tutulur (sadece edit_production'dan elle secilir).
 PRODUCTION_STAGES = [

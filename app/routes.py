@@ -1074,6 +1074,7 @@ def register_routes(app):
             while f'desc_{i}' in request.form:
                 qty = float(request.form[f'qty_{i}'])
                 price = float(request.form[f'price_{i}'])
+                teslim_tarihi_raw = request.form.get(f'teslim_tarihi_{i}', '').strip()
                 item = DealItem(
                     description=request.form[f'desc_{i}'],
                     quantity=qty,
@@ -1081,6 +1082,11 @@ def register_routes(app):
                     unit_price=price,
                     total_price=qty * price,
                     urun_tipi=request.form.get(f'urun_tipi_{i}', 'uretim'),
+                    kagit_cinsi=request.form.get(f'kagit_cinsi_{i}', '').strip() or None,
+                    boy=request.form.get(f'boy_{i}', '').strip() or None,
+                    en=request.form.get(f'en_{i}', '').strip() or None,
+                    renk=request.form.get(f'renk_{i}', '').strip() or None,
+                    teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
                     deal_id=deal.id
                 )
                 db.session.add(item)
@@ -1143,9 +1149,16 @@ def register_routes(app):
             while f'desc_{i}' in request.form:
                 qty = float(request.form[f'qty_{i}'])
                 price = float(request.form[f'price_{i}'])
+                teslim_tarihi_raw = request.form.get(f'teslim_tarihi_{i}', '').strip()
                 item = DealItem(description=request.form[f'desc_{i}'], quantity=qty, unit=request.form.get(f'unit_{i}', 'adet'),
                                unit_price=price, total_price=qty * price,
-                               urun_tipi=request.form.get(f'urun_tipi_{i}', 'uretim'), deal_id=deal.id)
+                               urun_tipi=request.form.get(f'urun_tipi_{i}', 'uretim'),
+                               kagit_cinsi=request.form.get(f'kagit_cinsi_{i}', '').strip() or None,
+                               boy=request.form.get(f'boy_{i}', '').strip() or None,
+                               en=request.form.get(f'en_{i}', '').strip() or None,
+                               renk=request.form.get(f'renk_{i}', '').strip() or None,
+                               teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
+                               deal_id=deal.id)
                 db.session.add(item)
                 i += 1
             
@@ -1238,7 +1251,9 @@ def register_routes(app):
         for item in deal.items:
             db.session.add(DealItem(description=item.description, quantity=item.quantity, unit=item.unit,
                                    unit_price=item.unit_price, total_price=item.total_price,
-                                   urun_tipi=item.urun_tipi, deal_id=new_deal.id))
+                                   urun_tipi=item.urun_tipi,
+                                   kagit_cinsi=item.kagit_cinsi, boy=item.boy, en=item.en, renk=item.renk,
+                                   teslim_tarihi=item.teslim_tarihi, deal_id=new_deal.id))
         db.session.flush()
         new_deal.calculate_totals()
         deal.stage = 'revize'
