@@ -4,6 +4,29 @@
  * akisini yonetir. Tum musteri secim noktalarinda (teklif, gunluk rapor,
  * odeme, ziyaret, gorev, teklif duzenleme) ayni davranisi saglar. */
 
+/* Sayfa uzun sure acik kaldiginda (orn. Dashboard) yuklemede gomulen
+ * CSRF token WTF_CSRF_TIME_LIMIT (varsayilan 1 saat) sonra gecersiz kalip
+ * POST'lari HTML hata sayfasiyla (JSON degil) reddediyordu - submit
+ * aninda /api/csrf-token'dan taze bir token cekmek bunu onler. Istek
+ * basarisiz olursa sayfadaki (muhtemelen bayat) degere geri duser. */
+function _freshCsrfToken(fallbackInput) {
+    return fetch('/api/csrf-token', { credentials: 'same-origin' })
+        .then(function (res) { return res.ok ? res.json() : Promise.reject(); })
+        .then(function (data) { return data.csrf_token; })
+        .catch(function () { return fallbackInput ? fallbackInput.value : ''; });
+}
+
+/* fetch sonucunu JSON olarak ayristirir; sunucu CSRF/oturum hatasi gibi
+ * bir nedenle HTML donerse (res.json() SyntaxError firlatir) bunu
+ * yutmak yerine anlasilir bir hata mesajina cevirir. */
+function _parseJsonResponse(res) {
+    return res.json()
+        .then(function (body) { return { ok: res.ok, body: body }; })
+        .catch(function () {
+            return { ok: false, body: { error: 'Oturum süresi dolmuş olabilir. Sayfayı yenileyip tekrar deneyin.' } };
+        });
+}
+
 function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
     opts = opts || {};
     var minLength = opts.minLength || 2;
@@ -67,15 +90,17 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Ekleniyor...';
             var csrfInput = input.closest('form') ? input.closest('form').querySelector('input[name=csrf_token]') : document.querySelector('input[name=csrf_token]');
-            fetch('/api/customers/quick-add', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfInput ? csrfInput.value : ''
-                },
-                body: JSON.stringify({ name: name, phone: phone })
+            _freshCsrfToken(csrfInput).then(function (token) {
+                return fetch('/api/customers/quick-add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': token
+                    },
+                    body: JSON.stringify({ name: name, phone: phone })
+                });
             })
-                .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+                .then(_parseJsonResponse)
                 .then(function (r) {
                     if (!r.ok) {
                         errorEl.textContent = r.body.error || 'Müşteri eklenemedi.';

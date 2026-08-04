@@ -12,6 +12,7 @@ import openpyxl
 import os
 import uuid
 from sqlalchemy.exc import IntegrityError
+from flask_wtf.csrf import generate_csrf
 
 def _customers_with_activity_subquery():
     """'Islem yapilmis' musteri id'lerinin birlesimi - sadece Deal (teklif)
@@ -1394,6 +1395,17 @@ def register_routes(app):
                 'address': r.company_address or r.address or ''
             })
         return jsonify(result)
+
+    @app.route('/api/csrf-token')
+    @login_required
+    def api_csrf_token():
+        """Uzun sure acik kalan sayfalardaki (orn. Dashboard'daki 'Bugun
+        Kiminle Gorustun?' kutusu) AJAX formlari icin taze bir CSRF token
+        dondurur. WTF_CSRF_TIME_LIMIT varsayilan 1 saat - sayfa yuklendiginde
+        gomulen token bu sureden sonra gecersiz kalip POST'lari sessizce
+        (HTML hata sayfasi donerek) reddediyordu; submit aninda bu endpoint'ten
+        taze token cekmek bu sorunu ortadan kaldirir."""
+        return jsonify({'csrf_token': generate_csrf()})
 
     @app.route('/api/customers/quick-add', methods=['POST'])
     @login_required

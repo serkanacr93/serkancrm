@@ -319,15 +319,17 @@ fetch('/api/chart-data')
         submitBtn.disabled = true;
         feedback.className = 'mt-2 small text-muted';
         feedback.textContent = 'Ekleniyor...';
-        fetch('/api/daily-reports/quick-add', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': csrfInput ? csrfInput.value : ''
-            },
-            body: JSON.stringify({ customer_id: customerId, notes: noteInput.value.trim() })
+        _freshCsrfToken(csrfInput).then(function (token) {
+            return fetch('/api/daily-reports/quick-add', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': token
+                },
+                body: JSON.stringify({ customer_id: customerId, notes: noteInput.value.trim() })
+            });
         })
-            .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+            .then(_parseJsonResponse)
             .then(function (r) {
                 if (!r.ok) {
                     feedback.className = 'mt-2 small text-danger';
