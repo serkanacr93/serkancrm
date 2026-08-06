@@ -272,8 +272,12 @@ class DealItem(db.Model):
     # (serbest metin, "12x20" gibi kesirli/karisik degerler de girilebilsin
     # diye) String tutuluyor - Float degil.
     kagit_cinsi = db.Column(db.String(100), nullable=True)
-    boy = db.Column(db.String(20), nullable=True)
-    en = db.Column(db.String(20), nullable=True)
+    # 20 karakter gercek kullanimda dar kaliyordu (orn. "145 milimetre
+    # yaklasik" gibi dogal dil ifadeleri 20'yi asiyor, PDF sarma duzeltmesi
+    # bu tur degerleri gostermek icin eklendi - once veri katmaninda
+    # kirpilmesi engellenmeli). 50'ye genisletildi (renk ile ayni).
+    boy = db.Column(db.String(50), nullable=True)
+    en = db.Column(db.String(50), nullable=True)
     renk = db.Column(db.String(50), nullable=True)
     teslim_tarihi = db.Column(db.Date, nullable=True)
 

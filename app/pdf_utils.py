@@ -35,6 +35,41 @@ def _sanitize_pdf_free_text(text):
         return text
     return text.replace('₺', 'TL')
 
+def _draw_watermark(canvas, doc, text):
+    """Sayfa arka planina, tam kaplayan, egik (-30 derece) tekrar eden bir
+    filigran ciziyor. onFirstPage/onLaterPages callback'i olarak cagrilir -
+    reportlab bu callback'i sayfanin flowable icerigi (tablo/metin) cizilmeden
+    ONCE calistirir, bu yuzden filigran otomatik olarak icerigin ALTINDA
+    kalir, ustune binmez. saveState/restoreState ile bu cizim, sayfanin geri
+    kalan durumunu (font, renk vb.) etkilemeden izole edilir."""
+    if not text:
+        return
+    canvas.saveState()
+    try:
+        canvas.setFillColorRGB(20 / 255.0, 20 / 255.0, 40 / 255.0, alpha=0.16)
+    except TypeError:
+        # bazi reportlab surumlerinde setFillColorRGB alpha kabul etmiyor
+        canvas.setFillColorRGB(20 / 255.0, 20 / 255.0, 40 / 255.0)
+        canvas.setFillAlpha(0.16)
+    canvas.setFont('Vera-Bold', 32)
+    page_w, page_h = A4
+    canvas.translate(page_w / 2.0, page_h / 2.0)
+    canvas.rotate(-30)
+    text_w = canvas.stringWidth(text, 'Vera-Bold', 32)
+    step_x = text_w + 50
+    step_y = 80
+    # Dondurulmus koordinat sisteminde sayfanin tum koseleri kapsansin diye
+    # kosegen uzunlugu kadar tasirarak grid ciziliyor - boslu/eksik alan kalmaz.
+    diag = (page_w ** 2 + page_h ** 2) ** 0.5
+    y = -diag
+    while y < diag:
+        x = -diag
+        while x < diag:
+            canvas.drawString(x, y, text)
+            x += step_x
+        y += step_y
+    canvas.restoreState()
+
 def register_fonts():
     font_dir = os.path.join(os.path.dirname(__file__), 'static', 'fonts')
     pdfmetrics.registerFont(TTFont('Vera', os.path.join(font_dir, 'Vera.ttf')))
@@ -208,17 +243,31 @@ def generate_deal_pdf(deal):
     if deal.items:
         table_small = ParagraphStyle('TableSmall', parent=small, fontSize=8, leading=10)
         table_header_style_normal = ParagraphStyle('TableHeaderNormal', parent=table_header_style, fontSize=8, leading=10)
-        col_widths = [4.3*cm, 2.3*cm, 1.2*cm, 1.2*cm, 1.4*cm, 1.7*cm, 1.4*cm, 1.9*cm, 1.9*cm]
+        # Kagit Cinsi/Boy/En/Renk onceden DUZ METIN olarak ekleniyordu - Table
+        # hucrelerinde duz metin SARMAZ (sadece Paragraph flowable'lar sarar),
+        # bu yuzden uzun bir deger hucre sinirini asip yandaki sutune biniyordu.
+        # Paragraph'a cevirip dar sutunlara uygun kucuk/ortali bir stil verildi.
+        table_narrow = ParagraphStyle('TableNarrow', parent=small, fontSize=7.5, leading=9, alignment=1)
+        col_widths = [4.0*cm, 2.1*cm, 1.6*cm, 1.6*cm, 1.3*cm, 1.6*cm, 1.3*cm, 1.8*cm, 1.8*cm]
         headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', f'Fiyat\n({para_birimi_text})', 'Teslim\nTarihi']
         data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style_normal) for h in headers]]
+
+        def _pdf_cell_text(value):
+            # Paragraph icerigi (duz metnin aksine) XML/HTML olarak
+            # ayristirilir - kullanicinin elle girdigi bir '<'/'>'/'&' PDF
+            # olusturmayi kirmasin diye kacis karakterleri uygulanir.
+            from xml.sax.saxutils import escape
+            cleaned = _sanitize_pdf_free_text(value)
+            return escape(cleaned) if cleaned else '-'
+
         for item in deal.items:
             item_delivery_str = item.teslim_tarihi.strftime('%d.%m.%Y') if item.teslim_tarihi else deal_delivery_fallback
             data.append([
-                Paragraph(_sanitize_pdf_free_text(item.description), table_small),
-                item.kagit_cinsi or '-',
-                item.boy or '-',
-                item.en or '-',
-                item.renk or '-',
+                Paragraph(_pdf_cell_text(item.description), table_small),
+                Paragraph(_pdf_cell_text(item.kagit_cinsi), table_narrow),
+                Paragraph(_pdf_cell_text(item.boy), table_narrow),
+                Paragraph(_pdf_cell_text(item.en), table_narrow),
+                Paragraph(_pdf_cell_text(item.renk), table_narrow),
                 f"{item.quantity:.2f}",
                 item.unit,
                 f"{item.unit_price:,.2f}",
@@ -340,7 +389,9 @@ def generate_deal_pdf(deal):
     ]))
     elements.append(signature_table)
 
-    doc.build(elements)
+    watermark_text = (company.company_name or 'LEMA AMBALAJ').upper()
+    _watermark_cb = lambda cnv, d: _draw_watermark(cnv, d, watermark_text)
+    doc.build(elements, onFirstPage=_watermark_cb, onLaterPages=_watermark_cb)
     buffer.seek(0)
     return buffer
 
