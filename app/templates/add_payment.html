@@ -45,7 +45,7 @@
 
                     <div class="row mb-3">
                         <div class="col-md-6">
-                            <label for="amount" class="form-label">Tutar (₺) <span class="text-danger">*</span></label>
+                            <label for="amount" class="form-label">Tutar <span id="amount_currency_label">(₺)</span> <span class="text-danger">*</span></label>
                             <input type="number" step="0.01" class="form-control" id="amount" name="amount" required
                                    value="{{ form_data.amount if form_data else ('%.2f'|format(prefill_invoice.remaining_amount) if prefill_invoice else '') }}">
                         </div>
@@ -53,6 +53,20 @@
                             <label for="payment_date" class="form-label">Ödeme Tarihi</label>
                             <input type="date" class="form-control" id="payment_date" name="payment_date"
                                    value="{{ form_data.payment_date if form_data else today.strftime('%Y-%m-%d') }}" required>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3" id="kur_orani_box" style="display:none;">
+                        <div class="col-md-6">
+                            <label for="kur_orani" class="form-label">Kur Oranı (1 birim = ? ₺)</label>
+                            <div class="input-group">
+                                <input type="number" step="0.0001" min="0" class="form-control" id="kur_orani" name="kur_orani"
+                                       value="{{ form_data.kur_orani if form_data else '' }}">
+                                <button type="button" class="btn btn-outline-secondary" id="tcmb_fetch_btn">
+                                    <i class="bi bi-arrow-repeat"></i> TCMB'den Çek
+                                </button>
+                            </div>
+                            <div class="form-text" id="tcmb_kur_info">Bağlı kayıt döviz cinsindenmiş - bu ödemenin gün kuru, TL karşılığının doğru hesaplanması için kullanılır.</div>
                         </div>
                     </div>
 
@@ -129,6 +143,7 @@ function loadOpenRecords(customerId) {
                     var opt = document.createElement('option');
                     opt.value = 'inv:' + inv.id;
                     opt.dataset.amount = inv.remaining.toFixed(2);
+                    opt.dataset.currency = inv.para_birimi || 'TRY';
                     opt.textContent = inv.display_no + ' - Kalan: ' + inv.remaining.toFixed(2) + ' ₺';
                     og.appendChild(opt);
                 });
@@ -142,6 +157,7 @@ function loadOpenRecords(customerId) {
                     opt.value = 'deal:' + d.id;
                     var pesinatNum = parseFloat((d.pesinat || '').replace(/[^0-9.,]/g, '').replace(',', '.'));
                     opt.dataset.amount = isNaN(pesinatNum) ? '' : pesinatNum.toFixed(2);
+                    opt.dataset.currency = d.para_birimi || 'TRY';
                     opt.textContent = d.display_no + (d.pesinat ? ' - Peşinat: ' + d.pesinat : '');
                     ogd.appendChild(opt);
                 });
@@ -150,6 +166,37 @@ function loadOpenRecords(customerId) {
             linkedSelect.disabled = false;
         });
 }
+
+var CURRENCY_SYMBOLS = { TRY: '₺', EUR: '€', USD: '$' };
+
+function fetchTcmbRate(currency) {
+    var kurInput = document.getElementById('kur_orani');
+    var kurInfo = document.getElementById('tcmb_kur_info');
+    kurInfo.className = 'form-text text-muted';
+    kurInfo.textContent = 'TCMB kuru alınıyor...';
+    fetch('/api/tcmb-rate?currency=' + encodeURIComponent(currency))
+        .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+        .then(function (r) {
+            if (!r.ok) {
+                kurInfo.className = 'form-text text-danger';
+                kurInfo.textContent = r.body.error || 'TCMB kuru alınamadı, elle girin.';
+                return;
+            }
+            kurInput.value = r.body.rate;
+            kurInfo.className = 'form-text text-success';
+            kurInfo.textContent = 'TCMB güncel kuru: 1 ' + currency + ' = ' + r.body.rate + ' ₺ (gerekirse elle değiştirebilirsiniz)';
+        })
+        .catch(function () {
+            kurInfo.className = 'form-text text-danger';
+            kurInfo.textContent = 'TCMB kuru alınamadı (bağlantı hatası), elle girin.';
+        });
+}
+
+document.getElementById('tcmb_fetch_btn').addEventListener('click', function () {
+    var selected = linkedSelect ? linkedSelect.selectedOptions[0] : null;
+    var currency = (selected && selected.dataset.currency) || 'EUR';
+    fetchTcmbRate(currency === 'TRY' ? 'EUR' : currency);
+});
 
 if (linkedSelect) {
     linkedSelect.addEventListener('change', function () {
@@ -164,6 +211,18 @@ if (linkedSelect) {
         var selected = this.selectedOptions[0];
         if (selected && selected.dataset.amount) {
             amountInput.value = selected.dataset.amount;
+        }
+        var currency = (selected && selected.dataset.currency) || 'TRY';
+        var kurBox = document.getElementById('kur_orani_box');
+        var amountLabel = document.getElementById('amount_currency_label');
+        if (currency && currency !== 'TRY') {
+            kurBox.style.display = 'block';
+            amountLabel.textContent = '(' + (CURRENCY_SYMBOLS[currency] || currency) + ')';
+            fetchTcmbRate(currency);
+        } else {
+            kurBox.style.display = 'none';
+            amountLabel.textContent = '(₺)';
+            document.getElementById('kur_orani').value = '';
         }
     });
 }

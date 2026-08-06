@@ -42,6 +42,19 @@
 </div>
 {% endif %}
 
+{% if deal.para_birimi != 'TRY' %}
+<div class="alert alert-info d-flex align-items-center">
+    <i class="bi bi-currency-exchange me-2 fs-4"></i>
+    <div>
+        <strong>Bu teklif {{ deal.para_birimi }} cinsindendir.</strong>
+        İşbu teklif {{ deal.para_birimi }} cinsindendir; ödemeler, ödemenin yapıldığı gün geçerli olan T.C. Merkez Bankası döviz satış kuru üzerinden Türk Lirası karşılığı olarak tahsil edilir.
+        {% if deal.kullanilan_kur %}
+        <br><small class="text-muted">Gösterge kur: 1 {{ deal.para_birimi }} = {{ "{:,.4f}".format(deal.kullanilan_kur) }} ₺ → yaklaşık TL karşılığı: {{ "{:,.2f}".format(deal.tl_karsiligi) }} ₺</small>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 <div class="row">
     <div class="col-md-8">
         <div class="card mb-4 shadow-sm">
@@ -67,12 +80,12 @@
                         <div class="card bg-light">
                             <div class="card-body text-center">
                                 <h6 class="text-muted mb-1">Ara Toplam</h6>
-                                <h4 class="text-primary">{{ "{:,.2f}".format(deal.subtotal) }} ₺</h4>
+                                <h4 class="text-primary">{{ "{:,.2f}".format(deal.subtotal) }} {{ deal.para_birimi_sembol }}</h4>
                                 <h6 class="text-muted mb-1">KDV (%{{ deal.vat_rate }})</h6>
-                                <h5 class="text-warning">{{ "{:,.2f}".format(deal.vat_amount) }} ₺</h5>
+                                <h5 class="text-warning">{{ "{:,.2f}".format(deal.vat_amount) }} {{ deal.para_birimi_sembol }}</h5>
                                 <hr>
                                 <h6 class="text-muted mb-1">GENEL TOPLAM</h6>
-                                <h3 class="text-success">{{ "{:,.2f}".format(deal.value) }} ₺</h3>
+                                <h3 class="text-success">{{ "{:,.2f}".format(deal.value) }} {{ deal.para_birimi_sembol }}</h3>
                             </div>
                         </div>
                     </div>
@@ -106,15 +119,15 @@
                                 <td>{{ item.description }}</td>
                                 <td>{{ item.quantity }}</td>
                                 <td>{{ item.unit }}</td>
-                                <td>{{ "{:,.2f}".format(item.unit_price) }} ₺</td>
-                                <td><strong>{{ "{:,.2f}".format(item.total_price) }} ₺</strong></td>
+                                <td>{{ "{:,.2f}".format(item.unit_price) }} {{ deal.para_birimi_sembol }}</td>
+                                <td><strong>{{ "{:,.2f}".format(item.total_price) }} {{ deal.para_birimi_sembol }}</strong></td>
                             </tr>
                             {% endfor %}
                         </tbody>
                         <tfoot class="table-light">
-                            <tr><td colspan="5" class="text-end">Ara Toplam:</td><td><strong>{{ "{:,.2f}".format(deal.subtotal) }} ₺</strong></td></tr>
-                            <tr><td colspan="5" class="text-end">KDV (%{{ deal.vat_rate }}):</td><td><strong>{{ "{:,.2f}".format(deal.vat_amount) }} ₺</strong></td></tr>
-                            <tr class="table-success"><td colspan="5" class="text-end"><strong>TOPLAM:</strong></td><td><strong>{{ "{:,.2f}".format(deal.value) }} ₺</strong></td></tr>
+                            <tr><td colspan="5" class="text-end">Ara Toplam:</td><td><strong>{{ "{:,.2f}".format(deal.subtotal) }} {{ deal.para_birimi_sembol }}</strong></td></tr>
+                            <tr><td colspan="5" class="text-end">KDV (%{{ deal.vat_rate }}):</td><td><strong>{{ "{:,.2f}".format(deal.vat_amount) }} {{ deal.para_birimi_sembol }}</strong></td></tr>
+                            <tr class="table-success"><td colspan="5" class="text-end"><strong>TOPLAM:</strong></td><td><strong>{{ "{:,.2f}".format(deal.value) }} {{ deal.para_birimi_sembol }}</strong></td></tr>
                         </tfoot>
                     </table>
                 </div>
@@ -140,19 +153,19 @@
             </div>
             <div class="card-body">
                 <table class="table table-borderless table-sm mb-2">
-                    <tr><th>Peşinat:</th><td>%{{ deal.pesinat_orani }} = {{ "{:,.2f}".format(deal.pesinat_tutari) }} ₺</td></tr>
+                    <tr><th>Peşinat:</th><td>%{{ deal.pesinat_orani }} = {{ "{:,.2f}".format(deal.pesinat_tutari) }} {{ deal.para_birimi_sembol }}</td></tr>
                     <tr><th>Peşinat Tarihi:</th><td>{{ deal.pesinat_tarihi.strftime('%d.%m.%Y') if deal.pesinat_tarihi else '-' }}</td></tr>
-                    <tr><th>Bakiye:</th><td>{{ "{:,.2f}".format(deal.bakiye_tutari) }} ₺</td></tr>
+                    <tr><th>Bakiye:</th><td>{{ "{:,.2f}".format(deal.bakiye_tutari) }} {{ deal.para_birimi_sembol }}</td></tr>
                     <tr><th>Bakiye Tarihi:</th><td>{{ deal.bakiye_tarihi.strftime('%d.%m.%Y') if deal.bakiye_tarihi else '-' }}</td></tr>
                 </table>
                 <hr class="my-2">
                 <div class="d-flex justify-content-between align-items-center">
                     <span>Tahsil Edilen:</span>
-                    <strong class="text-success">{{ "{:,.2f}".format(deal.paid_amount) }} ₺</strong>
+                    <strong class="text-success">{{ "{:,.2f}".format(deal.paid_amount) }} {{ deal.para_birimi_sembol }}</strong>
                 </div>
                 <div class="d-flex justify-content-between align-items-center">
                     <span>Kalan:</span>
-                    <strong class="{{ 'text-success' if deal.payment_complete else 'text-danger' }}">{{ "{:,.2f}".format(deal.outstanding_amount) }} ₺</strong>
+                    <strong class="{{ 'text-success' if deal.payment_complete else 'text-danger' }}">{{ "{:,.2f}".format(deal.outstanding_amount) }} {{ deal.para_birimi_sembol }}</strong>
                 </div>
                 {% if deal.payment_complete %}
                 <div class="small text-success mt-2"><i class="bi bi-check-circle"></i> Ödeme tamamlandı.</div>
@@ -170,7 +183,7 @@
                 <i class="bi bi-cash-coin"></i> Alınan Ön Ödeme
             </div>
             <div class="card-body">
-                <h4 class="text-success mb-2">{{ "{:,.2f}".format(_advance_payments|sum(attribute='amount')) }} ₺</h4>
+                <h4 class="text-success mb-2">{{ "{:,.2f}".format(_advance_payments|sum(attribute='amount')) }} {{ deal.para_birimi_sembol }}</h4>
                 <small class="text-muted">Henüz bir faturaya bağlanmamış, fatura kesildiğinde otomatik olarak bağlanabilir.</small>
                 <a href="{{ url_for('customer_detail', id=deal.customer_id) }}" class="btn btn-sm btn-outline-info w-100 mt-2">
                     <i class="bi bi-eye"></i> Müşterinin Ödemeleri

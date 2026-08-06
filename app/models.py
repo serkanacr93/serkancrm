@@ -163,6 +163,15 @@ class Deal(db.Model):
     pesinat_orani = db.Column(db.Float, nullable=True)  # yuzde, orn. 50.0
     pesinat_tarihi = db.Column(db.Date, nullable=True)  # beklenen veya gerceklesen odeme tarihi
     bakiye_tarihi = db.Column(db.Date, nullable=True)  # bakiyenin beklenen odeme tarihi
+    # Coklu Para Birimi - subtotal/vat_amount/value bu para biriminde tutulur
+    # (TRY disindaki tekliflerde TL'ye cevrilmis bir deger DEGIL, dogrudan
+    # doviz tutaridir). kullanilan_kur, teklif olusturulurken/guncellenirken
+    # TCMB'den cekilen (veya elle girilen) GOSTERGE kurdur - sadece tutari
+    # yaklasik TL karsiligiyla gostermek icin kullanilir. Gercek tahsilat
+    # kurlari Payment.kur_orani'nda ayri ayri tutulur (kismi odemeler farkli
+    # gunlerde farkli kurla gelebilir) - Deal'de tek bir "kesin" kur YOKTUR.
+    para_birimi = db.Column(db.String(3), default='TRY', nullable=False)  # TRY / EUR / USD
+    kullanilan_kur = db.Column(db.Float, nullable=True)  # 1 birim para_birimi = ? TL (gosterge)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -177,6 +186,19 @@ class Deal(db.Model):
         if self.deal_no:
             return f'TKL-{self.deal_no:05d}'
         return f'TKL-{self.id:05d}'
+
+    @property
+    def para_birimi_sembol(self):
+        return {'TRY': '₺', 'EUR': '€', 'USD': '$'}.get(self.para_birimi, self.para_birimi)
+
+    @property
+    def tl_karsiligi(self):
+        """Doviz teklifin kullanilan_kur'a gore YAKLASIK TL karsiligi -
+        sadece gosterge/bilgi amacli, gercek tahsilat Payment.kur_orani
+        ile hesaplanir."""
+        if self.para_birimi == 'TRY' or not self.kullanilan_kur:
+            return None
+        return self.value * self.kullanilan_kur
 
     def calculate_totals(self):
         self.subtotal = sum(item.total_price for item in self.items)
@@ -651,6 +673,12 @@ class Payment(db.Model):
     reference_no = db.Column(db.String(100))  # ödeme referans no
     notes = db.Column(db.Text)
     status = db.Column(db.String(20), default='beklemede', index=True)  # beklemede, odendi, iptal
+    # Coklu Para Birimi - bagli teklif/fatura TRY disinda bir para biriminde
+    # ise (Deal.para_birimi), bu odemenin GUN'undeki TCMB kuru (veya elle
+    # girilen) burada tutulur. Kismi odemeler farkli gunlerde farkli kurla
+    # gelebilecegi icin kur Deal uzerinde degil, her Payment'ta ayri ayri
+    # tutulur - boylece her tahsilatin gercek TL karsiligi dogru hesaplanir.
+    kur_orani = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
@@ -658,6 +686,12 @@ class Payment(db.Model):
     invoice = db.relationship('Invoice', backref='payments')
     deal = db.relationship('Deal', backref='payments')
     user = db.relationship('User', backref='payments')
+
+    @property
+    def tl_karsiligi(self):
+        """kur_orani girilmisse amount * kur_orani (dovizin TL karsiligi),
+        yoksa amount'un zaten TL oldugu varsayilir."""
+        return self.amount * self.kur_orani if self.kur_orani else self.amount
 
     def __repr__(self):
         return f'<Payment {self.amount} ₺ - {self.customer.display_name}>'

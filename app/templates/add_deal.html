@@ -85,6 +85,26 @@
                             <input type="date" class="form-control" id="expected_close" name="expected_close">
                         </div>
                     </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="para_birimi" class="form-label">Para Birimi</label>
+                            <select class="form-select" id="para_birimi" name="para_birimi">
+                                <option value="TRY" selected>₺ TRY</option>
+                                <option value="EUR">€ EUR</option>
+                                <option value="USD">$ USD</option>
+                            </select>
+                        </div>
+                        <div class="col-md-5 mb-3" id="kullanilan_kur_box" style="display:none;">
+                            <label for="kullanilan_kur" class="form-label">Kullanılan Kur (1 birim = ? ₺)</label>
+                            <div class="input-group">
+                                <input type="number" step="0.0001" min="0" class="form-control" id="kullanilan_kur" name="kullanilan_kur">
+                                <button type="button" class="btn btn-outline-secondary" id="tcmb_fetch_btn">
+                                    <i class="bi bi-arrow-repeat"></i> TCMB'den Çek
+                                </button>
+                            </div>
+                            <div class="form-text" id="tcmb_kur_info"></div>
+                        </div>
+                    </div>
                     <hr>
                     <h6 class="text-muted"><i class="bi bi-cash-coin"></i> Ödeme Şekli</h6>
                     <div class="row">
@@ -119,8 +139,8 @@
                                     <th style="width: 28%">Açıklama</th>
                                     <th style="width: 12%">Miktar</th>
                                     <th style="width: 12%">Birim</th>
-                                    <th style="width: 14%">Birim Fiyat (₺)</th>
-                                    <th style="width: 14%">Toplam (₺)</th>
+                                    <th style="width: 14%" id="birim_fiyat_header">Birim Fiyat (₺)</th>
+                                    <th style="width: 14%" id="toplam_header">Toplam (₺)</th>
                                     <th style="width: 15%">Tip</th>
                                     <th style="width: 5%"></th>
                                 </tr>
@@ -332,11 +352,73 @@ function attachEvents() {
         input.removeEventListener('input', calculateTotals);
         input.addEventListener('input', calculateTotals);
     });
-    document.getElementById('vat-rate').removeEventListener('change', calculateTotals);
-    document.getElementById('vat-rate').addEventListener('change', calculateTotals);
+    // NOT: burada 'vat-rate' (tire) araniyordu ama elemanin gercek id'si
+    // 'vat_rate' (alt cizgi) - KDV orani degistirilince toplamlar canli
+    // guncellenmiyordu, sadece qty/price degisince tetikleniyordu. Duzeltildi.
+    document.getElementById('vat_rate').removeEventListener('change', calculateTotals);
+    document.getElementById('vat_rate').addEventListener('change', calculateTotals);
 }
 
+// Coklu Para Birimi - secilen para birimine gore sembol/kur alani
+var CURRENCY_SYMBOLS = { TRY: '₺', EUR: '€', USD: '$' };
+
+function currentCurrencySymbol() {
+    var cur = document.getElementById('para_birimi').value;
+    return CURRENCY_SYMBOLS[cur] || '₺';
+}
+
+function updateCurrencyLabels() {
+    var sym = currentCurrencySymbol();
+    document.getElementById('birim_fiyat_header').textContent = 'Birim Fiyat (' + sym + ')';
+    document.getElementById('toplam_header').textContent = 'Toplam (' + sym + ')';
+}
+
+document.getElementById('para_birimi').addEventListener('change', function () {
+    var cur = this.value;
+    var kurBox = document.getElementById('kullanilan_kur_box');
+    var kurInput = document.getElementById('kullanilan_kur');
+    var kurInfo = document.getElementById('tcmb_kur_info');
+    if (cur === 'TRY') {
+        kurBox.style.display = 'none';
+        kurInput.value = '';
+        kurInfo.textContent = '';
+    } else {
+        kurBox.style.display = 'block';
+        fetchTcmbRate(cur);
+    }
+    updateCurrencyLabels();
+    calculateTotals();
+});
+
+function fetchTcmbRate(currency) {
+    var kurInput = document.getElementById('kullanilan_kur');
+    var kurInfo = document.getElementById('tcmb_kur_info');
+    kurInfo.className = 'form-text text-muted';
+    kurInfo.textContent = 'TCMB kuru alınıyor...';
+    fetch('/api/tcmb-rate?currency=' + encodeURIComponent(currency))
+        .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+        .then(function (r) {
+            if (!r.ok) {
+                kurInfo.className = 'form-text text-danger';
+                kurInfo.textContent = r.body.error || 'TCMB kuru alınamadı, elle girin.';
+                return;
+            }
+            kurInput.value = r.body.rate;
+            kurInfo.className = 'form-text text-success';
+            kurInfo.textContent = 'TCMB güncel kuru: 1 ' + currency + ' = ' + r.body.rate + ' ₺ (gerekirse elle değiştirebilirsiniz)';
+        })
+        .catch(function () {
+            kurInfo.className = 'form-text text-danger';
+            kurInfo.textContent = 'TCMB kuru alınamadı (bağlantı hatası), elle girin.';
+        });
+}
+
+document.getElementById('tcmb_fetch_btn').addEventListener('click', function () {
+    fetchTcmbRate(document.getElementById('para_birimi').value);
+});
+
 function calculateTotals() {
+    var sym = currentCurrencySymbol();
     let subtotal = 0;
     document.querySelectorAll('.item-row').forEach(row => {
         const qty = parseFloat(row.querySelector('.item-qty')?.value) || 0;
@@ -344,7 +426,7 @@ function calculateTotals() {
         const total = qty * price;
         const totalInput = row.querySelector('.item-total');
         if (totalInput) {
-            totalInput.value = total.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺';
+            totalInput.value = total.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym;
         }
         subtotal += total;
     });
@@ -353,14 +435,14 @@ function calculateTotals() {
     const vatAmount = subtotal * (vatRate / 100);
     const grandTotal = subtotal + vatAmount;
 
-    document.getElementById('subtotal').textContent = subtotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺';
-    document.getElementById('vat-amount').textContent = vatAmount.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺';
-    document.getElementById('grand-total').textContent = grandTotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺';
+    document.getElementById('subtotal').textContent = subtotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym;
+    document.getElementById('vat-amount').textContent = vatAmount.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym;
+    document.getElementById('grand-total').textContent = grandTotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym;
     document.getElementById('vat-rate-display').textContent = vatRate;
 
-    document.getElementById('sidebar-subtotal').textContent = subtotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺';
-    document.getElementById('sidebar-vat').textContent = vatAmount.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺';
-    document.getElementById('sidebar-total').textContent = grandTotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺';
+    document.getElementById('sidebar-subtotal').textContent = subtotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym;
+    document.getElementById('sidebar-vat').textContent = vatAmount.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym;
+    document.getElementById('sidebar-total').textContent = grandTotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym;
     document.getElementById('sidebar-vat-rate').textContent = vatRate;
 }
 

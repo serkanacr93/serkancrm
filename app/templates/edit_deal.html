@@ -46,6 +46,26 @@
                     <input type="date" class="form-control" id="valid_until" name="valid_until" value="{{ deal.valid_until.strftime('%Y-%m-%d') if deal.valid_until else '' }}">
                 </div>
             </div>
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    <label for="para_birimi" class="form-label">Para Birimi</label>
+                    <select class="form-select" id="para_birimi" name="para_birimi">
+                        <option value="TRY" {{ 'selected' if deal.para_birimi == 'TRY' }}>₺ TRY</option>
+                        <option value="EUR" {{ 'selected' if deal.para_birimi == 'EUR' }}>€ EUR</option>
+                        <option value="USD" {{ 'selected' if deal.para_birimi == 'USD' }}>$ USD</option>
+                    </select>
+                </div>
+                <div class="col-md-5 mb-3" id="kullanilan_kur_box" style="{{ '' if deal.para_birimi != 'TRY' else 'display:none;' }}">
+                    <label for="kullanilan_kur" class="form-label">Kullanılan Kur (1 birim = ? ₺)</label>
+                    <div class="input-group">
+                        <input type="number" step="0.0001" min="0" class="form-control" id="kullanilan_kur" name="kullanilan_kur" value="{{ deal.kullanilan_kur or '' }}">
+                        <button type="button" class="btn btn-outline-secondary" id="tcmb_fetch_btn">
+                            <i class="bi bi-arrow-repeat"></i> TCMB'den Çek
+                        </button>
+                    </div>
+                    <div class="form-text" id="tcmb_kur_info"></div>
+                </div>
+            </div>
 
             <h6 class="text-muted mt-2"><i class="bi bi-cash-coin"></i> Ödeme Şekli</h6>
             <div class="row">
@@ -121,6 +141,45 @@
 </div>
 
 <script>
+document.getElementById('para_birimi').addEventListener('change', function () {
+    var kurBox = document.getElementById('kullanilan_kur_box');
+    var kurInput = document.getElementById('kullanilan_kur');
+    if (this.value === 'TRY') {
+        kurBox.style.display = 'none';
+        kurInput.value = '';
+    } else {
+        kurBox.style.display = 'block';
+        fetchTcmbRate(this.value);
+    }
+});
+
+function fetchTcmbRate(currency) {
+    var kurInput = document.getElementById('kullanilan_kur');
+    var kurInfo = document.getElementById('tcmb_kur_info');
+    kurInfo.className = 'form-text text-muted';
+    kurInfo.textContent = 'TCMB kuru alınıyor...';
+    fetch('/api/tcmb-rate?currency=' + encodeURIComponent(currency))
+        .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+        .then(function (r) {
+            if (!r.ok) {
+                kurInfo.className = 'form-text text-danger';
+                kurInfo.textContent = r.body.error || 'TCMB kuru alınamadı, elle girin.';
+                return;
+            }
+            kurInput.value = r.body.rate;
+            kurInfo.className = 'form-text text-success';
+            kurInfo.textContent = 'TCMB güncel kuru: 1 ' + currency + ' = ' + r.body.rate + ' ₺ (gerekirse elle değiştirebilirsiniz)';
+        })
+        .catch(function () {
+            kurInfo.className = 'form-text text-danger';
+            kurInfo.textContent = 'TCMB kuru alınamadı (bağlantı hatası), elle girin.';
+        });
+}
+
+document.getElementById('tcmb_fetch_btn').addEventListener('click', function () {
+    fetchTcmbRate(document.getElementById('para_birimi').value);
+});
+
 let itemCount = {{ deal.items|length }};
 document.getElementById('add-item').addEventListener('click', function() {
     const container = document.getElementById('items-container');

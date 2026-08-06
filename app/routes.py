@@ -4,6 +4,7 @@ from app.models import User, Customer, Deal, DealItem, Production, ProductionIte
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search
+from app.tcmb import fetch_tcmb_rate
 from datetime import datetime, timedelta, date
 from functools import wraps
 from io import BytesIO
@@ -1051,6 +1052,12 @@ def register_routes(app):
             # tamamen kaldirildi.
             title = _customer_full_name(customer)
 
+            para_birimi = request.form.get('para_birimi', 'TRY').strip().upper()
+            if para_birimi not in ('TRY', 'EUR', 'USD'):
+                para_birimi = 'TRY'
+            kullanilan_kur_raw = request.form.get('kullanilan_kur', '').strip()
+            kullanilan_kur = float(kullanilan_kur_raw) if kullanilan_kur_raw and para_birimi != 'TRY' else None
+
             deal = Deal(
                 deal_no=next_no,
                 title=title,
@@ -1064,6 +1071,8 @@ def register_routes(app):
                 vade_gun=request.form.get('vade_gun', '').strip() or None,
                 pesinat=request.form.get('pesinat', '').strip() or None,
                 bakiye_odemesi=request.form.get('bakiye_odemesi', '').strip() or None,
+                para_birimi=para_birimi,
+                kullanilan_kur=kullanilan_kur,
                 customer_id=customer.id,
                 user_id=current_user.id
             )
@@ -1104,7 +1113,7 @@ def register_routes(app):
             )
             db.session.add(reminder)
             db.session.commit()
-            flash(f'Teklif oluşturuldu! KDV dahil: {deal.value:,.2f} ₺', 'success')
+            flash(f'Teklif oluşturuldu! KDV dahil: {deal.value:,.2f} {deal.para_birimi_sembol}', 'success')
             return redirect(url_for('deal_detail', id=deal.id))
         # Not: customers listesi burada kasitli olarak cekilmiyor - form
         # merkezi musteri arama bilesenini (customer-search.js) kullaniyor,
@@ -1143,6 +1152,13 @@ def register_routes(app):
             deal.vade_gun = request.form.get('vade_gun', '').strip() or None
             deal.pesinat = request.form.get('pesinat', '').strip() or None
             deal.bakiye_odemesi = request.form.get('bakiye_odemesi', '').strip() or None
+
+            para_birimi = request.form.get('para_birimi', 'TRY').strip().upper()
+            if para_birimi not in ('TRY', 'EUR', 'USD'):
+                para_birimi = 'TRY'
+            kullanilan_kur_raw = request.form.get('kullanilan_kur', '').strip()
+            deal.para_birimi = para_birimi
+            deal.kullanilan_kur = float(kullanilan_kur_raw) if kullanilan_kur_raw and para_birimi != 'TRY' else None
 
             DealItem.query.filter_by(deal_id=id).delete()
             i = 0
@@ -1243,6 +1259,7 @@ def register_routes(app):
             title=deal.title, stage='teklif', probability=deal.probability,
             deal_date=today, expected_close=deal.expected_close, valid_until=today + timedelta(days=7),
             vat_rate=deal.vat_rate, notes=f"Revize. Orijinal: {deal.display_no}. {deal.notes or ''}".strip(),
+            para_birimi=deal.para_birimi, kullanilan_kur=deal.kullanilan_kur,
             customer_id=deal.customer_id,
             user_id=deal.user_id
         )
@@ -1427,6 +1444,21 @@ def register_routes(app):
         (HTML hata sayfasi donerek) reddediyordu; submit aninda bu endpoint'ten
         taze token cekmek bu sorunu ortadan kaldirir."""
         return jsonify({'csrf_token': generate_csrf()})
+
+    @app.route('/api/tcmb-rate')
+    @login_required
+    def api_tcmb_rate():
+        """Coklu Para Birimi - teklif formunda para birimi EUR/USD secilince
+        veya odeme formunda dovizli bir teklif/fatura secilince, o gunun
+        TCMB efektif satis kurunu doner. Kullanici bu degeri elle de
+        degistirebilir - burasi sadece otomatik on-doldurma icindir."""
+        currency = request.args.get('currency', 'EUR').upper()
+        if currency not in ('TRY', 'EUR', 'USD'):
+            return jsonify({'error': 'Desteklenmeyen para birimi.'}), 400
+        rate = fetch_tcmb_rate(currency)
+        if rate is None:
+            return jsonify({'error': 'TCMB kuru şu an alınamadı, elle girebilirsiniz.'}), 502
+        return jsonify({'currency': currency, 'rate': rate})
 
     @app.route('/api/customers/quick-add', methods=['POST'])
     @login_required
@@ -2833,6 +2865,7 @@ def register_routes(app):
                                             prefill_customer=prefill_customer, prefill_invoice=None,
                                             duplicate_warning=True, form_data=request.form)
 
+            kur_orani_raw = request.form.get('kur_orani', '').strip()
             payment = Payment(
                 customer_id=customer_id,
                 invoice_id=int(request.form['invoice_id']) if request.form.get('invoice_id') else None,
@@ -2843,6 +2876,7 @@ def register_routes(app):
                 reference_no=request.form.get('reference_no'),
                 notes=request.form.get('notes'),
                 status=request.form.get('status', 'odendi'),
+                kur_orani=float(kur_orani_raw) if kur_orani_raw else None,
                 user_id=current_user.id
             )
             db.session.add(payment)
@@ -2910,14 +2944,15 @@ def register_routes(app):
         invoices = Invoice.query.filter_by(customer_id=customer_id, type='fatura').all()
         open_invoices = [{
             'id': inv.id, 'display_no': inv.display_no,
-            'total': inv.total, 'remaining': inv.remaining_amount
+            'total': inv.total, 'remaining': inv.remaining_amount,
+            'para_birimi': inv.deal.para_birimi if inv.deal else 'TRY'
         } for inv in invoices if inv.remaining_amount > 0.01]
 
         invoiced_deal_ids = {inv.deal_id for inv in invoices}
         won_deals = Deal.query.filter_by(customer_id=customer_id, stage='kazanilan').all()
         open_deals = [{
             'id': d.id, 'display_no': d.display_no,
-            'value': d.value, 'pesinat': d.pesinat or ''
+            'value': d.value, 'pesinat': d.pesinat or '', 'para_birimi': d.para_birimi
         } for d in won_deals if d.id not in invoiced_deal_ids]
 
         return jsonify({'invoices': open_invoices, 'deals': open_deals})

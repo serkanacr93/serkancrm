@@ -201,11 +201,15 @@ def generate_deal_pdf(deal):
     # gercek deger, bossa '-' gosterilir. Kalemin kendi teslim tarihi
     # girilmemisse teklifin genel beklenen kapanis tarihine dusulur.
     deal_delivery_fallback = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
+    # Coklu Para Birimi - TRY icin Vera fontunda ₺ glifi olmadigindan
+    # (bkz. _sanitize_pdf_free_text) tutarlar hep 'TL' metniyle gosterilir;
+    # EUR/USD sembolleri Vera'da mevcut, dogrudan kullanilabilir.
+    para_birimi_text = 'TL' if deal.para_birimi == 'TRY' else deal.para_birimi_sembol
     if deal.items:
         table_small = ParagraphStyle('TableSmall', parent=small, fontSize=8, leading=10)
         table_header_style_normal = ParagraphStyle('TableHeaderNormal', parent=table_header_style, fontSize=8, leading=10)
         col_widths = [4.3*cm, 2.3*cm, 1.2*cm, 1.2*cm, 1.4*cm, 1.7*cm, 1.4*cm, 1.9*cm, 1.9*cm]
-        headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', 'Fiyat', 'Teslim\nTarihi']
+        headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', f'Fiyat\n({para_birimi_text})', 'Teslim\nTarihi']
         data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style_normal) for h in headers]]
         for item in deal.items:
             item_delivery_str = item.teslim_tarihi.strftime('%d.%m.%Y') if item.teslim_tarihi else deal_delivery_fallback
@@ -237,9 +241,9 @@ def generate_deal_pdf(deal):
 
         elements.append(Spacer(1, 2*mm))
         totals_data = [
-            ['Ara Toplam:', f"{deal.subtotal:,.2f} TL"],
-            [f'KDV (%{deal.vat_rate:.0f}):', f"{deal.vat_amount:,.2f} TL"],
-            ['TOPLAM:', f"{deal.value:,.2f} TL"],
+            ['Ara Toplam:', f"{deal.subtotal:,.2f} {para_birimi_text}"],
+            [f'KDV (%{deal.vat_rate:.0f}):', f"{deal.vat_amount:,.2f} {para_birimi_text}"],
+            ['TOPLAM:', f"{deal.value:,.2f} {para_birimi_text}"],
         ]
         totals_table = Table(totals_data, colWidths=[3*cm, 3*cm], hAlign='RIGHT')
         totals_table.setStyle(TableStyle([
@@ -251,6 +255,16 @@ def generate_deal_pdf(deal):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ]))
         elements.append(totals_table)
+
+        # Doviz teklifte, kullanilan_kur girilmisse gosterge TL karsiligi
+        if deal.para_birimi != 'TRY' and deal.kullanilan_kur:
+            elements.append(Spacer(1, 1*mm))
+            kur_note = ParagraphStyle('KurNote', parent=terms_style, alignment=2)
+            elements.append(Paragraph(
+                f"Gösterge kur: 1 {deal.para_birimi} = {deal.kullanilan_kur:,.4f} TL &nbsp;-&nbsp; "
+                f"yaklaşık TL karşılığı: {deal.tl_karsiligi:,.2f} TL",
+                kur_note
+            ))
     else:
         elements.append(Paragraph("<i>Henüz ürün eklenmemiş.</i>", normal))
 
@@ -293,6 +307,14 @@ def generate_deal_pdf(deal):
         "Teslim edilen ürünler, teslim anında alıcı tarafından kontrol edilir; görünür hata ve eksiklikler ancak teslim anında bildirilirse dikkate alınır.",
         "Siparişin iptali, üretime başlanmadan önce yazılı bildirimle mümkündür; üretime başlanmış siparişlerde iptal talepleri değerlendirmeye tabidir.",
     ]
+    if deal.para_birimi != 'TRY':
+        # Doviz sartlar metni - odemeler ayri gunlerde farkli kurla
+        # gelebilecegi icin (bkz. Payment.kur_orani), her tahsilatin
+        # kendi gununun TCMB kuru uzerinden TL'ye cevrilecegi acikca belirtilir.
+        terms.append(
+            f"İşbu teklif {deal.para_birimi} cinsindendir; ödemeler, ödemenin yapıldığı gün geçerli olan "
+            f"T.C. Merkez Bankası döviz satış kuru üzerinden Türk Lirası karşılığı olarak tahsil edilir."
+        )
     for i, t in enumerate(terms, 1):
         elements.append(Paragraph(f"{i}. {t}", terms_style))
     elements.append(Spacer(1, 8*mm))
