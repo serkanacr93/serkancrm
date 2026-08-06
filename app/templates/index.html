@@ -50,7 +50,7 @@
 
 <div class="row mb-4">
     <div class="col-12">
-        <div class="card shadow-sm border-primary" style="position: relative; z-index: 10;">
+        <div class="card shadow-sm border-primary" id="today_contact_card" style="position: relative; z-index: 10;">
             <div class="card-header bg-primary text-white">
                 <i class="bi bi-chat-dots"></i> Bugün Kiminle Görüştün?
             </div>
@@ -358,6 +358,11 @@ fetch('/api/chart-data')
         hiddenIdInputId: 'today_contact_customer_id',
         resultsId: 'today_contact_results',
         allowQuickAdd: true,
+        // Not kutusu/Ekle butonu ayni kartta ama sonuc listesinin disinda -
+        // bunlara tiklamak "disariya tiklama" sayilip acik "yeni musteri"
+        // formunu (telefon alaniyla birlikte) gizlemesin diye tum kart
+        // "icerde" sayiliyor (bkz. customer-search.js clickOutsideContainer).
+        clickOutsideContainer: document.getElementById('today_contact_card'),
         onSelect: function () {
             submitBtn.disabled = false;
         },

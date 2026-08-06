@@ -31,6 +31,14 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
     opts = opts || {};
     var minLength = opts.minLength || 2;
     var timeout;
+    // Yaris durumu (Katman 2 / Is - "alakasiz isimler cikiyor") - kullanici
+    // hizli yazip ara verdiginde birden fazla arama istegi ayni anda ucuyor
+    // olabilir; ag gecikmesi yuzunden ESKI bir sorgunun cevabi YENI
+    // sorgunun cevabindan SONRA gelebilir ve ekrandaki dogru sonucu bayat
+    // veriyle ezebilir. Her arama denemesine artan bir kimlik verilip,
+    // cevap dondugunde hala "en guncel deneme" mi diye kontrol edilir -
+    // degilse (daha yeni bir arama zaten baslamissa) o cevap yok sayilir.
+    var searchAttempt = 0;
 
     function selectCustomer(c) {
         input.value = c.name;
@@ -135,9 +143,11 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
             return;
         }
         timeout = setTimeout(function () {
+            var myAttempt = ++searchAttempt;
             fetch('/api/customers/search?q=' + encodeURIComponent(query))
                 .then(function (res) { return res.json(); })
                 .then(function (data) {
+                    if (myAttempt !== searchAttempt) return; // daha yeni bir arama zaten baslamis - bu bayat cevabi yok say
                     resultsEl.innerHTML = '';
                     if (data.length === 0) {
                         renderQuickAdd(query);
@@ -162,8 +172,19 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
         }, 150);
     });
 
+    // "Disariya tiklaninca kapat" kontrolu - varsayilan olarak sadece arama
+    // kutusu + sonuc listesi "icerde" sayilir. Ama bazi formlarda (orn.
+    // Dashboard'daki "Bugun Kiminle Gorustun?" kutusu) ayni kartta, sonuc
+    // listesinin DISINDA baska alanlar da var (Not kutusu, Ekle butonu) -
+    // bunlara tiklamak "disariya tiklama" sayilip acik olan "Yeni musteri
+    // ekle" formunu (icindeki telefon alaniyla birlikte) gizliyordu, kullanici
+    // "telefon alani kayboluyor" olarak deneyimliyordu. clickOutsideContainer
+    // verilirse, o elemanin ICI de "icerde" sayilir.
+    var outsideContainer = opts.clickOutsideContainer || null;
     document.addEventListener('click', function (e) {
-        if (!input.contains(e.target) && !resultsEl.contains(e.target)) {
+        var inside = input.contains(e.target) || resultsEl.contains(e.target) ||
+            (outsideContainer && outsideContainer.contains(e.target));
+        if (!inside) {
             resultsEl.style.display = 'none';
         }
     });
