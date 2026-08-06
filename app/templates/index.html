@@ -297,7 +297,7 @@ fetch('/api/chart-data')
     });
 </script>
 
-<script src="{{ url_for('static', filename='js/customer-search.js') }}"></script>
+<script src="{{ asset_url('js/customer-search.js') }}"></script>
 <script>
 (function () {
     var searchInput = document.getElementById('today_contact_search');
@@ -315,8 +315,11 @@ fetch('/api/chart-data')
         searchInput.focus();
     }
 
+    var submitBtnDefaultHtml = submitBtn.innerHTML;
+
     function submitReport(customerId, customerName) {
         submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Ekleniyor...';
         feedback.className = 'mt-2 small text-muted';
         feedback.textContent = 'Ekleniyor...';
         _freshCsrfToken(csrfInput).then(function (token) {
@@ -331,6 +334,7 @@ fetch('/api/chart-data')
         })
             .then(_parseJsonResponse)
             .then(function (r) {
+                submitBtn.innerHTML = submitBtnDefaultHtml;
                 if (!r.ok) {
                     feedback.className = 'mt-2 small text-danger';
                     feedback.textContent = r.body.error || 'Eklenemedi.';
@@ -342,6 +346,7 @@ fetch('/api/chart-data')
                 resetBox();
             })
             .catch(function () {
+                submitBtn.innerHTML = submitBtnDefaultHtml;
                 feedback.className = 'mt-2 small text-danger';
                 feedback.textContent = 'Bağlantı hatası, tekrar deneyin.';
                 submitBtn.disabled = false;

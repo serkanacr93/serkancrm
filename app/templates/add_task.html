@@ -31,7 +31,7 @@
         </div>
     </div>
 </div>
-<script src="{{ url_for('static', filename='js/customer-search.js') }}"></script>
+<script src="{{ asset_url('js/customer-search.js') }}"></script>
 <script>
 initCustomerSearch({ inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results' });
 </script>

@@ -56,6 +56,23 @@ def create_app():
     from app.routes import register_routes
     register_routes(app)
 
+    @app.template_global()
+    def asset_url(filename):
+        """static/ altindaki bir dosya icin, dosyanin degisiklik tarihini
+        (mtime) query string olarak ekleyen bir URL dondurur (orn.
+        customer-search.js?v=1735...). Boylece JS/CSS'te bir duzeltme
+        yapilip deploy edildiginde, tarayicinin eski (Cache-Control:
+        no-cache olsa bile bazi ara katmanlarda/proxy'lerde onbelleklenmis
+        olabilecek) surumu kullanmaya devam etmesi onlenir - URL degistigi
+        icin tamamen YENI bir kaynak olarak ele alinir."""
+        from flask import url_for
+        static_path = os.path.join(app.static_folder, filename)
+        try:
+            version = int(os.path.getmtime(static_path))
+        except OSError:
+            version = 0
+        return url_for('static', filename=filename) + f'?v={version}'
+
     with app.app_context():
         db.create_all()
         from app.models import User
