@@ -36,38 +36,29 @@ def _sanitize_pdf_free_text(text):
     return text.replace('₺', 'TL')
 
 def _draw_watermark(canvas, doc, text):
-    """Sayfa arka planina, tam kaplayan, egik (-30 derece) tekrar eden bir
-    filigran ciziyor. onFirstPage/onLaterPages callback'i olarak cagrilir -
-    reportlab bu callback'i sayfanin flowable icerigi (tablo/metin) cizilmeden
-    ONCE calistirir, bu yuzden filigran otomatik olarak icerigin ALTINDA
-    kalir, ustune binmez. saveState/restoreState ile bu cizim, sayfanin geri
-    kalan durumunu (font, renk vb.) etkilemeden izole edilir."""
+    """Sayfa ortasinda TEK, buyuk, ince cerceveli (sadece kontur - ici bos)
+    bir filigran ciziyor, -25 derece egik. onFirstPage/onLaterPages
+    callback'i olarak cagrilir - reportlab bu callback'i sayfanin flowable
+    icerigi (tablo/metin) cizilmeden ONCE calistirir, bu yuzden filigran
+    otomatik olarak icerigin ALTINDA kalir, ustune binmez. Ici dolu
+    olmamasi icin PDFTextObject.setTextRenderMode(1) (Tr 1 = sadece kontur
+    ciz, doldurma) kullanilir - drawString gibi normal metin cizim
+    fonksiyonlari her zaman ICI DOLU (fill) cizer, bu yuzden dogrudan
+    text object uzerinden calisilir."""
     if not text:
         return
     canvas.saveState()
-    try:
-        canvas.setFillColorRGB(20 / 255.0, 20 / 255.0, 40 / 255.0, alpha=0.16)
-    except TypeError:
-        # bazi reportlab surumlerinde setFillColorRGB alpha kabul etmiyor
-        canvas.setFillColorRGB(20 / 255.0, 20 / 255.0, 40 / 255.0)
-        canvas.setFillAlpha(0.16)
-    canvas.setFont('Vera-Bold', 32)
-    page_w, page_h = A4
-    canvas.translate(page_w / 2.0, page_h / 2.0)
-    canvas.rotate(-30)
-    text_w = canvas.stringWidth(text, 'Vera-Bold', 32)
-    step_x = text_w + 50
-    step_y = 80
-    # Dondurulmus koordinat sisteminde sayfanin tum koseleri kapsansin diye
-    # kosegen uzunlugu kadar tasirarak grid ciziliyor - boslu/eksik alan kalmaz.
-    diag = (page_w ** 2 + page_h ** 2) ** 0.5
-    y = -diag
-    while y < diag:
-        x = -diag
-        while x < diag:
-            canvas.drawString(x, y, text)
-            x += step_x
-        y += step_y
+    canvas.translate(A4[0] / 2.0, A4[1] / 2.0)
+    canvas.rotate(-25)
+    font_size = 65
+    canvas.setLineWidth(1.1)
+    canvas.setStrokeColorRGB(20 / 255.0, 20 / 255.0, 40 / 255.0)
+    text_w = canvas.stringWidth(text, 'Vera-Bold', font_size)
+    text_obj = canvas.beginText(-text_w / 2.0, -font_size / 3.0)
+    text_obj.setFont('Vera-Bold', font_size)
+    text_obj.setTextRenderMode(1)  # 1 = stroke only (kontur), fill yok
+    text_obj.textOut(text)
+    canvas.drawText(text_obj)
     canvas.restoreState()
 
 def register_fonts():
@@ -144,35 +135,54 @@ def generate_deal_pdf(deal):
     elements = []
 
     # ===== UST BASLIK: firma bilgisi (sol) + TEKLIF basligi (sag) =====
-    left_cell = []
-    if company.logo_data:
-        try:
-            from PIL import Image as PILImage
-            PILImage.open(BytesIO(company.logo_data)).verify()
-            img = Image(BytesIO(company.logo_data), width=3.5*cm, height=1.8*cm, kind='proportional')
-            left_cell.append(img)
-            left_cell.append(Spacer(1, 2*mm))
-        except Exception:
-            pass
-    left_cell.append(Paragraph(company.company_name or 'Lema Ambalaj', company_name_style))
+    company_text_block = [Paragraph(company.company_name or 'Lema Ambalaj', company_name_style)]
     if company.address:
-        left_cell.append(Paragraph(company.address.replace('\n', '<br/>'), small))
+        company_text_block.append(Paragraph(company.address.replace('\n', '<br/>'), small))
     contact_bits = []
     if company.phone:
         contact_bits.append(f"Tel: {company.phone}")
     if company.fax:
         contact_bits.append(f"Faks: {company.fax}")
     if contact_bits:
-        left_cell.append(Paragraph(' | '.join(contact_bits), small))
+        company_text_block.append(Paragraph(' | '.join(contact_bits), small))
     contact_bits2 = []
     if company.email:
         contact_bits2.append(company.email)
     if company.website:
         contact_bits2.append(company.website)
     if contact_bits2:
-        left_cell.append(Paragraph(' | '.join(contact_bits2), small))
+        company_text_block.append(Paragraph(' | '.join(contact_bits2), small))
     if company.tax_office or company.tax_id:
-        left_cell.append(Paragraph(f"V.D.: {company.tax_office or '-'}  V.No: {company.tax_id or '-'}", small))
+        company_text_block.append(Paragraph(f"V.D.: {company.tax_office or '-'}  V.No: {company.tax_id or '-'}", small))
+
+    logo_img = None
+    if company.logo_data:
+        try:
+            from PIL import Image as PILImage
+            PILImage.open(BytesIO(company.logo_data)).verify()
+            # Logo, firma adinin SOLUNDA, dikey ortalanmis olarak gosteriliyor
+            # (eskiden ustte ayri bir kutuda, kucuk boyuttaydi). Boyut ~%45
+            # buyutuldu (3.5x1.8cm -> 5.1x2.6cm) ve metin blogunun toplam
+            # yuksekligine yakinlasmasi hedeflendi.
+            logo_img = Image(BytesIO(company.logo_data), width=5.1*cm, height=2.6*cm, kind='proportional')
+        except Exception:
+            logo_img = None
+
+    if logo_img is not None:
+        logo_row_table = Table([[logo_img, company_text_block]], colWidths=[5.1*cm, 5.9*cm])
+        logo_row_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (0, 0), 0),
+            # logo ile metin arasinda 10-15pt bosluk
+            ('RIGHTPADDING', (0, 0), (0, 0), 12),
+            ('LEFTPADDING', (1, 0), (1, 0), 0),
+            ('RIGHTPADDING', (1, 0), (1, 0), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        left_cell = [logo_row_table]
+    else:
+        left_cell = company_text_block
 
     right_cell = [
         Paragraph("TEKLİF", doc_title_style),
