@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}Manuel İrsaliye Oluştur - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-file-earmark-text"></i> Manuel İrsaliye Oluştur</h2>
+    <a href="{{ url_for('shipment_list') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Geri</a>
+</div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Sistemde teklif/üretim kaydı olmadan, doğrudan bir müşteriye bağlı bağımsız bir irsaliye oluşturur.
+</div>
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <i class="bi bi-info-circle"></i> İrsaliye Bilgileri
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-12 mb-3 position-relative">
+                            <label for="customer_search" class="form-label">Müşteri *</label>
+                            <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..." autocomplete="off" required>
+                            <input type="hidden" id="customer_id" name="customer_id">
+                            <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="ship_date" class="form-label">Gönderim Tarihi</label>
+                            <input type="date" class="form-control" id="ship_date" name="ship_date" value="{{ today.strftime('%Y-%m-%d') }}">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="estimated_delivery_date" class="form-label">Tahmini Teslim Tarihi</label>
+                            <input type="date" class="form-control" id="estimated_delivery_date" name="estimated_delivery_date">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="carrier" class="form-label">Kargo Firması</label>
+                            <select class="form-select" id="carrier" name="carrier">
+                                <option value="">Seçiniz (opsiyonel)</option>
+                                {% for c in carriers %}
+                                <option value="{{ c }}">{{ c }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="tracking_number" class="form-label">Takip No</label>
+                            <input type="text" class="form-control" id="tracking_number" name="tracking_number" placeholder="Opsiyonel">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-box"></i> Ürün Kalemleri</span>
+                    <button type="button" class="btn btn-sm btn-light" id="add-item">
+                        <i class="bi bi-plus"></i> Kalem Ekle
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="items-table">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th style="width: 55%">Açıklama</th>
+                                    <th style="width: 20%">Miktar</th>
+                                    <th style="width: 20%">Birim</th>
+                                    <th style="width: 5%"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="item-row">
+                                    <td><input type="text" class="form-control form-control-sm" name="desc_0" required></td>
+                                    <td><input type="number" class="form-control form-control-sm" name="qty_0" min="0" step="0.01" required></td>
+                                    <td>
+                                        <select class="form-select form-select-sm" name="unit_0">
+                                            <option value="adet">Adet</option>
+                                            <option value="kg">Kg</option>
+                                            <option value="mt">Metre</option>
+                                            <option value="lt">Litre</option>
+                                            <option value="m2">m²</option>
+                                            <option value="set">Set</option>
+                                        </select>
+                                    </td>
+                                    <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header bg-secondary text-white">
+                    <i class="bi bi-journal-text"></i> Notlar
+                </div>
+                <div class="card-body">
+                    <textarea class="form-control" id="notes" name="notes" rows="3"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header bg-warning text-dark">
+                    <i class="bi bi-info-circle"></i> Bilgi
+                </div>
+                <div class="card-body">
+                    <small>
+                        <ul class="mb-0">
+                            <li>Bu irsaliye, mevcut Sevkiyat listesinde "Manuel" etiketiyle görünür.</li>
+                            <li>Kaydedilince PDF olarak indirilebilir.</li>
+                        </ul>
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-end gap-2 mb-4">
+        <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-check-lg"></i> İrsaliye Oluştur</button>
+        <a href="{{ url_for('shipment_list') }}" class="btn btn-secondary btn-lg"><i class="bi bi-x-lg"></i> İptal</a>
+    </div>
+</form>
+
+<script src="{{ asset_url('js/customer-search.js') }}"></script>
+<script>
+let itemCount = 1;
+
+initCustomerSearch({
+    inputId: 'customer_search',
+    hiddenIdInputId: 'customer_id',
+    resultsId: 'customer_results',
+    allowQuickAdd: true
+});
+
+document.getElementById('add-item').addEventListener('click', function() {
+    const tbody = document.querySelector('#items-table tbody');
+    const row = document.createElement('tr');
+    row.className = 'item-row';
+    row.innerHTML = `
+        <td><input type="text" class="form-control form-control-sm" name="desc_${itemCount}" required></td>
+        <td><input type="number" class="form-control form-control-sm" name="qty_${itemCount}" min="0" step="0.01" required></td>
+        <td>
+            <select class="form-select form-select-sm" name="unit_${itemCount}">
+                <option value="adet">Adet</option>
+                <option value="kg">Kg</option>
+                <option value="mt">Metre</option>
+                <option value="lt">Litre</option>
+                <option value="m2">m²</option>
+                <option value="set">Set</option>
+            </select>
+        </td>
+        <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
+    `;
+    tbody.appendChild(row);
+    itemCount++;
+});
+
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
+        const row = e.target.closest('.item-row');
+        if (document.querySelectorAll('.item-row').length > 1) {
+            row.remove();
+        }
+    }
+});
+</script>
+{% endblock %}

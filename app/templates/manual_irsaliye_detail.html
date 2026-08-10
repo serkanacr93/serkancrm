@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Manuel İrsaliye Detayı - {{ manual_irsaliye.display_no }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2><i class="bi bi-file-earmark-text"></i> Manuel İrsaliye Detayı <span class="badge bg-secondary fs-6">Manuel</span></h2>
+        <small class="text-muted">{{ manual_irsaliye.display_no }} | {{ manual_irsaliye.ship_date.strftime('%d.%m.%Y') if manual_irsaliye.ship_date else '-' }}</small>
+    </div>
+    <div>
+        <a href="{{ url_for('shipment_list') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Geri
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-secondary text-white">
+                <i class="bi bi-info-circle"></i> İrsaliye Bilgileri
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless">
+                    <tr><th>Müşteri:</th><td>{{ manual_irsaliye.customer.display_name }}</td></tr>
+                    <tr><th>Durum:</th>
+                        <td>
+                            <span class="badge bg-{{ 'success' if manual_irsaliye.status == 'teslim_edildi' else 'info' if manual_irsaliye.status == 'yolda' else 'primary' if manual_irsaliye.status == 'kargoya_verildi' else 'secondary' }}">{{ manual_irsaliye.status_label }}</span>
+                        </td>
+                    </tr>
+                    <tr><th>Gönderim Tarihi:</th><td>{{ manual_irsaliye.ship_date.strftime('%d.%m.%Y') if manual_irsaliye.ship_date else '-' }}</td></tr>
+                    <tr><th>Tahmini Teslim:</th><td>{{ manual_irsaliye.estimated_delivery_date.strftime('%d.%m.%Y') if manual_irsaliye.estimated_delivery_date else '-' }}</td></tr>
+                    <tr><th>Gerçek Teslim:</th><td>{{ manual_irsaliye.actual_delivery_date.strftime('%d.%m.%Y') if manual_irsaliye.actual_delivery_date else '-' }}</td></tr>
+                    <tr>
+                        <th>Takip No:</th>
+                        <td>
+                            {% if manual_irsaliye.tracking_url %}
+                            <a href="{{ manual_irsaliye.tracking_url }}" target="_blank" rel="noopener">{{ manual_irsaliye.tracking_number }} <i class="bi bi-box-arrow-up-right"></i></a>
+                            {% else %}
+                            {{ manual_irsaliye.tracking_number or '-' }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr><th>Taşıyıcı:</th><td>{{ manual_irsaliye.carrier or '-' }}</td></tr>
+                    <tr><th>Notlar:</th><td>{{ manual_irsaliye.notes or '-' }}</td></tr>
+                </table>
+                {% if manual_irsaliye.items %}
+                <div class="table-responsive">
+                    <table class="table table-bordered">
+                        <thead class="table-dark">
+                            <tr><th>Açıklama</th><th>Miktar</th><th>Birim</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for item in manual_irsaliye.items %}
+                            <tr>
+                                <td>{{ item.description }}</td>
+                                <td>{{ item.quantity }}</td>
+                                <td>{{ item.unit }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+                <a href="{{ url_for('manual_irsaliye_pdf', id=manual_irsaliye.id) }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-file-earmark-pdf"></i> İrsaliye İndir
+                </a>
+                {% if manual_irsaliye.status != 'teslim_edildi' %}
+                <form method="POST" action="{{ url_for('mark_manual_irsaliye_delivered', id=manual_irsaliye.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-success"><i class="bi bi-check-circle"></i> Teslim Edildi Olarak İşaretle</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

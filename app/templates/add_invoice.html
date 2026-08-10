@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+
+{% block title %}Manuel Fatura Oluştur - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-receipt"></i> Manuel Fatura Oluştur</h2>
+    <a href="{{ url_for('invoices') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Geri</a>
+</div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Sistemde teklif kaydı olmadan, doğrudan bir müşteriye bağlı dahili takip amaçlı bir fatura kaydı oluşturur. Bu kayıt resmi bir vergi faturası değildir.
+</div>
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <i class="bi bi-info-circle"></i> Müşteri
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-12 mb-3 position-relative">
+                            <label for="customer_search" class="form-label">Müşteri *</label>
+                            <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..." autocomplete="off" required>
+                            <input type="hidden" id="customer_id" name="customer_id">
+                            <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
+                        </div>
+                    </div>
+
+                    <div id="missing_info_box" class="alert alert-warning" style="display:none;">
+                        <i class="bi bi-exclamation-triangle"></i> <span id="missing_info_text"></span>
+                        <div class="row mt-2">
+                            <div class="col-md-6 mb-2">
+                                <label for="customer_company_name" class="form-label small mb-1">Firma Ünvanı</label>
+                                <input type="text" class="form-control form-control-sm" id="customer_company_name" name="customer_company_name">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label for="customer_tax_id" class="form-label small mb-1">Vergi No</label>
+                                <input type="text" class="form-control form-control-sm" id="customer_tax_id" name="customer_tax_id">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="vat_rate" class="form-label">KDV Oranı (%)</label>
+                            <select class="form-select" id="vat_rate" name="vat_rate">
+                                <option value="0">%0</option>
+                                <option value="1">%1</option>
+                                <option value="10">%10</option>
+                                <option value="20" selected>%20</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-box"></i> Kalemler</span>
+                    <button type="button" class="btn btn-sm btn-light" id="add-item">
+                        <i class="bi bi-plus"></i> Kalem Ekle
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="items-table">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th style="width: 34%">Açıklama</th>
+                                    <th style="width: 14%">Miktar</th>
+                                    <th style="width: 14%">Birim</th>
+                                    <th style="width: 17%">Birim Fiyat</th>
+                                    <th style="width: 17%">Toplam</th>
+                                    <th style="width: 4%"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="item-row">
+                                    <td><input type="text" class="form-control form-control-sm" name="desc_0" required></td>
+                                    <td><input type="number" class="form-control form-control-sm item-qty" name="qty_0" min="0" step="0.01" required></td>
+                                    <td><input type="text" class="form-control form-control-sm" name="unit_0" value="adet"></td>
+                                    <td><input type="number" class="form-control form-control-sm item-price" name="price_0" min="0" step="0.01" required></td>
+                                    <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
+                                    <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
+                                </tr>
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end"><strong>Ara Toplam:</strong></td>
+                                    <td colspan="2"><strong id="subtotal">0,00 ₺</strong></td>
+                                </tr>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end"><strong>KDV (<span id="vat-rate-display">20</span>%):</strong></td>
+                                    <td colspan="2"><strong id="vat-amount">0,00 ₺</strong></td>
+                                </tr>
+                                <tr class="table-success">
+                                    <td colspan="4" class="text-end"><strong>GENEL TOPLAM:</strong></td>
+                                    <td colspan="2"><strong id="grand-total">0,00 ₺</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header bg-secondary text-white">
+                    <i class="bi bi-journal-text"></i> Notlar
+                </div>
+                <div class="card-body">
+                    <textarea class="form-control" id="notes" name="notes" rows="3"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header bg-dark text-white">
+                    <i class="bi bi-cash-coin"></i> Ön Ödeme
+                </div>
+                <div class="card-body">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="on_odeme_alindi" name="on_odeme_alindi">
+                        <label class="form-check-label" for="on_odeme_alindi"><strong>Ön Ödeme Alındı</strong></label>
+                    </div>
+                    <div id="on_odeme_box" style="display:none;">
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">Ön Ödeme Tutarı</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="on_odeme_tutari" name="on_odeme_tutari">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">Ödeme Tarihi</label>
+                            <input type="date" class="form-control form-control-sm" id="on_odeme_tarihi" name="on_odeme_tarihi" value="{{ today.strftime('%Y-%m-%d') }}">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">Ödeme Yöntemi</label>
+                            <select class="form-select form-select-sm" name="on_odeme_yontemi">
+                                <option value="">Belirtilmedi</option>
+                                <option value="nakit">Nakit</option>
+                                <option value="kredi_karti">Kredi Kartı</option>
+                                <option value="havale">Havale</option>
+                                <option value="cek">Çek</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="alert alert-light border mb-0 py-2">
+                        <small class="text-muted d-block">Kaydedilince Kalan Bakiye</small>
+                        <strong id="kalan_bakiye_preview" class="fs-5">0,00 ₺</strong>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-body">
+                    <button type="submit" class="btn btn-primary w-100 btn-lg">
+                        <i class="bi bi-check-lg"></i> Fatura Oluştur
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<script src="{{ asset_url('js/customer-search.js') }}"></script>
+<script>
+let itemCount = 1;
+
+initCustomerSearch({
+    inputId: 'customer_search',
+    hiddenIdInputId: 'customer_id',
+    resultsId: 'customer_results',
+    allowQuickAdd: true,
+    onSelect: function (c) {
+        var missingBox = document.getElementById('missing_info_box');
+        var missing = [];
+        if (!c.company_name) missing.push('firma ünvanı');
+        if (!c.tax_id) missing.push('vergi no');
+        if (missing.length > 0) {
+            document.getElementById('missing_info_text').textContent =
+                'Bu müşteride eksik bilgi var: ' + missing.join(', ') + '. İsterseniz aşağıdan tamamlayıp faturayla birlikte kaydedebilirsiniz.';
+            document.getElementById('customer_company_name').value = c.company_name || '';
+            document.getElementById('customer_tax_id').value = c.tax_id || '';
+            missingBox.style.display = 'block';
+        } else {
+            missingBox.style.display = 'none';
+        }
+    },
+    onClear: function () {
+        document.getElementById('missing_info_box').style.display = 'none';
+    }
+});
+
+function fmt(n) { return n.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺'; }
+
+function renumberItemRows() {
+    var rows = document.querySelectorAll('#items-table tbody tr');
+    rows.forEach(function (row, idx) {
+        row.querySelectorAll('[name]').forEach(function (input) {
+            var base = input.getAttribute('name').replace(/_\d+$/, '');
+            input.setAttribute('name', base + '_' + idx);
+        });
+    });
+}
+
+document.getElementById('add-item').addEventListener('click', function () {
+    var tbody = document.querySelector('#items-table tbody');
+    var row = document.createElement('tr');
+    row.className = 'item-row';
+    row.innerHTML =
+        '<td><input type="text" class="form-control form-control-sm" name="desc_' + itemCount + '" required></td>' +
+        '<td><input type="number" class="form-control form-control-sm item-qty" name="qty_' + itemCount + '" min="0" step="0.01" required></td>' +
+        '<td><input type="text" class="form-control form-control-sm" name="unit_' + itemCount + '" value="adet"></td>' +
+        '<td><input type="number" class="form-control form-control-sm item-price" name="price_' + itemCount + '" min="0" step="0.01" required></td>' +
+        '<td><input type="text" class="form-control form-control-sm item-total" readonly></td>' +
+        '<td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>';
+    tbody.appendChild(row);
+    itemCount++;
+    attachEvents();
+});
+
+document.addEventListener('click', function (e) {
+    if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
+        var row = e.target.closest('.item-row');
+        if (document.querySelectorAll('.item-row').length > 1) {
+            row.remove();
+            renumberItemRows();
+            calculateTotals();
+        }
+    }
+});
+
+function attachEvents() {
+    document.querySelectorAll('.item-qty, .item-price').forEach(function (input) {
+        input.removeEventListener('input', calculateTotals);
+        input.addEventListener('input', calculateTotals);
+    });
+    document.getElementById('vat_rate').removeEventListener('change', calculateTotals);
+    document.getElementById('vat_rate').addEventListener('change', calculateTotals);
+}
+
+function calculateTotals() {
+    var subtotal = 0;
+    document.querySelectorAll('.item-row').forEach(function (row) {
+        var qty = parseFloat(row.querySelector('.item-qty')?.value) || 0;
+        var price = parseFloat(row.querySelector('.item-price')?.value) || 0;
+        var total = qty * price;
+        var totalInput = row.querySelector('.item-total');
+        if (totalInput) totalInput.value = fmt(total);
+        subtotal += total;
+    });
+
+    var vatRate = parseFloat(document.getElementById('vat_rate').value) || 0;
+    var vatAmount = subtotal * (vatRate / 100);
+    var grandTotal = subtotal + vatAmount;
+
+    document.getElementById('subtotal').textContent = fmt(subtotal);
+    document.getElementById('vat-amount').textContent = fmt(vatAmount);
+    document.getElementById('grand-total').textContent = fmt(grandTotal);
+    document.getElementById('vat-rate-display').textContent = vatRate;
+
+    updateKalanBakiyePreview(grandTotal);
+}
+
+function updateKalanBakiyePreview(grandTotal) {
+    var onOdemeChecked = document.getElementById('on_odeme_alindi').checked;
+    var onOdemeTutari = onOdemeChecked ? (parseFloat(document.getElementById('on_odeme_tutari').value) || 0) : 0;
+    document.getElementById('kalan_bakiye_preview').textContent = fmt(grandTotal - onOdemeTutari);
+}
+
+document.getElementById('on_odeme_alindi').addEventListener('change', function () {
+    document.getElementById('on_odeme_box').style.display = this.checked ? 'block' : 'none';
+    calculateTotals();
+});
+document.getElementById('on_odeme_tutari').addEventListener('input', calculateTotals);
+
+attachEvents();
+calculateTotals();
+</script>
+{% endblock %}

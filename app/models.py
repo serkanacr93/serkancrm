@@ -505,6 +505,53 @@ class ShipmentItem(db.Model):
     unit_price = db.Column(db.Float, default=0)
     total_price = db.Column(db.Float, default=0)
 
+class ManualIrsaliye(db.Model):
+    """Hicbir teklif/uretim kaydi olmadan, dogrudan bir musteriye bagli
+    bagimsiz irsaliye. Shipment (Production'a bagli, gercek fiziksel
+    sevkiyat) ile ayni alan adlarini paylasir (ship_date/carrier/
+    tracking_number/status) - boylece sevkiyat listesinde iki farkli
+    kaynak tek bir tabloda, ayni sablonla gosterilebilir."""
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
+    ship_date = db.Column(db.Date)
+    tracking_number = db.Column(db.String(100))
+    carrier = db.Column(db.String(100))
+    estimated_delivery_date = db.Column(db.Date, nullable=True)
+    actual_delivery_date = db.Column(db.Date, nullable=True)
+    status = db.Column(db.String(30), default='hazirlaniyor')
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    customer = db.relationship('Customer', backref='manual_irsaliyeler')
+    user = db.relationship('User')
+    items = db.relationship('ManualIrsaliyeItem', backref='manual_irsaliye', lazy=True, cascade='all, delete-orphan')
+
+    @property
+    def display_no(self):
+        return f'MIRS-{self.id:05d}'
+
+    @property
+    def status_label(self):
+        return SHIPMENT_STATUS_LABELS.get(self.status, self.status)
+
+    @property
+    def tracking_url(self):
+        if not self.tracking_number or not self.carrier:
+            return None
+        template = _CARRIER_TRACKING_URL_TEMPLATES.get(self.carrier)
+        if not template:
+            return None
+        from urllib.parse import quote
+        return template.format(no=quote(self.tracking_number.strip()))
+
+class ManualIrsaliyeItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    manual_irsaliye_id = db.Column(db.Integer, db.ForeignKey('manual_irsaliye.id'), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    unit = db.Column(db.String(20), default='adet')
+
 class CustomerStatement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
@@ -525,7 +572,9 @@ class Invoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     invoice_no = db.Column(db.Integer, unique=True, nullable=True)
     type = db.Column(db.String(20), nullable=False, default='fatura')  # fatura / irsaliye
-    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=False, index=True)
+    # Bagimsiz (teklifsiz) fatura olusturulabildigi icin (Is 2) artik
+    # opsiyonel - tekliften olusturulanlarda dolu, manuel olusturulanlarda NULL.
+    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=True, index=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
     date = db.Column(db.Date, default=datetime.utcnow)
     subtotal = db.Column(db.Float, nullable=False, default=0)

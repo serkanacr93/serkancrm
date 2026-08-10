@@ -15,9 +15,11 @@
         <a href="{{ url_for('invoice_pdf', id=invoice.id) }}" class="btn btn-info">
             <i class="bi bi-file-pdf"></i> PDF İndir
         </a>
+        {% if invoice.deal %}
         <a href="{{ url_for('deal_detail', id=invoice.deal.id) }}" class="btn btn-outline-info">
             <i class="bi bi-file-earmark-text"></i> Teklif Detayı
         </a>
+        {% endif %}
         <a href="{{ url_for('invoices') }}" class="btn btn-secondary">
             <i class="bi bi-arrow-left"></i> Geri
         </a>
@@ -36,7 +38,7 @@
                         <table class="table table-borderless">
                             <tr><th>Belge No:</th><td>{{ invoice.display_no }}</td></tr>
                             <tr><th>Tarih:</th><td>{{ invoice.date.strftime('%d.%m.%Y') }}</td></tr>
-                            <tr><th>Bağlı Teklif:</th><td>{{ invoice.deal.display_no }}</td></tr>
+                            <tr><th>Bağlı Teklif:</th><td>{{ invoice.deal.display_no if invoice.deal else 'Yok (bağımsız kayıt)' }}</td></tr>
                         </table>
                     </div>
                     <div class="col-md-6">
@@ -122,22 +124,37 @@
                     <tr><th>Ödenen:</th><td class="text-success">{{ "{:,.2f}".format(invoice.paid_amount) }} ₺</td></tr>
                     <tr><th>Kalan:</th><td class="text-danger"><strong>{{ "{:,.2f}".format(invoice.remaining_amount) }} ₺</strong></td></tr>
                 </table>
-                {% if invoice.payments %}
+
+                {% if ledger_rows %}
                 <div class="table-responsive mb-3">
-                    <table class="table table-sm">
-                        <thead><tr><th>Tarih</th><th>Tutar</th><th>Durum</th></tr></thead>
+                    <table class="table table-sm table-bordered mb-2">
+                        <thead class="table-light">
+                            <tr><th>Tarih</th><th>Açıklama</th><th>Tutar</th><th>Kalan Bakiye</th></tr>
+                        </thead>
                         <tbody>
-                            {% for p in invoice.payments %}
+                            {% for row in ledger_rows %}
                             <tr>
-                                <td>{{ p.payment_date.strftime('%d.%m.%Y') }}</td>
-                                <td>{{ "{:,.2f}".format(p.amount) }} ₺</td>
-                                <td><span class="badge bg-{{ 'success' if p.status == 'odendi' else 'warning' if p.status == 'beklemede' else 'danger' }}">{{ p.status }}</span></td>
+                                <td>{{ row.date.strftime('%d.%m.%Y') if row.date else '-' }}</td>
+                                <td>
+                                    {% if row.badge %}
+                                    <span class="badge bg-success">{{ row.badge }}</span>
+                                    {% else %}
+                                    {{ row.description }}
+                                    {% endif %}
+                                </td>
+                                <td>{{ "{:,.2f}".format(row.amount) + ' ₺' if row.amount is not none else '-' }}</td>
+                                <td><strong>{{ "{:,.2f}".format(row.balance) }} ₺</strong></td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
+                <div class="alert alert-dark d-flex justify-content-between align-items-center mb-3">
+                    <span>Güncel Kalan Bakiye</span>
+                    <strong class="fs-4">{{ "{:,.2f}".format(invoice.remaining_amount) }} ₺</strong>
+                </div>
                 {% endif %}
+
                 {% if invoice.remaining_amount > 0.01 %}
                 <a href="{{ url_for('add_payment', invoice_id=invoice.id) }}" class="btn btn-success w-100">
                     <i class="bi bi-plus-circle"></i> Ödeme Ekle
@@ -162,6 +179,7 @@
             </div>
         </div>
 
+        {% if invoice.deal %}
         <div class="card mb-4 shadow-sm">
             <div class="card-header bg-secondary text-white">
                 <i class="bi bi-file-earmark-text"></i> Bağlı Teklif
@@ -174,6 +192,17 @@
                 <small class="text-muted">{{ invoice.deal.title }}</small>
             </div>
         </div>
+        {% else %}
+        <div class="card mb-4 shadow-sm border-secondary">
+            <div class="card-header bg-secondary text-white">
+                <i class="bi bi-file-earmark-text"></i> Kaynak
+            </div>
+            <div class="card-body">
+                <span class="badge bg-secondary">Manuel</span>
+                <small class="text-muted d-block mt-1">Bu fatura bir teklife bağlı değil, doğrudan oluşturulmuş.</small>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

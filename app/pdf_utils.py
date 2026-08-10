@@ -417,12 +417,20 @@ def generate_invoice_pdf(invoice):
     styles = getSampleStyleSheet()
     normal = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=9, leading=12)
     small = ParagraphStyle('SmallStyle', parent=normal, fontSize=8, leading=10)
-    title_style = ParagraphStyle('TitleStyle', parent=normal, fontName='Vera-Bold', fontSize=18, leading=22)
     heading_style = ParagraphStyle('HeadingStyle', parent=normal, fontName='Vera-Bold', fontSize=11, leading=14, spaceAfter=5)
     company_name_style = ParagraphStyle('CompanyName', parent=normal, fontName='Vera-Bold', fontSize=14, leading=17)
 
     is_fatura = invoice.type == 'fatura'
-    doc_title = 'FATURA' if is_fatura else 'İRSALİYE'
+    # ONEMLI: bu kayit RESMI bir vergi faturasi DEGIL, sadece dahili
+    # takip amacli bir kayit (gercek resmi fatura ayri bir muhasebe
+    # programinda kesiliyor) - baslikta "FATURA" tek basina resmi belge
+    # izlenimi verebilecegi icin notr bir ifade kullaniliyor.
+    if is_fatura:
+        doc_title = 'FATURA / TAHSİLAT<br/>TAKİP BELGESİ'
+        title_style = ParagraphStyle('TitleStyle', parent=normal, fontName='Vera-Bold', fontSize=13, leading=16)
+    else:
+        doc_title = 'İRSALİYE'
+        title_style = ParagraphStyle('TitleStyle', parent=normal, fontName='Vera-Bold', fontSize=18, leading=22)
     customer = invoice.customer
 
     elements = []
@@ -444,14 +452,20 @@ def generate_invoice_pdf(invoice):
         Spacer(1, 2*mm),
         Paragraph(f"<b>{invoice.display_no}</b>", normal),
         Paragraph(f"Tarih: {invoice.date.strftime('%d.%m.%Y') if invoice.date else '-'}", normal),
-        Paragraph(f"Teklif: {invoice.deal.display_no}", normal),
     ]
+    if invoice.deal:
+        header_right.append(Paragraph(f"Teklif: {invoice.deal.display_no}", normal))
 
-    header_table = Table([[header_left, header_right]], colWidths=[11*cm, 6*cm])
+    header_table = Table([[header_left, header_right]], colWidths=[10.5*cm, 6.5*cm])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        # Uzun (2 satirli) "FATURA / TAHSİLAT TAKİP BELGESİ" basligi eklendikten
+        # sonra iki sutun arasinda hic bosluk olmamasi (RIGHTPADDING=0) sol
+        # sutundaki firma adresiyle gorsel olarak neredeyse cakisiyordu -
+        # sol sutuna kucuk bir sag bosluk eklendi.
+        ('RIGHTPADDING', (0, 0), (0, -1), 10),
+        ('RIGHTPADDING', (1, 0), (1, -1), 0),
     ]))
     elements.append(header_table)
     elements.append(Spacer(1, 4*mm))
@@ -786,6 +800,96 @@ def generate_irsaliye_pdf(shipment):
         elements.append(Spacer(1, 5*mm))
         elements.append(Paragraph("NOTLAR", heading_style))
         elements.append(Paragraph(_sanitize_pdf_free_text(shipment.notes), turkish_style))
+
+    elements.append(Spacer(1, 15*mm))
+    signature_data = [
+        ['Teslim Eden:', '', 'Teslim Alan:'],
+        ['', '', ''],
+        ['', '', ''],
+        ['Adı Soyadı:', '', 'Adı Soyadı:'],
+        ['Tarih:', '', 'Tarih:'],
+    ]
+    signature_table = Table(signature_data, colWidths=[5*cm, 4*cm, 5*cm])
+    signature_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Vera'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('LINEBELOW', (0, 2), (0, 2), 1, colors.black),
+        ('LINEBELOW', (2, 2), (2, 2), 1, colors.black),
+    ]))
+    elements.append(signature_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+def generate_manual_irsaliye_pdf(manual_irsaliye):
+    """generate_irsaliye_pdf ile ayni gorsel format - ama Shipment/Production
+    yerine dogrudan ManualIrsaliye+customer'dan besleniyor (teklif/uretim
+    kaydi olmadan olusturulan bagimsiz irsaliyeler icin)."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=9)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Vera-Bold', fontSize=18)
+    heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontName='Vera-Bold', fontSize=11, spaceAfter=5)
+
+    customer = manual_irsaliye.customer
+
+    elements = []
+
+    elements.append(Paragraph("İRSALİYE", title_style))
+    elements.append(Spacer(1, 8*mm))
+
+    elements.append(Paragraph(f"<b>İrsaliye No:</b> {manual_irsaliye.display_no}", turkish_style))
+    elements.append(Paragraph(f"<b>Gönderim Tarihi:</b> {manual_irsaliye.ship_date.strftime('%d.%m.%Y') if manual_irsaliye.ship_date else '-'}", turkish_style))
+    if manual_irsaliye.carrier:
+        elements.append(Paragraph(f"<b>Kargo Firması:</b> {manual_irsaliye.carrier}", turkish_style))
+    if manual_irsaliye.tracking_number:
+        elements.append(Paragraph(f"<b>Takip No:</b> {manual_irsaliye.tracking_number}", turkish_style))
+    elements.append(Spacer(1, 5*mm))
+
+    elements.append(Paragraph("MÜŞTERİ BİLGİLERİ", heading_style))
+    if customer.company_name:
+        elements.append(Paragraph(f"<b>Firma:</b> {_clean_for_pdf(customer.company_name)}", turkish_style))
+    elements.append(Paragraph(f"<b>Ad Soyad:</b> {_clean_for_pdf(customer.first_name)} {_clean_for_pdf(customer.last_name)}", turkish_style))
+    if customer.company_address or customer.address:
+        elements.append(Paragraph(f"<b>Adres:</b> {customer.company_address or customer.address}", turkish_style))
+    if customer.company_phone or customer.phone:
+        elements.append(Paragraph(f"<b>Telefon:</b> {customer.company_phone or customer.phone}", turkish_style))
+    elements.append(Spacer(1, 5*mm))
+
+    elements.append(Paragraph("ÜRÜN / MİKTAR", heading_style))
+
+    if manual_irsaliye.items:
+        from xml.sax.saxutils import escape
+        data = [['#', 'Açıklama', 'Miktar', 'Birim']]
+        for i, item in enumerate(manual_irsaliye.items, 1):
+            data.append([
+                str(i),
+                Paragraph(escape(_sanitize_pdf_free_text(item.description) or '-'), turkish_style),
+                f"{item.quantity:.2f}",
+                item.unit
+            ])
+        table = Table(data, colWidths=[1*cm, 9*cm, 3*cm, 3*cm])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+        ]))
+        elements.append(table)
+    else:
+        elements.append(Paragraph("<i>Ürün kalemi bulunamadı.</i>", turkish_style))
+
+    if manual_irsaliye.notes:
+        elements.append(Spacer(1, 5*mm))
+        elements.append(Paragraph("NOTLAR", heading_style))
+        elements.append(Paragraph(_sanitize_pdf_free_text(manual_irsaliye.notes), turkish_style))
 
     elements.append(Spacer(1, 15*mm))
     signature_data = [

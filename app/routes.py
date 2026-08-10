@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search
 from app.tcmb import fetch_tcmb_rate
@@ -168,6 +168,40 @@ def _next_invoice_no():
     bir numarayla cakisabiliyordu (bkz. deal_no / revise_deal bug'i)."""
     max_no = db.session.query(db.func.max(Invoice.invoice_no)).scalar()
     return (max_no or 0) + 1
+
+def _create_prepayment_if_requested(invoice, form, user_id):
+    """Is 2: fatura olusturma formunda 'On Odeme Alindi' isaretlenmisse,
+    faturaya bagli ilk Payment kaydini ('Ön Ödeme' etiketiyle) otomatik
+    olusturur - add_payment() route'undaki 'odendi' -> CustomerStatement
+    'alacak' otomasyonuyla AYNI mantik burada tekrarlanir (ayri/ikinci bir
+    hesaplama kaynagi olusturmamak icin invoice_detail'deki bakiye tablosu
+    da dogrudan Payment kayitlarindan besleniyor)."""
+    if form.get('on_odeme_alindi') != 'on':
+        return
+    amount_raw = (form.get('on_odeme_tutari') or '').strip()
+    if not amount_raw:
+        return
+    amount = float(amount_raw)
+    if amount <= 0:
+        return
+    payment_date = datetime.strptime(form['on_odeme_tarihi'], '%Y-%m-%d').date() if form.get('on_odeme_tarihi') else datetime.now().date()
+    payment = Payment(
+        customer_id=invoice.customer_id,
+        invoice_id=invoice.id,
+        amount=amount,
+        payment_date=payment_date,
+        payment_method=form.get('on_odeme_yontemi') or None,
+        notes='Ön Ödeme',
+        status='odendi',
+        user_id=user_id
+    )
+    db.session.add(payment)
+    db.session.flush()
+    statement = CustomerStatement(
+        customer_id=payment.customer_id, payment_id=payment.id, type='alacak',
+        amount=payment.amount, description=f'Tahsilat: {invoice.display_no} (Ön Ödeme)'
+    )
+    db.session.add(statement)
 
 def _musteri_no_max():
     """Mevcut en buyuk musteri_no'nun sayisal kismini dondurur (Is 2).
@@ -2070,7 +2104,82 @@ def register_routes(app):
         shipments = Shipment.query.options(
             joinedload(Shipment.production).joinedload(Production.deal).joinedload(Deal.customer)
         ).order_by(Shipment.created_at.desc()).all()
-        return render_template('shipment_list.html', shipments=shipments)
+        for s in shipments:
+            s.is_manual = False
+
+        # Is 1: bagimsiz manuel irsaliyeler, ayri bir liste sayfasi acmadan
+        # bu mevcut sevkiyat listesine "Manuel" etiketiyle karisik gosterilir.
+        manual_irsaliyeler = ManualIrsaliye.query.options(
+            joinedload(ManualIrsaliye.customer)
+        ).order_by(ManualIrsaliye.created_at.desc()).all()
+        for m in manual_irsaliyeler:
+            m.is_manual = True
+
+        rows = sorted(shipments + manual_irsaliyeler, key=lambda r: r.created_at, reverse=True)
+        return render_template('shipment_list.html', rows=rows)
+
+    @app.route('/irsaliye/manuel-olustur', methods=['GET', 'POST'])
+    @login_required
+    def manual_irsaliye_add():
+        if request.method == 'POST':
+            customer_id = request.form.get('customer_id')
+            if not customer_id:
+                flash('Lütfen bir müşteri seçin.', 'danger')
+                return render_template('manual_irsaliye_add.html', carriers=CARRIER_OPTIONS, today=datetime.now().date())
+
+            manual_irsaliye = ManualIrsaliye(
+                customer_id=int(customer_id),
+                ship_date=datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else datetime.now().date(),
+                estimated_delivery_date=datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None,
+                carrier=request.form.get('carrier') or None,
+                tracking_number=request.form.get('tracking_number') or None,
+                notes=request.form.get('notes', ''),
+                user_id=current_user.id
+            )
+            db.session.add(manual_irsaliye)
+            db.session.flush()
+
+            i = 0
+            while f'desc_{i}' in request.form:
+                desc = request.form.get(f'desc_{i}', '').strip()
+                qty = request.form.get(f'qty_{i}', '').strip()
+                if desc and qty:
+                    db.session.add(ManualIrsaliyeItem(
+                        manual_irsaliye_id=manual_irsaliye.id,
+                        description=desc,
+                        quantity=float(qty),
+                        unit=request.form.get(f'unit_{i}', 'adet')
+                    ))
+                i += 1
+
+            db.session.commit()
+            flash(f'{manual_irsaliye.display_no} manuel irsaliyesi oluşturuldu!', 'success')
+            return redirect(url_for('manual_irsaliye_detail', id=manual_irsaliye.id))
+
+        return render_template('manual_irsaliye_add.html', carriers=CARRIER_OPTIONS, today=datetime.now().date())
+
+    @app.route('/irsaliye/manuel/<int:id>')
+    @login_required
+    def manual_irsaliye_detail(id):
+        manual_irsaliye = ManualIrsaliye.query.get_or_404(id)
+        return render_template('manual_irsaliye_detail.html', manual_irsaliye=manual_irsaliye)
+
+    @app.route('/irsaliye/manuel/<int:id>/pdf')
+    @login_required
+    def manual_irsaliye_pdf(id):
+        manual_irsaliye = ManualIrsaliye.query.get_or_404(id)
+        pdf = generate_manual_irsaliye_pdf(manual_irsaliye)
+        return send_file(pdf, as_attachment=True, download_name=f'irsaliye_{manual_irsaliye.display_no}.pdf')
+
+    @app.route('/irsaliye/manuel/<int:id>/mark-delivered', methods=['POST'])
+    @login_required
+    def mark_manual_irsaliye_delivered(id):
+        manual_irsaliye = ManualIrsaliye.query.get_or_404(id)
+        manual_irsaliye.actual_delivery_date = datetime.now().date()
+        manual_irsaliye.status = 'teslim_edildi'
+        db.session.commit()
+        flash('İrsaliye "Teslim Edildi" olarak işaretlendi.', 'success')
+        return redirect(url_for('manual_irsaliye_detail', id=id))
 
     @app.route('/shipments/<int:id>/edit', methods=['GET', 'POST'])
     @login_required
@@ -2434,7 +2543,39 @@ def register_routes(app):
     @login_required
     def invoice_detail(id):
         invoice = Invoice.query.get_or_404(id)
-        return render_template('invoice_detail.html', invoice=invoice)
+
+        # Is 3: satir satir kumulatif kalan bakiye tablosu. Ayri bir hesaplama
+        # kaynagi ACILMIYOR - dogrudan invoice.total (Cari Hesap Ozeti'nin de
+        # kullandigi ayni Invoice.total) ve invoice.payments'daki (status=
+        # 'odendi') gercek Payment kayitlari (paid_amount/remaining_amount
+        # property'leriyle AYNI kaynak) uzerinden, sirayla kumulatif olarak
+        # hesaplanir.
+        ledger_rows = []
+        if invoice.type == 'fatura':
+            running_balance = invoice.total
+            ledger_rows.append({
+                'date': invoice.date,
+                'description': 'Fatura tutarı',
+                'badge': None,
+                'amount': None,
+                'balance': running_balance
+            })
+            odenen_payments = sorted(
+                [p for p in invoice.payments if p.status == 'odendi'],
+                key=lambda p: (p.payment_date or invoice.date, p.created_at)
+            )
+            for p in odenen_payments:
+                running_balance -= p.amount
+                badge = 'Ön Ödeme' if (p.notes and p.notes.strip().startswith('Ön Ödeme')) else 'Kısmi Ödeme'
+                ledger_rows.append({
+                    'date': p.payment_date,
+                    'description': badge,
+                    'badge': badge,
+                    'amount': p.amount,
+                    'balance': running_balance
+                })
+
+        return render_template('invoice_detail.html', invoice=invoice, ledger_rows=ledger_rows)
 
     @app.route('/invoices/<int:id>/pdf')
     @login_required
@@ -2502,13 +2643,77 @@ def register_routes(app):
                 if request.form.get(f'link_payment_{payment.id}'):
                     payment.invoice_id = invoice.id
 
+            # Is 2: formda "On Odeme Alindi" isaretlenmisse ilk Payment
+            # otomatik olusur.
+            _create_prepayment_if_requested(invoice, request.form, current_user.id)
+
             db.session.commit()
 
             flash(f'{invoice.display_no} - {inv_type} başarıyla oluşturuldu!', 'success')
             return redirect(url_for('invoice_detail', id=invoice.id))
 
         unlinked_payments = Payment.query.filter_by(deal_id=deal.id, invoice_id=None).all()
-        return render_template('create_invoice_from_deal.html', deal=deal, unlinked_payments=unlinked_payments)
+        return render_template('create_invoice_from_deal.html', deal=deal, unlinked_payments=unlinked_payments, today=datetime.now().date())
+
+    @app.route('/invoices/add', methods=['GET', 'POST'])
+    @login_required
+    def add_invoice_standalone():
+        """Is 2: hicbir teklif olmadan, bagimsiz bir Fatura (dahili takip
+        kaydi) olusturur. create_invoice_from_deal ile ayni kalem/on odeme
+        mantigini paylasir, tek fark musteri+kalemlerin serbestce (deal'den
+        kopyalanmadan) girilmesi."""
+        if request.method == 'POST':
+            customer_id = request.form.get('customer_id')
+            if not customer_id:
+                flash('Lütfen bir müşteri seçin.', 'danger')
+                return render_template('add_invoice.html', today=datetime.now().date())
+
+            new_company_name = request.form.get('customer_company_name', '').strip()
+            new_tax_id = request.form.get('customer_tax_id', '').strip()
+            customer = Customer.query.get_or_404(int(customer_id))
+            if new_company_name:
+                customer.company_name = new_company_name
+            if new_tax_id:
+                customer.tax_id = new_tax_id
+
+            invoice = Invoice(
+                invoice_no=_next_invoice_no(),
+                type='fatura',
+                deal_id=None,
+                customer_id=customer.id,
+                date=datetime.now().date(),
+                vat_rate=float(request.form.get('vat_rate', 20)),
+                notes=request.form.get('notes', '')
+            )
+            db.session.add(invoice)
+            db.session.flush()
+
+            i = 0
+            while f'desc_{i}' in request.form:
+                qty = float(request.form.get(f'qty_{i}', 0))
+                price = float(request.form.get(f'price_{i}', 0))
+                item = InvoiceItem(
+                    invoice_id=invoice.id,
+                    description=request.form[f'desc_{i}'],
+                    quantity=qty,
+                    unit=request.form.get(f'unit_{i}', 'adet'),
+                    unit_price=price,
+                    total_price=qty * price
+                )
+                db.session.add(item)
+                i += 1
+
+            db.session.flush()
+            invoice.calculate_totals()
+
+            _create_prepayment_if_requested(invoice, request.form, current_user.id)
+
+            db.session.commit()
+
+            flash(f'{invoice.display_no} başarıyla oluşturuldu!', 'success')
+            return redirect(url_for('invoice_detail', id=invoice.id))
+
+        return render_template('add_invoice.html', today=datetime.now().date())
 
     @app.route('/visits')
     @login_required

@@ -19,10 +19,14 @@
     <div class="row">
         <div class="col-md-8">
             <div class="card mb-4">
-                <div class="card-header bg-primary text-white">
-                    <i class="bi bi-box"></i> Kalemler
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-box"></i> Kalemler</span>
+                    <button type="button" class="btn btn-sm btn-light" id="add-extra-item">
+                        <i class="bi bi-plus"></i> Kalem Ekle
+                    </button>
                 </div>
                 <div class="card-body">
+                    <p class="small text-muted mb-2">Aşağıdaki kalemler tekliften geldi. Gerekirse (örn. "Klişe Bedeli") <strong>Kalem Ekle</strong> ile üstüne serbest kalem ekleyebilirsiniz.</p>
                     <div class="table-responsive">
                         <table class="table table-bordered" id="items-table">
                             <thead class="table-dark">
@@ -32,6 +36,7 @@
                                     <th style="width:100px">Birim</th>
                                     <th style="width:150px">Birim Fiyat</th>
                                     <th style="width:150px">Toplam</th>
+                                    <th style="width:40px"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -52,20 +57,21 @@
                                     <td>
                                         <span class="row-total fw-bold">{{ "{:,.2f}".format(item.total_price) }} ₺</span>
                                     </td>
+                                    <td></td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
                             <tfoot>
                                 <tr class="table-light">
-                                    <td colspan="4" class="text-end"><strong>Ara Toplam:</strong></td>
+                                    <td colspan="5" class="text-end"><strong>Ara Toplam:</strong></td>
                                     <td><span id="subtotal">{{ "{:,.2f}".format(deal.subtotal) }} ₺</span></td>
                                 </tr>
                                 <tr class="table-light">
-                                    <td colspan="4" class="text-end">KDV (%{{ deal.vat_rate }}):</td>
+                                    <td colspan="5" class="text-end">KDV (%{{ deal.vat_rate }}):</td>
                                     <td><span id="vat_amount">{{ "{:,.2f}".format(deal.vat_amount) }} ₺</span></td>
                                 </tr>
                                 <tr class="table-success">
-                                    <td colspan="4" class="text-end"><strong>TOPLAM:</strong></td>
+                                    <td colspan="5" class="text-end"><strong>TOPLAM:</strong></td>
                                     <td><span id="total" class="fw-bold">{{ "{:,.2f}".format(deal.value) }} ₺</span></td>
                                 </tr>
                             </tfoot>
@@ -96,6 +102,37 @@
                         <label class="form-label">Notlar</label>
                         <textarea class="form-control" name="notes" rows="3" placeholder="İsteğe bağlı not..."></textarea>
                     </div>
+
+                    <hr>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="on_odeme_alindi" name="on_odeme_alindi">
+                        <label class="form-check-label" for="on_odeme_alindi"><strong>Ön Ödeme Alındı</strong></label>
+                    </div>
+                    <div id="on_odeme_box" style="display:none;">
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">Ön Ödeme Tutarı</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="on_odeme_tutari" name="on_odeme_tutari">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">Ödeme Tarihi</label>
+                            <input type="date" class="form-control form-control-sm" id="on_odeme_tarihi" name="on_odeme_tarihi" value="{{ today.strftime('%Y-%m-%d') if today else '' }}">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">Ödeme Yöntemi</label>
+                            <select class="form-select form-select-sm" name="on_odeme_yontemi">
+                                <option value="">Belirtilmedi</option>
+                                <option value="nakit">Nakit</option>
+                                <option value="kredi_karti">Kredi Kartı</option>
+                                <option value="havale">Havale</option>
+                                <option value="cek">Çek</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="alert alert-light border mb-3 py-2">
+                        <small class="text-muted d-block">Kaydedilince Kalan Bakiye</small>
+                        <strong id="kalan_bakiye_preview" class="fs-5">{{ "{:,.2f}".format(deal.value) }} ₺</strong>
+                    </div>
+
                     <button type="submit" class="btn btn-primary w-100">
                         <i class="bi bi-check-lg"></i> Oluştur
                     </button>
@@ -151,29 +188,85 @@
 
 <script>
 var VAT_RATE = {{ deal.vat_rate|safe }};
+var extraItemCount = {{ deal.items|length }};
 function fmt(n) { return n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' ₺'; }
-document.addEventListener('DOMContentLoaded', function() {
-    var qtyInputs = document.querySelectorAll('.qty-input');
-    var priceInputs = document.querySelectorAll('.price-input');
-    function calcRow(r) {
-        var q = parseFloat(r.querySelector('.qty-input').value) || 0;
-        var p = parseFloat(r.querySelector('.price-input').value) || 0;
-        var t = q * p;
-        r.querySelector('.row-total').textContent = fmt(t);
-        return t;
-    }
-    function calcAll() {
-        var rows = document.querySelectorAll('#items-table tbody tr');
-        var sub = 0;
-        for (var i = 0; i < rows.length; i++) { sub += calcRow(rows[i]); }
-        var v = sub * VAT_RATE / 100;
-        var tot = sub + v;
-        document.getElementById('subtotal').textContent = fmt(sub);
-        document.getElementById('vat_amount').textContent = fmt(v);
-        document.getElementById('total').textContent = fmt(tot);
-    }
-    for (var i = 0; i < qtyInputs.length; i++) { qtyInputs[i].addEventListener('input', calcAll); }
-    for (var i = 0; i < priceInputs.length; i++) { priceInputs[i].addEventListener('input', calcAll); }
+
+function renumberItemRows() {
+    var rows = document.querySelectorAll('#items-table tbody tr');
+    rows.forEach(function (row, idx) {
+        row.querySelectorAll('[name]').forEach(function (input) {
+            var base = input.getAttribute('name').replace(/_\d+$/, '');
+            input.setAttribute('name', base + '_' + idx);
+        });
+    });
+}
+
+function calcRow(r) {
+    var q = parseFloat(r.querySelector('.qty-input').value) || 0;
+    var p = parseFloat(r.querySelector('.price-input').value) || 0;
+    var t = q * p;
+    r.querySelector('.row-total').textContent = fmt(t);
+    return t;
+}
+
+function calcAll() {
+    var rows = document.querySelectorAll('#items-table tbody tr');
+    var sub = 0;
+    for (var i = 0; i < rows.length; i++) { sub += calcRow(rows[i]); }
+    var v = sub * VAT_RATE / 100;
+    var tot = sub + v;
+    document.getElementById('subtotal').textContent = fmt(sub);
+    document.getElementById('vat_amount').textContent = fmt(v);
+    document.getElementById('total').textContent = fmt(tot);
+    updateKalanBakiyePreview(tot);
+}
+
+function updateKalanBakiyePreview(grandTotal) {
+    var onOdemeChecked = document.getElementById('on_odeme_alindi').checked;
+    var onOdemeTutari = onOdemeChecked ? (parseFloat(document.getElementById('on_odeme_tutari').value) || 0) : 0;
+    var kalan = grandTotal - onOdemeTutari;
+    document.getElementById('kalan_bakiye_preview').textContent = fmt(kalan);
+}
+
+function attachRowEvents() {
+    document.querySelectorAll('.qty-input, .price-input').forEach(function (input) {
+        input.removeEventListener('input', calcAll);
+        input.addEventListener('input', calcAll);
+    });
+}
+
+document.getElementById('add-extra-item').addEventListener('click', function () {
+    var tbody = document.querySelector('#items-table tbody');
+    var row = document.createElement('tr');
+    row.className = 'extra-item-row';
+    row.innerHTML =
+        '<td><input type="text" class="form-control" name="desc_' + extraItemCount + '" required></td>' +
+        '<td><input type="number" step="0.001" class="form-control qty-input" name="qty_' + extraItemCount + '" required></td>' +
+        '<td><input type="text" class="form-control" name="unit_' + extraItemCount + '" value="adet"></td>' +
+        '<td><input type="number" step="0.01" class="form-control price-input" name="price_' + extraItemCount + '" required></td>' +
+        '<td><span class="row-total fw-bold">0,00 ₺</span></td>' +
+        '<td><button type="button" class="btn btn-sm btn-danger remove-extra-item"><i class="bi bi-trash"></i></button></td>';
+    tbody.appendChild(row);
+    extraItemCount++;
+    attachRowEvents();
 });
+
+document.addEventListener('click', function (e) {
+    if (e.target.classList.contains('remove-extra-item') || e.target.closest('.remove-extra-item')) {
+        var row = e.target.closest('.extra-item-row');
+        row.remove();
+        renumberItemRows();
+        calcAll();
+    }
+});
+
+document.getElementById('on_odeme_alindi').addEventListener('change', function () {
+    document.getElementById('on_odeme_box').style.display = this.checked ? 'block' : 'none';
+    calcAll();
+});
+document.getElementById('on_odeme_tutari').addEventListener('input', calcAll);
+
+attachRowEvents();
+calcAll();
 </script>
 {% endblock %}
