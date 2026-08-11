@@ -698,10 +698,18 @@ def generate_is_emri_pdf(production, copy_label=None):
 
         elements.append(Spacer(1, 6*mm))
         elements.append(Paragraph("NOTLAR", heading_style))
-        notes_table = Table([['']], colWidths=[17.2*cm], rowHeights=[2.5*cm])
+        # Onceden bu kutu her zaman bos ciziliyordu - production.notes hic
+        # okunmuyordu, dijital olarak kaydedilen not atolyeye elden verilen
+        # kagitta hic gorunmuyordu. Simdi kayitli not varsa kutunun icine
+        # yaziliyor, yine de elle ek not icin bosluk birakiliyor.
+        notes_style = ParagraphStyle('IsEmriNotes', parent=normal, fontSize=8.5, leading=11)
+        notes_content = Paragraph(_sanitize_pdf_free_text(production.notes), notes_style) if production.notes else ''
+        notes_table = Table([[notes_content]], colWidths=[17.2*cm], rowHeights=[2.5*cm])
         notes_table.setStyle(TableStyle([
             ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
         ]))
         elements.append(notes_table)
         elements.append(Spacer(1, 8*mm))

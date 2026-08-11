@@ -1086,6 +1086,18 @@ def register_routes(app):
             # tamamen kaldirildi.
             title = _customer_full_name(customer)
 
+            # Cift-tiklama korumasi: ayni musteri icin birkac saniye once
+            # zaten bir teklif olusmussa (gercek testte "Teklif Oluştur"
+            # butonuna hizli cift tiklamanin mukerrer teklif actigi
+            # dogrulandi) yeni kayit acmak yerine mevcut olana yonlendir.
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=8)
+            recent_duplicate = Deal.query.filter(
+                Deal.customer_id == customer.id, Deal.created_at >= recent_cutoff
+            ).first()
+            if recent_duplicate:
+                flash(f'{recent_duplicate.display_no} az önce zaten oluşturuldu.', 'info')
+                return redirect(url_for('deal_detail', id=recent_duplicate.id))
+
             para_birimi = request.form.get('para_birimi', 'TRY').strip().upper()
             if para_birimi not in ('TRY', 'EUR', 'USD'):
                 para_birimi = 'TRY'
@@ -1363,8 +1375,16 @@ def register_routes(app):
             db.session.add(production)
             db.session.flush()
             
-            # Teklif kalemlerinden ProductionItem'ları oluştur
+            # Teklif kalemlerinden ProductionItem'ları oluştur. Teklifte zaten
+            # girilmis kagit_cinsi/boy/en/renk varsa is emrine on-doldurma
+            # olarak kopyalanir (atolyenin ayni bilgiyi elden tekrar girmesi
+            # gerekmesin diye) - yine de is emri sayfasindan duzenlenebilir.
             for item in deal.items:
+                olcu = None
+                if item.boy and item.en:
+                    olcu = f'{item.boy}x{item.en}'
+                elif item.boy or item.en:
+                    olcu = item.boy or item.en
                 prod_item = ProductionItem(
                     production_id=production.id,
                     deal_item_id=item.id,
@@ -1374,7 +1394,10 @@ def register_routes(app):
                     unit=item.unit,
                     status='bekleniyor',
                     urun_tipi=item.urun_tipi,
-                    ticaret_durumu='siparis_edildi' if item.urun_tipi == 'ticaret' else None
+                    ticaret_durumu='siparis_edildi' if item.urun_tipi == 'ticaret' else None,
+                    kagit_tipi=item.kagit_cinsi,
+                    olcu=olcu,
+                    baski_bilgisi=item.renk
                 )
                 db.session.add(prod_item)
             
@@ -2008,6 +2031,20 @@ def register_routes(app):
                 flash('Sevkiyat oluşturmadan önce fatura oluşturmalı ya da "Faturasız Çıkış" seçeneğini işaretlemelisiniz.', 'danger')
                 return redirect(url_for('deal_detail', id=deal_id))
 
+            # Cift-tiklama korumasi: ayni production icin birkac saniye once
+            # zaten bir Shipment olusmussa (status='hazir' kontrolu, iki
+            # istek DB'ye commit edilmeden once neredeyse ayni anda gelirse
+            # ikisini de gecirebiliyordu - gercek veride bu sekilde mukerrer
+            # sevkiyat olustugu tespit edildi) yeni kayit acmak yerine mevcut
+            # olana yonlendir.
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+            recent_duplicate = Shipment.query.filter(
+                Shipment.production_id == id, Shipment.created_at >= recent_cutoff
+            ).first()
+            if recent_duplicate:
+                flash(f'SVN-{recent_duplicate.id:05d} sevkiyatı az önce zaten oluşturuldu.', 'info')
+                return redirect(url_for('shipment_detail', id=recent_duplicate.id))
+
             shipment = Shipment(
                 production_id=id,
                 ship_date=datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else datetime.now().date(),
@@ -2126,6 +2163,17 @@ def register_routes(app):
             if not customer_id:
                 flash('Lütfen bir müşteri seçin.', 'danger')
                 return render_template('manual_irsaliye_add.html', carriers=CARRIER_OPTIONS, today=datetime.now().date())
+
+            # Cift-tiklama korumasi: ayni musteri icin birkac saniye once
+            # zaten bir ManualIrsaliye olusmussa yeni kayit acmak yerine
+            # mevcut olana yonlendir.
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+            recent_duplicate = ManualIrsaliye.query.filter(
+                ManualIrsaliye.customer_id == int(customer_id), ManualIrsaliye.created_at >= recent_cutoff
+            ).first()
+            if recent_duplicate:
+                flash(f'{recent_duplicate.display_no} irsaliyesi az önce zaten oluşturuldu.', 'info')
+                return redirect(url_for('manual_irsaliye_detail', id=recent_duplicate.id))
 
             manual_irsaliye = ManualIrsaliye(
                 customer_id=int(customer_id),
@@ -2604,6 +2652,18 @@ def register_routes(app):
             if new_tax_id:
                 deal.customer.tax_id = new_tax_id
 
+            # Cift-tiklama korumasi: ayni teklif+tur icin birkac saniye once
+            # zaten bir Invoice olusmussa (gercek veride bu sekilde ayni
+            # teklife 4 kez mukerrer fatura kesildigi tespit edildi) yeni
+            # kayit acmak yerine mevcut olana yonlendir.
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+            recent_duplicate = Invoice.query.filter(
+                Invoice.deal_id == deal.id, Invoice.type == inv_type, Invoice.created_at >= recent_cutoff
+            ).first()
+            if recent_duplicate:
+                flash(f'{recent_duplicate.display_no} az önce zaten oluşturuldu.', 'info')
+                return redirect(url_for('invoice_detail', id=recent_duplicate.id))
+
             invoice = Invoice(
                 invoice_no=_next_invoice_no(),
                 type=inv_type,
@@ -2675,6 +2735,16 @@ def register_routes(app):
                 customer.company_name = new_company_name
             if new_tax_id:
                 customer.tax_id = new_tax_id
+
+            # Cift-tiklama korumasi: bkz. create_invoice_from_deal - ayni
+            # mantik, burada deal_id olmadigi icin customer_id uzerinden.
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+            recent_duplicate = Invoice.query.filter(
+                Invoice.customer_id == customer.id, Invoice.deal_id.is_(None), Invoice.created_at >= recent_cutoff
+            ).first()
+            if recent_duplicate:
+                flash(f'{recent_duplicate.display_no} az önce zaten oluşturuldu.', 'info')
+                return redirect(url_for('invoice_detail', id=recent_duplicate.id))
 
             invoice = Invoice(
                 invoice_no=_next_invoice_no(),
