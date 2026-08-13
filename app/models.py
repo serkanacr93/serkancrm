@@ -576,6 +576,11 @@ class Invoice(db.Model):
     # opsiyonel - tekliften olusturulanlarda dolu, manuel olusturulanlarda NULL.
     deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=True, index=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
+    # Sahiplik/yetki kontrolu icin (guvenlik duzeltmesi) - deal_id'den
+    # (deal.user_id) turetilemeyen bagimsiz faturalar icin de bir sahip
+    # gerekiyordu. Eski kayitlarda NULL kalir (geriye donuk erisimi
+    # kapatmaz, sadece bilinen bir sahip varsa kontrol edilir).
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     date = db.Column(db.Date, default=datetime.utcnow)
     subtotal = db.Column(db.Float, nullable=False, default=0)
     vat_rate = db.Column(db.Float, nullable=False, default=20)
@@ -586,6 +591,14 @@ class Invoice(db.Model):
     
     customer = db.relationship('Customer', backref='invoices')
     items = db.relationship('InvoiceItem', backref='invoice', lazy=True, cascade='all, delete-orphan')
+
+    @property
+    def owner_id(self):
+        """Sahiplik kontrolu icin - once kendi user_id'si, o da yoksa
+        (eski kayitlar) bagli teklifin sahibine duser. Ikisi de yoksa
+        (eski bagimsiz fatura) None doner - bilinen bir sahip olmadigi
+        icin erisim kisitlanmaz."""
+        return self.user_id or (self.deal.user_id if self.deal else None)
 
     @property
     def display_no(self):

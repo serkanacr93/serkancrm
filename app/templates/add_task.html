@@ -34,5 +34,13 @@
 <script src="{{ asset_url('js/customer-search.js') }}"></script>
 <script>
 initCustomerSearch({ inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results' });
+
+document.querySelector('form').addEventListener('submit', function () {
+    var btn = this.querySelector('button[type="submit"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Kaydediliyor...';
+    }
+});
 </script>
 {% endblock %}

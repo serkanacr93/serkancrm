@@ -280,5 +280,13 @@ document.getElementById('on_odeme_tutari').addEventListener('input', calculateTo
 
 attachEvents();
 calculateTotals();
+
+document.querySelector('form').addEventListener('submit', function () {
+    var btn = this.querySelector('button[type="submit"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Kaydediliyor...';
+    }
+});
 </script>
 {% endblock %}

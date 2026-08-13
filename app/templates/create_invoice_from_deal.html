@@ -268,5 +268,15 @@ document.getElementById('on_odeme_tutari').addEventListener('input', calcAll);
 
 attachRowEvents();
 calcAll();
+
+// Cift-tiklama korumasi: form gonderilince buton devre disi birakilir -
+// gonderim zaten baslamis oldugu icin bu sadece IKINCI tikla(n)mayi engeller.
+document.querySelector('form').addEventListener('submit', function () {
+    var btn = this.querySelector('button[type="submit"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Kaydediliyor...';
+    }
+});
 </script>
 {% endblock %}

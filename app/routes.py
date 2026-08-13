@@ -3,7 +3,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
-from app import db, places_search
+from app import db, places_search, limiter
 from app.tcmb import fetch_tcmb_rate
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -239,6 +239,15 @@ def _normalize_tr(s):
     return s.translate(_TR_LOWER_MAP).lower()
 
 
+def _login_rate_limit_key():
+    """IP + kullanici adi birlesimi - sadece IP bazli limit, ayni ag/ofis
+    arkasindaki farkli kullanicilari birbirini etkileyerek gereksiz yere
+    kilitleyebilirdi; IP+kullanici adi kombinasyonu tek bir hesaba yonelik
+    kaba kuvvet denemesini hedefler."""
+    from flask_limiter.util import get_remote_address
+    username = (request.form.get('username') or '').strip().lower()
+    return f'{get_remote_address()}:{username}'
+
 def admin_required(f):
     @wraps(f)
     @login_required
@@ -251,7 +260,13 @@ def admin_required(f):
 
 def register_routes(app):
 
+    @app.errorhandler(429)
+    def _rate_limit_exceeded(e):
+        flash('Çok fazla giriş denemesi yaptınız. Lütfen bir dakika bekleyip tekrar deneyin.', 'danger')
+        return render_template('login.html'), 429
+
     @app.route('/login', methods=['GET', 'POST'])
+    @limiter.limit('5 per minute', key_func=_login_rate_limit_key, methods=['POST'])
     def login():
         if current_user.is_authenticated:
             return redirect(url_for('index'))
@@ -970,24 +985,30 @@ def register_routes(app):
         duplicate_customers = [c for c in customers if c.id != main_customer.id]
         
         # Tekrarlayan müşterilerin ilişkilerini ana müşteriye aktar
-        for dup in duplicate_customers:
-            # Teklifleri aktar
-            Deal.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
-            # Ekstreleri aktar
-            CustomerStatement.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
-            # Günlük raporları güncelle
-            DailyReport.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
-            # Ziyaretleri aktar
-            CustomerVisit.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
-            # Görevleri aktar
-            Task.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
-            # Hatırlatıcıları aktar
-            Reminder.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
-            
-            # Tekrarlayan müşteriyi sil
-            db.session.delete(dup)
-        
-        db.session.commit()
+        try:
+            for dup in duplicate_customers:
+                # Teklifleri aktar
+                Deal.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
+                # Ekstreleri aktar
+                CustomerStatement.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
+                # Günlük raporları güncelle
+                DailyReport.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
+                # Ziyaretleri aktar
+                CustomerVisit.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
+                # Görevleri aktar
+                Task.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
+                # Hatırlatıcıları aktar
+                Reminder.query.filter_by(customer_id=dup.id).update({'customer_id': main_customer.id})
+
+                # Tekrarlayan müşteriyi sil
+                db.session.delete(dup)
+
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            flash('Müşteriler birleştirilirken bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+            return redirect(url_for('customers'))
+
         flash(f'{len(duplicate_customers)} tekrar eden müşteri birleştirildi! Ana müşteri: {main_customer.display_name}', 'success')
         return redirect(url_for('customers'))
 
@@ -1090,7 +1111,7 @@ def register_routes(app):
             # zaten bir teklif olusmussa (gercek testte "Teklif Oluştur"
             # butonuna hizli cift tiklamanin mukerrer teklif actigi
             # dogrulandi) yeni kayit acmak yerine mevcut olana yonlendir.
-            recent_cutoff = datetime.utcnow() - timedelta(seconds=8)
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
             recent_duplicate = Deal.query.filter(
                 Deal.customer_id == customer.id, Deal.created_at >= recent_cutoff
             ).first()
@@ -1104,61 +1125,67 @@ def register_routes(app):
             kullanilan_kur_raw = request.form.get('kullanilan_kur', '').strip()
             kullanilan_kur = float(kullanilan_kur_raw) if kullanilan_kur_raw and para_birimi != 'TRY' else None
 
-            deal = Deal(
-                deal_no=next_no,
-                title=title,
-                stage=request.form.get('stage', 'yeni'),
-                probability=int(request.form.get('probability', 0)),
-                deal_date=today,
-                expected_close=datetime.strptime(request.form['expected_close'], '%Y-%m-%d').date() if request.form.get('expected_close') else None,
-                valid_until=today + timedelta(days=7),
-                vat_rate=float(request.form.get('vat_rate', 20)),
-                notes=request.form.get('notes'),
-                vade_gun=request.form.get('vade_gun', '').strip() or None,
-                pesinat=request.form.get('pesinat', '').strip() or None,
-                bakiye_odemesi=request.form.get('bakiye_odemesi', '').strip() or None,
-                para_birimi=para_birimi,
-                kullanilan_kur=kullanilan_kur,
-                customer_id=customer.id,
-                user_id=current_user.id
-            )
-            db.session.add(deal)
-            db.session.flush()
-
-            i = 0
-            while f'desc_{i}' in request.form:
-                qty = float(request.form[f'qty_{i}'])
-                price = float(request.form[f'price_{i}'])
-                teslim_tarihi_raw = request.form.get(f'teslim_tarihi_{i}', '').strip()
-                item = DealItem(
-                    description=request.form[f'desc_{i}'],
-                    quantity=qty,
-                    unit=request.form.get(f'unit_{i}', 'adet'),
-                    unit_price=price,
-                    total_price=qty * price,
-                    urun_tipi=request.form.get(f'urun_tipi_{i}', 'uretim'),
-                    kagit_cinsi=request.form.get(f'kagit_cinsi_{i}', '').strip() or None,
-                    boy=request.form.get(f'boy_{i}', '').strip() or None,
-                    en=request.form.get(f'en_{i}', '').strip() or None,
-                    renk=request.form.get(f'renk_{i}', '').strip() or None,
-                    teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
-                    deal_id=deal.id
+            try:
+                deal = Deal(
+                    deal_no=next_no,
+                    title=title,
+                    stage=request.form.get('stage', 'yeni'),
+                    probability=int(request.form.get('probability', 0)),
+                    deal_date=today,
+                    expected_close=datetime.strptime(request.form['expected_close'], '%Y-%m-%d').date() if request.form.get('expected_close') else None,
+                    valid_until=today + timedelta(days=7),
+                    vat_rate=float(request.form.get('vat_rate', 20)),
+                    notes=request.form.get('notes'),
+                    vade_gun=request.form.get('vade_gun', '').strip() or None,
+                    pesinat=request.form.get('pesinat', '').strip() or None,
+                    bakiye_odemesi=request.form.get('bakiye_odemesi', '').strip() or None,
+                    para_birimi=para_birimi,
+                    kullanilan_kur=kullanilan_kur,
+                    customer_id=customer.id,
+                    user_id=current_user.id
                 )
-                db.session.add(item)
-                i += 1
+                db.session.add(deal)
+                db.session.flush()
 
-            db.session.flush()
-            deal.calculate_totals()
+                i = 0
+                while f'desc_{i}' in request.form:
+                    qty = float(request.form[f'qty_{i}'])
+                    price = float(request.form[f'price_{i}'])
+                    teslim_tarihi_raw = request.form.get(f'teslim_tarihi_{i}', '').strip()
+                    item = DealItem(
+                        description=request.form[f'desc_{i}'],
+                        quantity=qty,
+                        unit=request.form.get(f'unit_{i}', 'adet'),
+                        unit_price=price,
+                        total_price=qty * price,
+                        urun_tipi=request.form.get(f'urun_tipi_{i}', 'uretim'),
+                        kagit_cinsi=request.form.get(f'kagit_cinsi_{i}', '').strip() or None,
+                        boy=request.form.get(f'boy_{i}', '').strip() or None,
+                        en=request.form.get(f'en_{i}', '').strip() or None,
+                        renk=request.form.get(f'renk_{i}', '').strip() or None,
+                        teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
+                        deal_id=deal.id
+                    )
+                    db.session.add(item)
+                    i += 1
 
-            reminder = Reminder(
-                customer_id=deal.customer_id,
-                deal_id=deal.id,
-                title=f'Teklif Süresi Doluyor: {deal.title}',
-                message=f'{deal.display_no} teklifinin geçerlilik süresi {deal.valid_until.strftime("%d.%m.%Y")} tarihinde doluyor.',
-                remind_date=deal.valid_until - timedelta(days=1)
-            )
-            db.session.add(reminder)
-            db.session.commit()
+                db.session.flush()
+                deal.calculate_totals()
+
+                reminder = Reminder(
+                    customer_id=deal.customer_id,
+                    deal_id=deal.id,
+                    title=f'Teklif Süresi Doluyor: {deal.title}',
+                    message=f'{deal.display_no} teklifinin geçerlilik süresi {deal.valid_until.strftime("%d.%m.%Y")} tarihinde doluyor.',
+                    remind_date=deal.valid_until - timedelta(days=1)
+                )
+                db.session.add(reminder)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('Teklif oluşturulurken bir hata oluştu, hiçbir değişiklik kaydedilmedi. Girdiğiniz bilgileri kontrol edip tekrar deneyin.', 'danger')
+                return redirect(url_for('add_deal'))
+
             flash(f'Teklif oluşturuldu! KDV dahil: {deal.value:,.2f} {deal.para_birimi_sembol}', 'success')
             return redirect(url_for('deal_detail', id=deal.id))
         # Not: customers listesi burada kasitli olarak cekilmiyor - form
@@ -1296,6 +1323,29 @@ def register_routes(app):
         if not current_user.is_admin and deal.user_id != current_user.id:
             flash('Bu teklifi revize etme yetkiniz yok.', 'danger')
             return redirect(url_for('deals'))
+
+        # delete_deal'daki ayni kontrol: bagli Production/Commission/Invoice/
+        # CustomerStatement varken teklif revize edilirse, bu kayitlar eski
+        # (artik stage='revize' olan, "kazanilan" filtresine girmeyen)
+        # deal_id'ye sessizce bagli kalirdi - prim/rapor sorgularinda
+        # gorunmez hale gelirlerdi. Bu durumda revizyon engellenir.
+        blockers = []
+        if deal.production:
+            blockers.append('üretim')
+        if Commission.query.filter_by(deal_id=id).first():
+            blockers.append('prim')
+        if deal.invoices:
+            blockers.append('fatura')
+        if deal.statements:
+            blockers.append('cari ekstre')
+        if blockers:
+            flash(
+                'Bu teklife bağlı ' + ', '.join(blockers) + ' kaydı var, '
+                'bu yüzden revize edilemez (bağlı kayıtlar eski tekliften kopar). '
+                'Gerekirse önce bu kayıtları inceleyin.', 'danger'
+            )
+            return redirect(url_for('deal_detail', id=id))
+
         today = datetime.now().date()
         # Is 3: revize teklif ayni (temizlenmis) musteri adiyla devam eder,
         # eski karisik "(Revize N)" suffix mantigi kaldirildi - tekilligi
@@ -1363,74 +1413,79 @@ def register_routes(app):
                 return render_template('approve_deal.html', deal=deal, suggested_rate=suggested_rate,
                                         form_data=request.form)
 
-            deal.pesinat_orani = pesinat_orani
-            deal.pesinat_tarihi = datetime.strptime(pesinat_tarihi_raw, '%Y-%m-%d').date()
-            deal.bakiye_tarihi = datetime.strptime(bakiye_tarihi_raw, '%Y-%m-%d').date()
+            try:
+                deal.pesinat_orani = pesinat_orani
+                deal.pesinat_tarihi = datetime.strptime(pesinat_tarihi_raw, '%Y-%m-%d').date()
+                deal.bakiye_tarihi = datetime.strptime(bakiye_tarihi_raw, '%Y-%m-%d').date()
 
-            deal.stage = 'kazanilan'
-            deal.user_id = current_user.id
+                deal.stage = 'kazanilan'
+                deal.user_id = current_user.id
 
-            production = Production(deal_id=deal.id, status='uretimde', start_date=datetime.now().date(),
-                                     due_date=deal.expected_close)
-            db.session.add(production)
-            db.session.flush()
-            
-            # Teklif kalemlerinden ProductionItem'ları oluştur. Teklifte zaten
-            # girilmis kagit_cinsi/boy/en/renk varsa is emrine on-doldurma
-            # olarak kopyalanir (atolyenin ayni bilgiyi elden tekrar girmesi
-            # gerekmesin diye) - yine de is emri sayfasindan duzenlenebilir.
-            for item in deal.items:
-                olcu = None
-                if item.boy and item.en:
-                    olcu = f'{item.boy}x{item.en}'
-                elif item.boy or item.en:
-                    olcu = item.boy or item.en
-                prod_item = ProductionItem(
-                    production_id=production.id,
-                    deal_item_id=item.id,
-                    description=item.description,
-                    planned_quantity=item.quantity,
-                    produced_quantity=0,
-                    unit=item.unit,
-                    status='bekleniyor',
-                    urun_tipi=item.urun_tipi,
-                    ticaret_durumu='siparis_edildi' if item.urun_tipi == 'ticaret' else None,
-                    kagit_tipi=item.kagit_cinsi,
-                    olcu=olcu,
-                    baski_bilgisi=item.renk
+                production = Production(deal_id=deal.id, status='uretimde', start_date=datetime.now().date(),
+                                         due_date=deal.expected_close)
+                db.session.add(production)
+                db.session.flush()
+
+                # Teklif kalemlerinden ProductionItem'ları oluştur. Teklifte zaten
+                # girilmis kagit_cinsi/boy/en/renk varsa is emrine on-doldurma
+                # olarak kopyalanir (atolyenin ayni bilgiyi elden tekrar girmesi
+                # gerekmesin diye) - yine de is emri sayfasindan duzenlenebilir.
+                for item in deal.items:
+                    olcu = None
+                    if item.boy and item.en:
+                        olcu = f'{item.boy}x{item.en}'
+                    elif item.boy or item.en:
+                        olcu = item.boy or item.en
+                    prod_item = ProductionItem(
+                        production_id=production.id,
+                        deal_item_id=item.id,
+                        description=item.description,
+                        planned_quantity=item.quantity,
+                        produced_quantity=0,
+                        unit=item.unit,
+                        status='bekleniyor',
+                        urun_tipi=item.urun_tipi,
+                        ticaret_durumu='siparis_edildi' if item.urun_tipi == 'ticaret' else None,
+                        kagit_tipi=item.kagit_cinsi,
+                        olcu=olcu,
+                        baski_bilgisi=item.renk
+                    )
+                    db.session.add(prod_item)
+
+                statement = CustomerStatement(customer_id=deal.customer_id, deal_id=deal.id, type='borc', amount=deal.value,
+                                             description=f'Satış: {deal.title} (KDV Dahil: {deal.value:,.2f} ₺)')
+                db.session.add(statement)
+
+                # Manuel prim oranını al
+                manual_rate = request.form.get('commission_rate')
+                if manual_rate:
+                    rate = float(manual_rate)
+                    customer_type = 'manuel'
+                else:
+                    prev_sales = Deal.query.filter(Deal.customer_id == deal.customer_id, Deal.stage == 'kazanilan', Deal.id != deal.id).count()
+                    is_new = prev_sales == 0
+                    rate = 1.5 if is_new else 1.0
+                    customer_type = 'yeni' if is_new else 'eski'
+
+                commission_amount = deal.subtotal * (rate / 100)
+
+                commission = Commission(
+                    user_id=current_user.id,
+                    deal_id=deal.id,
+                    sale_amount=deal.subtotal,
+                    rate=rate,
+                    amount=commission_amount,
+                    customer_type=customer_type,
+                    status='odenmedi',
+                    manual_rate=rate if manual_rate else None
                 )
-                db.session.add(prod_item)
-            
-            statement = CustomerStatement(customer_id=deal.customer_id, deal_id=deal.id, type='borc', amount=deal.value,
-                                         description=f'Satış: {deal.title} (KDV Dahil: {deal.value:,.2f} ₺)')
-            db.session.add(statement)
-            
-            # Manuel prim oranını al
-            manual_rate = request.form.get('commission_rate')
-            if manual_rate:
-                rate = float(manual_rate)
-                customer_type = 'manuel'
-            else:
-                prev_sales = Deal.query.filter(Deal.customer_id == deal.customer_id, Deal.stage == 'kazanilan', Deal.id != deal.id).count()
-                is_new = prev_sales == 0
-                rate = 1.5 if is_new else 1.0
-                customer_type = 'yeni' if is_new else 'eski'
-            
-            commission_amount = deal.subtotal * (rate / 100)
-            
-            commission = Commission(
-                user_id=current_user.id,
-                deal_id=deal.id,
-                sale_amount=deal.subtotal,
-                rate=rate,
-                amount=commission_amount,
-                customer_type=customer_type,
-                status='odenmedi',
-                manual_rate=rate if manual_rate else None
-            )
-            db.session.add(commission)
-            db.session.commit()
-            
+                db.session.add(commission)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('Teklif onaylanırken bir hata oluştu, hiçbir değişiklik kaydedilmedi. Girdiğiniz bilgileri kontrol edip tekrar deneyin.', 'danger')
+                return redirect(url_for('approve_deal', id=id))
+
             flash(f'Teklif onaylandı! Üretime aktarıldı. Prim: %{rate} = {commission_amount:,.2f} ₺', 'success')
             return redirect(url_for('production_detail', id=production.id))
         
@@ -2037,7 +2092,7 @@ def register_routes(app):
             # ikisini de gecirebiliyordu - gercek veride bu sekilde mukerrer
             # sevkiyat olustugu tespit edildi) yeni kayit acmak yerine mevcut
             # olana yonlendir.
-            recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
             recent_duplicate = Shipment.query.filter(
                 Shipment.production_id == id, Shipment.created_at >= recent_cutoff
             ).first()
@@ -2045,33 +2100,39 @@ def register_routes(app):
                 flash(f'SVN-{recent_duplicate.id:05d} sevkiyatı az önce zaten oluşturuldu.', 'info')
                 return redirect(url_for('shipment_detail', id=recent_duplicate.id))
 
-            shipment = Shipment(
-                production_id=id,
-                ship_date=datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else datetime.now().date(),
-                estimated_delivery_date=datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None,
-                carrier=request.form.get('carrier') or None,
-                tracking_number=request.form.get('tracking_number') or None,
-                status='hazirlaniyor',
-                faturasiz_cikis=not has_invoice,
-                notes=request.form.get('notes', '')
-            )
-            db.session.add(shipment)
-            db.session.flush()
+            try:
+                shipment = Shipment(
+                    production_id=id,
+                    ship_date=datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else datetime.now().date(),
+                    estimated_delivery_date=datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None,
+                    carrier=request.form.get('carrier') or None,
+                    tracking_number=request.form.get('tracking_number') or None,
+                    status='hazirlaniyor',
+                    faturasiz_cikis=not has_invoice,
+                    notes=request.form.get('notes', '')
+                )
+                db.session.add(shipment)
+                db.session.flush()
 
-            # Sevkiyat kalemleri, uretimde kaydedilen gercek uretilen adetten
-            # otomatik olusturulur - fiyat/kg tekrar sorulmaz (Is C).
-            for item in production.items:
-                if item.produced_quantity and item.produced_quantity > 0:
-                    db.session.add(ShipmentItem(
-                        shipment_id=shipment.id,
-                        production_item_id=item.id,
-                        description=item.description,
-                        quantity=item.produced_quantity,
-                        unit=item.unit
-                    ))
+                # Sevkiyat kalemleri, uretimde kaydedilen gercek uretilen adetten
+                # otomatik olusturulur - fiyat/kg tekrar sorulmaz (Is C).
+                for item in production.items:
+                    if item.produced_quantity and item.produced_quantity > 0:
+                        db.session.add(ShipmentItem(
+                            shipment_id=shipment.id,
+                            production_item_id=item.id,
+                            description=item.description,
+                            quantity=item.produced_quantity,
+                            unit=item.unit
+                        ))
 
-            production.status = 'sevkiyat'
-            db.session.commit()
+                production.status = 'sevkiyat'
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('Sevkiyat oluşturulurken bir hata oluştu, hiçbir değişiklik kaydedilmedi. Girdiğiniz bilgileri kontrol edip tekrar deneyin.', 'danger')
+                return redirect(url_for('create_shipment_from_production', id=id))
+
             flash(f'SVN-{shipment.id:05d} sevkiyatı oluşturuldu!', 'success')
             return redirect(url_for('shipment_detail', id=shipment.id))
 
@@ -2106,7 +2167,21 @@ def register_routes(app):
     def edit_production(id):
         production = Production.query.get_or_404(id)
         if request.method == 'POST':
-            production.status = request.form['status']
+            new_status = request.form['status']
+            # 'Sevkiyat' durumuna GECIS burada elle yapilamaz - bu asama
+            # sadece create_shipment_from_production uzerinden, irsaliye/
+            # fatura zorunlulugu kontrol edilerek gecilebilir. Aksi halde
+            # (daha once tam olarak boyle bir kayitta - Production #33 -
+            # gorulduugu gibi) hicbir Shipment/irsaliye kaydi olmadan
+            # 'sevkiyat' durumuna gecilebiliyordu. Zaten 'sevkiyat'
+            # durumundaki bir kaydin diger alanlarini (not vb.) duzenlemek
+            # hala serbest - engellenen sadece YENI bir gecis.
+            if new_status == 'sevkiyat' and production.status != 'sevkiyat':
+                flash('Üretim durumu buradan doğrudan "Sevkiyat" olarak değiştirilemez. '
+                      'Sevkiyat oluşturmak için üretim detayındaki "Sevkiyat Oluştur" akışını kullanın '
+                      '(irsaliye/fatura kontrolü orada yapılır).', 'danger')
+                return redirect(url_for('edit_production', id=id))
+            production.status = new_status
             production.start_date = datetime.strptime(request.form['start_date'], '%Y-%m-%d').date() if request.form.get('start_date') else None
             production.end_date = datetime.strptime(request.form['end_date'], '%Y-%m-%d').date() if request.form.get('end_date') else None
             production.due_date = datetime.strptime(request.form['due_date'], '%Y-%m-%d').date() if request.form.get('due_date') else None
@@ -2167,7 +2242,7 @@ def register_routes(app):
             # Cift-tiklama korumasi: ayni musteri icin birkac saniye once
             # zaten bir ManualIrsaliye olusmussa yeni kayit acmak yerine
             # mevcut olana yonlendir.
-            recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
             recent_duplicate = ManualIrsaliye.query.filter(
                 ManualIrsaliye.customer_id == int(customer_id), ManualIrsaliye.created_at >= recent_cutoff
             ).first()
@@ -2175,32 +2250,38 @@ def register_routes(app):
                 flash(f'{recent_duplicate.display_no} irsaliyesi az önce zaten oluşturuldu.', 'info')
                 return redirect(url_for('manual_irsaliye_detail', id=recent_duplicate.id))
 
-            manual_irsaliye = ManualIrsaliye(
-                customer_id=int(customer_id),
-                ship_date=datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else datetime.now().date(),
-                estimated_delivery_date=datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None,
-                carrier=request.form.get('carrier') or None,
-                tracking_number=request.form.get('tracking_number') or None,
-                notes=request.form.get('notes', ''),
-                user_id=current_user.id
-            )
-            db.session.add(manual_irsaliye)
-            db.session.flush()
+            try:
+                manual_irsaliye = ManualIrsaliye(
+                    customer_id=int(customer_id),
+                    ship_date=datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else datetime.now().date(),
+                    estimated_delivery_date=datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None,
+                    carrier=request.form.get('carrier') or None,
+                    tracking_number=request.form.get('tracking_number') or None,
+                    notes=request.form.get('notes', ''),
+                    user_id=current_user.id
+                )
+                db.session.add(manual_irsaliye)
+                db.session.flush()
 
-            i = 0
-            while f'desc_{i}' in request.form:
-                desc = request.form.get(f'desc_{i}', '').strip()
-                qty = request.form.get(f'qty_{i}', '').strip()
-                if desc and qty:
-                    db.session.add(ManualIrsaliyeItem(
-                        manual_irsaliye_id=manual_irsaliye.id,
-                        description=desc,
-                        quantity=float(qty),
-                        unit=request.form.get(f'unit_{i}', 'adet')
-                    ))
-                i += 1
+                i = 0
+                while f'desc_{i}' in request.form:
+                    desc = request.form.get(f'desc_{i}', '').strip()
+                    qty = request.form.get(f'qty_{i}', '').strip()
+                    if desc and qty:
+                        db.session.add(ManualIrsaliyeItem(
+                            manual_irsaliye_id=manual_irsaliye.id,
+                            description=desc,
+                            quantity=float(qty),
+                            unit=request.form.get(f'unit_{i}', 'adet')
+                        ))
+                    i += 1
 
-            db.session.commit()
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('İrsaliye oluşturulurken bir hata oluştu, hiçbir değişiklik kaydedilmedi. Girdiğiniz bilgileri kontrol edip tekrar deneyin.', 'danger')
+                return redirect(url_for('manual_irsaliye_add'))
+
             flash(f'{manual_irsaliye.display_no} manuel irsaliyesi oluşturuldu!', 'success')
             return redirect(url_for('manual_irsaliye_detail', id=manual_irsaliye.id))
 
@@ -2345,6 +2426,17 @@ def register_routes(app):
     @login_required
     def add_task():
         if request.method == 'POST':
+            # Cift-tiklama korumasi: ayni kullanici, ayni baslikla 30 saniye
+            # icinde tekrar gorev eklemeye calisirsa mevcut olana yonlendir.
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
+            recent_duplicate = Task.query.filter(
+                Task.user_id == current_user.id, Task.title == request.form['title'],
+                Task.created_at >= recent_cutoff
+            ).first()
+            if recent_duplicate:
+                flash('Bu görev az önce zaten eklendi.', 'info')
+                return redirect(url_for('tasks'))
+
             task = Task(
                 title=request.form['title'], description=request.form.get('description'),
                 due_date=datetime.strptime(request.form['due_date'], '%Y-%m-%d').date() if request.form.get('due_date') else None,
@@ -2472,8 +2564,14 @@ def register_routes(app):
                              total_pending=total_pending, total_paid=total_paid, user_stats=user_stats)
 
     @app.route('/commissions/<int:id>/pay', methods=['POST'])
-    @login_required
+    @admin_required
     def pay_commission(id):
+        # Bir satiscinin KENDI primini "odendi" isaretleyebilmesi (yalnizca
+        # commission.user_id == current_user.id kontroluyle) is mantigi
+        # acisindan yanlis olurdu - odeme durumu bir bordro/muhasebe
+        # alanidir, sahibi tarafindan degistirilmemeli. Toplu odeme
+        # (pay_all_commissions) zaten @admin_required, tutarlilik icin
+        # tekil odeme de ayni korumaya alindi.
         commission = Commission.query.get_or_404(id)
         commission.status = 'odendi'
         commission.paid_at = datetime.utcnow()
@@ -2490,7 +2588,7 @@ def register_routes(app):
         return redirect(url_for('commissions'))
 
     @app.route('/settings')
-    @login_required
+    @admin_required
     def settings():
         db_size = db.session.execute(db.text("SELECT pg_database_size(current_database())")).scalar()
 
@@ -2504,7 +2602,7 @@ def register_routes(app):
                                 company_settings=company_settings)
 
     @app.route('/settings/places-toggle', methods=['POST'])
-    @login_required
+    @admin_required
     def toggle_places_search():
         config = places_search.get_config()
         config.enabled = not config.enabled
@@ -2513,7 +2611,7 @@ def register_routes(app):
         return redirect(url_for('settings'))
 
     @app.route('/settings/company', methods=['POST'])
-    @login_required
+    @admin_required
     def update_company_settings():
         company_settings = _get_company_settings()
         company_settings.company_name = request.form.get('company_name', '').strip() or 'Lema Ambalaj'
@@ -2531,21 +2629,31 @@ def register_routes(app):
             if len(data) > 2 * 1024 * 1024:
                 flash('Logo dosyası çok büyük (maks. 2 MB).', 'danger')
                 return redirect(url_for('settings'))
+            # Mimetype istemciden geldigi gibi (logo.mimetype) GUVENILMEDEN,
+            # PIL'in dosya icerigine bakarak tespit ettigi gercek formattan
+            # turetiliyor ve sadece image/jpeg + image/png'ye izin veriliyor -
+            # aksi halde saklanip aynen geri servis edilen mimetype uzerinden
+            # bir content-type confusion riski olustururdu.
             try:
                 from PIL import Image as PILImage
                 PILImage.open(BytesIO(data)).verify()
+                detected_format = PILImage.open(BytesIO(data)).format
             except Exception:
                 flash('Logo dosyası geçerli bir görsel değil.', 'danger')
                 return redirect(url_for('settings'))
+            mimetype = {'JPEG': 'image/jpeg', 'PNG': 'image/png'}.get(detected_format)
+            if not mimetype:
+                flash('Logo yalnızca JPEG veya PNG formatında olabilir.', 'danger')
+                return redirect(url_for('settings'))
             company_settings.logo_data = data
-            company_settings.logo_mimetype = logo.mimetype
+            company_settings.logo_mimetype = mimetype
 
         db.session.commit()
         flash('Firma bilgileri güncellendi!', 'success')
         return redirect(url_for('settings'))
 
     @app.route('/settings/company-logo')
-    @login_required
+    @admin_required
     def company_logo():
         company_settings = _get_company_settings()
         if not company_settings.logo_data:
@@ -2591,6 +2699,10 @@ def register_routes(app):
     @login_required
     def invoice_detail(id):
         invoice = Invoice.query.get_or_404(id)
+        owner_id = invoice.owner_id
+        if owner_id is not None and not current_user.is_admin and owner_id != current_user.id:
+            flash('Bu faturayı görüntüleme yetkiniz yok.', 'danger')
+            return redirect(url_for('invoices'))
 
         # Is 3: satir satir kumulatif kalan bakiye tablosu. Ayri bir hesaplama
         # kaynagi ACILMIYOR - dogrudan invoice.total (Cari Hesap Ozeti'nin de
@@ -2629,6 +2741,10 @@ def register_routes(app):
     @login_required
     def invoice_pdf(id):
         invoice = Invoice.query.get_or_404(id)
+        owner_id = invoice.owner_id
+        if owner_id is not None and not current_user.is_admin and owner_id != current_user.id:
+            flash('Bu faturayı indirme yetkiniz yok.', 'danger')
+            return redirect(url_for('invoices'))
         pdf = generate_invoice_pdf(invoice)
         return send_file(pdf, as_attachment=True, download_name=f'{invoice.display_no}.pdf')
 
@@ -2656,7 +2772,7 @@ def register_routes(app):
             # zaten bir Invoice olusmussa (gercek veride bu sekilde ayni
             # teklife 4 kez mukerrer fatura kesildigi tespit edildi) yeni
             # kayit acmak yerine mevcut olana yonlendir.
-            recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
             recent_duplicate = Invoice.query.filter(
                 Invoice.deal_id == deal.id, Invoice.type == inv_type, Invoice.created_at >= recent_cutoff
             ).first()
@@ -2664,50 +2780,56 @@ def register_routes(app):
                 flash(f'{recent_duplicate.display_no} az önce zaten oluşturuldu.', 'info')
                 return redirect(url_for('invoice_detail', id=recent_duplicate.id))
 
-            invoice = Invoice(
-                invoice_no=_next_invoice_no(),
-                type=inv_type,
-                deal_id=deal.id,
-                customer_id=deal.customer_id,
-                date=datetime.now().date(),
-                vat_rate=deal.vat_rate,
-                notes=request.form.get('notes', '')
-            )
-            db.session.add(invoice)
-            db.session.flush()
-            
-            # Teklif kalemlerini kopyala, manuel girilen kg/adet ile güncelle
-            i = 0
-            while f'desc_{i}' in request.form:
-                qty = float(request.form.get(f'qty_{i}', 0))
-                price = float(request.form.get(f'price_{i}', 0))
-                item = InvoiceItem(
-                    invoice_id=invoice.id,
-                    description=request.form[f'desc_{i}'],
-                    quantity=qty,
-                    unit=request.form.get(f'unit_{i}', 'adet'),
-                    unit_price=price,
-                    total_price=qty * price
+            try:
+                invoice = Invoice(
+                    invoice_no=_next_invoice_no(),
+                    type=inv_type,
+                    deal_id=deal.id,
+                    customer_id=deal.customer_id,
+                    user_id=current_user.id,
+                    date=datetime.now().date(),
+                    vat_rate=deal.vat_rate,
+                    notes=request.form.get('notes', '')
                 )
-                db.session.add(item)
-                i += 1
-            
-            db.session.flush()
-            invoice.calculate_totals()
+                db.session.add(invoice)
+                db.session.flush()
 
-            # On odeme (avans) uzlastirmasi: bu teklife bagli, henuz hicbir
-            # faturaya baglanmamis Payment kayitlari isaretlenmisse, yeni
-            # faturaya baglanir (artik invoice.paid_amount'a dahil olurlar).
-            unlinked_payments = Payment.query.filter_by(deal_id=deal.id, invoice_id=None).all()
-            for payment in unlinked_payments:
-                if request.form.get(f'link_payment_{payment.id}'):
-                    payment.invoice_id = invoice.id
+                # Teklif kalemlerini kopyala, manuel girilen kg/adet ile güncelle
+                i = 0
+                while f'desc_{i}' in request.form:
+                    qty = float(request.form.get(f'qty_{i}', 0))
+                    price = float(request.form.get(f'price_{i}', 0))
+                    item = InvoiceItem(
+                        invoice_id=invoice.id,
+                        description=request.form[f'desc_{i}'],
+                        quantity=qty,
+                        unit=request.form.get(f'unit_{i}', 'adet'),
+                        unit_price=price,
+                        total_price=qty * price
+                    )
+                    db.session.add(item)
+                    i += 1
 
-            # Is 2: formda "On Odeme Alindi" isaretlenmisse ilk Payment
-            # otomatik olusur.
-            _create_prepayment_if_requested(invoice, request.form, current_user.id)
+                db.session.flush()
+                invoice.calculate_totals()
 
-            db.session.commit()
+                # On odeme (avans) uzlastirmasi: bu teklife bagli, henuz hicbir
+                # faturaya baglanmamis Payment kayitlari isaretlenmisse, yeni
+                # faturaya baglanir (artik invoice.paid_amount'a dahil olurlar).
+                unlinked_payments = Payment.query.filter_by(deal_id=deal.id, invoice_id=None).all()
+                for payment in unlinked_payments:
+                    if request.form.get(f'link_payment_{payment.id}'):
+                        payment.invoice_id = invoice.id
+
+                # Is 2: formda "On Odeme Alindi" isaretlenmisse ilk Payment
+                # otomatik olusur.
+                _create_prepayment_if_requested(invoice, request.form, current_user.id)
+
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('Fatura/irsaliye oluşturulurken bir hata oluştu, hiçbir değişiklik kaydedilmedi. Girdiğiniz bilgileri kontrol edip tekrar deneyin.', 'danger')
+                return redirect(url_for('create_invoice_from_deal', id=id))
 
             flash(f'{invoice.display_no} - {inv_type} başarıyla oluşturuldu!', 'success')
             return redirect(url_for('invoice_detail', id=invoice.id))
@@ -2738,7 +2860,7 @@ def register_routes(app):
 
             # Cift-tiklama korumasi: bkz. create_invoice_from_deal - ayni
             # mantik, burada deal_id olmadigi icin customer_id uzerinden.
-            recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
             recent_duplicate = Invoice.query.filter(
                 Invoice.customer_id == customer.id, Invoice.deal_id.is_(None), Invoice.created_at >= recent_cutoff
             ).first()
@@ -2746,39 +2868,45 @@ def register_routes(app):
                 flash(f'{recent_duplicate.display_no} az önce zaten oluşturuldu.', 'info')
                 return redirect(url_for('invoice_detail', id=recent_duplicate.id))
 
-            invoice = Invoice(
-                invoice_no=_next_invoice_no(),
-                type='fatura',
-                deal_id=None,
-                customer_id=customer.id,
-                date=datetime.now().date(),
-                vat_rate=float(request.form.get('vat_rate', 20)),
-                notes=request.form.get('notes', '')
-            )
-            db.session.add(invoice)
-            db.session.flush()
-
-            i = 0
-            while f'desc_{i}' in request.form:
-                qty = float(request.form.get(f'qty_{i}', 0))
-                price = float(request.form.get(f'price_{i}', 0))
-                item = InvoiceItem(
-                    invoice_id=invoice.id,
-                    description=request.form[f'desc_{i}'],
-                    quantity=qty,
-                    unit=request.form.get(f'unit_{i}', 'adet'),
-                    unit_price=price,
-                    total_price=qty * price
+            try:
+                invoice = Invoice(
+                    invoice_no=_next_invoice_no(),
+                    type='fatura',
+                    deal_id=None,
+                    customer_id=customer.id,
+                    user_id=current_user.id,
+                    date=datetime.now().date(),
+                    vat_rate=float(request.form.get('vat_rate', 20)),
+                    notes=request.form.get('notes', '')
                 )
-                db.session.add(item)
-                i += 1
+                db.session.add(invoice)
+                db.session.flush()
 
-            db.session.flush()
-            invoice.calculate_totals()
+                i = 0
+                while f'desc_{i}' in request.form:
+                    qty = float(request.form.get(f'qty_{i}', 0))
+                    price = float(request.form.get(f'price_{i}', 0))
+                    item = InvoiceItem(
+                        invoice_id=invoice.id,
+                        description=request.form[f'desc_{i}'],
+                        quantity=qty,
+                        unit=request.form.get(f'unit_{i}', 'adet'),
+                        unit_price=price,
+                        total_price=qty * price
+                    )
+                    db.session.add(item)
+                    i += 1
 
-            _create_prepayment_if_requested(invoice, request.form, current_user.id)
+                db.session.flush()
+                invoice.calculate_totals()
 
-            db.session.commit()
+                _create_prepayment_if_requested(invoice, request.form, current_user.id)
+
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('Fatura oluşturulurken bir hata oluştu, hiçbir değişiklik kaydedilmedi. Girdiğiniz bilgileri kontrol edip tekrar deneyin.', 'danger')
+                return redirect(url_for('add_invoice_standalone'))
 
             flash(f'{invoice.display_no} başarıyla oluşturuldu!', 'success')
             return redirect(url_for('invoice_detail', id=invoice.id))
@@ -2796,6 +2924,17 @@ def register_routes(app):
     def add_visit():
         if request.method == 'POST':
             customer_id = int(request.form['customer_id'])
+
+            # Cift-tiklama korumasi: ayni musteri icin 30 saniye icinde
+            # tekrar ziyaret eklemeye calisilirsa mevcut olana yonlendir.
+            recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
+            recent_duplicate = CustomerVisit.query.filter(
+                CustomerVisit.customer_id == customer_id, CustomerVisit.created_at >= recent_cutoff
+            ).first()
+            if recent_duplicate:
+                flash('Bu ziyaret az önce zaten kaydedildi.', 'info')
+                return redirect(url_for('visits'))
+
             visit = CustomerVisit(
                 customer_id=customer_id,
                 user_id=current_user.id,
@@ -2973,68 +3112,69 @@ def register_routes(app):
             customer_names = request.form.getlist('customer_name[]')
             phones = request.form.getlist('phone[]')
             notes_list = request.form.getlist('notes[]')
-            
+
             if not customer_names or not any(customer_names):
                 flash('En az bir müşteri adı gereklidir.', 'danger')
                 return render_template('add_daily_report.html', today=today)
-            
-            reports_added = 0
-            
+
+            # Is 4: musteri secimi artik ZORUNLU - merkezi arama bileseninden
+            # (allowQuickAdd ile) gelen gercek bir customer_id olmadan hicbir
+            # DailyReport olusturulmuyor. Eskiden customer_id bos birakilip
+            # sadece serbest metin isimle kayit girilebiliyordu; bu kayitlar
+            # _last_contact_subquery()'nin customer_id filtresi yuzunden
+            # 60 gunluk takip dongusunu hic sifirlamiyordu (musteriyle
+            # gorusulmus olsa bile sistemde "gorusulmemis" gorunmeye devam
+            # ediyordu). Telefonla otomatik esleme/yeni musteri olusturma da
+            # kaldirildi - bu artik quick-add akisinin (/api/customers/
+            # quick-add) sorumlulugu, iki ayri musteri-olusturma yolu olmasin.
+            customer_ids = request.form.getlist('customer_id[]')
+            missing_customer_rows = []
             for i, customer_name in enumerate(customer_names):
                 customer_name = customer_name.strip()
                 if not customer_name:
                     continue
-                
-                phone = phones[i].strip() if i < len(phones) else ''
-                notes = notes_list[i].strip() if i < len(notes_list) else ''
-                statuses = request.form.getlist('status[]')
-                status = statuses[i].strip() if i < len(statuses) and statuses[i] else 'takip_edilecek'
-
-                # Önce formdan gelen customer_id'yi kontrol et
-                customer_ids = request.form.getlist('customer_id[]')
-                customer_id = int(customer_ids[i]) if i < len(customer_ids) and customer_ids[i] else None
-                
-                # Eğer customer_id yoksa, telefon ile müşteri bul
-                if not customer_id and phone:
-                    matched_customer = Customer.query.filter_by(phone=phone).first()
-                    if matched_customer:
-                        customer_id = matched_customer.id
-                
-                # Eğer telefon numarası farklı bir müşteriye aitse, yeni müşteri kaydet
-                if phone and customer_id:
-                    matched_customer = Customer.query.get(customer_id)
-                    if matched_customer:
-                        existing_name = matched_customer.display_name
-                        if customer_name.lower() != existing_name.lower():
-                            # Farklı müşteri - yeni kayıt oluştur
-                            name_parts = customer_name.split()
-                            first_name = name_parts[0] if name_parts else customer_name
-                            last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
-                            
-                            new_customer = Customer(
-                                musteri_no=_next_musteri_no(),
-                                first_name=first_name,
-                                last_name=last_name or None,
-                                phone=phone
-                            )
-                            db.session.add(new_customer)
-                            db.session.flush()
-                            customer_id = new_customer.id
-                            flash(f'Yeni müşteri kaydedildi: {customer_name} (Telefon: {phone})', 'success')
-                
-                report = DailyReport(
-                    report_date=report_date,
-                    customer_name=customer_name,
-                    phone=phone or None,
-                    notes=notes,
-                    status=status,
-                    user_id=current_user.id,
-                    customer_id=customer_id
+                customer_id_raw = customer_ids[i].strip() if i < len(customer_ids) else ''
+                if not customer_id_raw:
+                    missing_customer_rows.append(customer_name)
+            if missing_customer_rows:
+                flash(
+                    'Şu müşteriler için listeden seçim yapılmamış: ' + ', '.join(missing_customer_rows) +
+                    '. Lütfen arama sonuçlarından bir müşteri seçin veya "Yeni müşteri olarak ekle" ile ekleyin.',
+                    'danger'
                 )
-                db.session.add(report)
-                reports_added += 1
-            
-            db.session.commit()
+                return render_template('add_daily_report.html', today=today)
+
+            try:
+                reports_added = 0
+                for i, customer_name in enumerate(customer_names):
+                    customer_name = customer_name.strip()
+                    if not customer_name:
+                        continue
+
+                    phone = phones[i].strip() if i < len(phones) else ''
+                    notes = notes_list[i].strip() if i < len(notes_list) else ''
+                    statuses = request.form.getlist('status[]')
+                    status = statuses[i].strip() if i < len(statuses) and statuses[i] else 'takip_edilecek'
+                    customer_id = int(customer_ids[i])
+
+                    report = DailyReport(
+                        report_date=report_date,
+                        customer_name=customer_name,
+                        phone=phone or None,
+                        notes=notes,
+                        status=status,
+                        user_id=current_user.id,
+                        customer_id=customer_id
+                    )
+                    db.session.add(report)
+                    reports_added += 1
+
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('Günlük rapor eklenirken bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+                return redirect(url_for('add_daily_report'))
+
             flash(f'{reports_added} adet günlük rapor eklendi!', 'success')
             return redirect(url_for('daily_reports'))
         
@@ -3188,6 +3328,9 @@ def register_routes(app):
     @login_required
     def delete_payment(id):
         payment = Payment.query.get_or_404(id)
+        if not current_user.is_admin and payment.user_id != current_user.id:
+            flash('Bu ödeme kaydını silme yetkiniz yok.', 'danger')
+            return redirect(url_for('payments'))
         CustomerStatement.query.filter_by(payment_id=payment.id).delete()
         db.session.delete(payment)
         db.session.commit()
@@ -3425,12 +3568,26 @@ def register_routes(app):
             flash('Bu potansiyel müşteri zaten dönüştürülmüş.', 'warning')
             return redirect(url_for('potential_customers'))
 
+        # Customer modelinde sehir/sektor/ilgilenilen urun/kaynak icin ayri
+        # alan yok - onceden bu bilgiler donusturme sirasinda sessizce
+        # kayboluyordu. Customer.notes'a ekleniyor, boylece en azindan
+        # okunabilir sekilde korunuyorlar.
+        extra_bits = []
+        if pc.city:
+            extra_bits.append(f'Şehir: {pc.city}')
+        if pc.sector:
+            extra_bits.append(f'Sektör: {pc.sector}')
+        if pc.interested_products:
+            extra_bits.append(f'İlgilendiği Ürünler: {pc.interested_products}')
+        if pc.source:
+            extra_bits.append(f'Kaynak: {pc.source}')
+        extra_info = (' | '.join(extra_bits) + '\n') if extra_bits else ''
         customer = Customer(
             musteri_no=_next_musteri_no(),
             company_name=pc.company_name,
             phone=pc.phone,
             address=pc.address,
-            notes=f'Potansiyel müşteriden dönüştürüldü. {pc.notes or ""}'.strip(),
+            notes=f'Potansiyel müşteriden dönüştürüldü. {extra_info}{pc.notes or ""}'.strip(),
             status='aktif',
         )
         db.session.add(customer)

@@ -90,14 +90,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const container = document.getElementById('reportsContainer');
     const addButton = document.querySelector('.btn-add-row');
 
-    // Merkezi arama bileseni (Is 1) - bir satirdaki musteri arama alanini baglar
+    // Merkezi arama bileseni (Is 1) - bir satirdaki musteri arama alanini baglar.
+    // allowQuickAdd: true - artik ZORUNLU: eslesme yoksa "yeni musteri ekle"
+    // akisi devreye giriyor, boylece customer_id her zaman doluyor (eskiden
+    // burada quick-add kapaliydi, kullanici serbest metin yazip hicbir
+    // musteriye baglanmadan kaydedebiliyordu - 60 gunluk takip dongusu bu
+    // yuzden sifirlanmiyordu).
     function setupCustomerSearch(row) {
         const input = row.querySelector('.customer-search');
         const hiddenIdInput = row.querySelector('.customer-id');
         const resultsEl = row.querySelector('.customer-results');
         const phoneInput = row.querySelector('.phone-input');
         initCustomerSearchRow(input, hiddenIdInput, resultsEl, {
+            allowQuickAdd: true,
             onSelect: function (c) {
+                if (phoneInput && !phoneInput.value) phoneInput.value = c.phone || '';
+            },
+            onQuickAdd: function (c) {
                 if (phoneInput && !phoneInput.value) phoneInput.value = c.phone || '';
             }
         });
@@ -152,6 +161,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 e.target.closest('.report-row').remove();
             } else {
                 alert('En az bir görüşme eklemelisiniz!');
+            }
+        }
+    });
+
+    // Zorunlu musteri secimi (Is 4): musteri adi yazilmis ama listeden
+    // secilmemis/quick-add ile eklenmemis (customer_id hala bos) bir satir
+    // varsa gonderimi durdur - sunucu tarafi zaten ayni kontrolu yapiyor,
+    // burada erken ve net bir mesajla engellemek kullanici deneyimini
+    // iyilestiriyor.
+    document.getElementById('dailyReportForm').addEventListener('submit', function (e) {
+        const rows = container.querySelectorAll('.report-row');
+        for (const row of rows) {
+            const nameVal = row.querySelector('.customer-search').value.trim();
+            const idVal = row.querySelector('.customer-id').value.trim();
+            if (nameVal && !idVal) {
+                e.preventDefault();
+                alert('"' + nameVal + '" için listeden bir müşteri seçmediniz veya "Yeni müşteri olarak ekle" ile eklemediniz. Lütfen arama sonuçlarından seçim yapın.');
+                row.querySelector('.customer-search').focus();
+                return false;
             }
         }
     });
