@@ -26,9 +26,10 @@
                 <thead class="table-dark">
                     <tr>
                         <th>Müşteri</th>
-                        <th class="text-end">Toplam Faturalanan</th>
-                        <th class="text-end">Toplam Tahsil Edilen</th>
-                        <th class="text-end">Kalan Bakiye</th>
+                        <th class="text-end">Faturalanmış</th>
+                        <th class="text-end" title="Kazanılmış ama henüz fatura kesilmemiş tekliflerin toplam değeri">Faturalanmamış Kazanılan</th>
+                        <th class="text-end">Tahsil Edilen</th>
+                        <th class="text-end">Toplam Bakiye</th>
                         <th>İşlem</th>
                     </tr>
                 </thead>
@@ -37,6 +38,7 @@
                     <tr>
                         <td><a href="{{ url_for('customer_detail', id=r.customer.id) }}">{{ r.customer.display_name }}</a></td>
                         <td class="text-end">{{ "{:,.2f}".format(r.invoiced) }} ₺</td>
+                        <td class="text-end text-muted">{{ "{:,.2f}".format(r.uninvoiced_won) }} ₺</td>
                         <td class="text-end text-success">{{ "{:,.2f}".format(r.collected) }} ₺</td>
                         <td class="text-end">
                             <strong class="{{ 'text-danger' if r.balance > 0.01 else 'text-success' }}">
@@ -60,6 +62,7 @@
                 </tbody>
             </table>
         </div>
+        <p class="small text-muted mt-2 mb-0">Toplam Bakiye = Faturalanmış + Faturalanmamış Kazanılan Teklif − Tahsil Edilen.</p>
     </div>
 </div>
 {% else %}

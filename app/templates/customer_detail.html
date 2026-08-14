@@ -40,31 +40,40 @@
 
 <div class="row mb-4">
     <div class="col-12">
-        <div class="card shadow-sm {{ 'border-danger' if customer.balance > 0.01 else 'border-success' }}">
-            <div class="card-header {{ 'bg-danger text-white' if customer.balance > 0.01 else 'bg-success text-white' }}">
+        <div class="card shadow-sm {{ 'border-danger' if balance_info.balance > 0.01 else 'border-success' }}">
+            <div class="card-header {{ 'bg-danger text-white' if balance_info.balance > 0.01 else 'bg-success text-white' }}">
                 <i class="bi bi-wallet2"></i> Cari Hesap
             </div>
             <div class="card-body">
                 <div class="row text-center">
-                    <div class="col-md-4">
-                        <h6 class="text-muted mb-1">Toplam Faturalanan</h6>
-                        <h4>{{ "{:,.2f}".format(customer.total_invoiced) }} ₺</h4>
+                    <div class="col-md-3">
+                        <h6 class="text-muted mb-1">Faturalanmış</h6>
+                        <h5>{{ "{:,.2f}".format(balance_info.invoiced) }} ₺</h5>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-3">
+                        <h6 class="text-muted mb-1" title="Kazanılmış ama henüz fatura kesilmemiş tekliflerin toplam değeri">
+                            Faturalanmamış Kazanılan
+                        </h6>
+                        <h5>{{ "{:,.2f}".format(balance_info.uninvoiced_won) }} ₺</h5>
+                    </div>
+                    <div class="col-md-3">
                         <h6 class="text-muted mb-1">Toplam Tahsil Edilen</h6>
-                        <h4 class="text-success">{{ "{:,.2f}".format(customer.total_collected) }} ₺</h4>
+                        <h5 class="text-success">{{ "{:,.2f}".format(balance_info.collected) }} ₺</h5>
                     </div>
-                    <div class="col-md-4">
-                        <h6 class="text-muted mb-1">Kalan Bakiye</h6>
-                        <h4 class="{{ 'text-danger' if customer.balance > 0.01 else 'text-success' }}">
-                            {{ "{:,.2f}".format(customer.balance) }} ₺
-                            {% if customer.balance > 0.01 %}
+                    <div class="col-md-3">
+                        <h6 class="text-muted mb-1">Toplam Bakiye</h6>
+                        <h4 class="{{ 'text-danger' if balance_info.balance > 0.01 else 'text-success' }}">
+                            {{ "{:,.2f}".format(balance_info.balance) }} ₺
+                            {% if balance_info.balance > 0.01 %}
                             <span class="badge bg-danger">Alacaklıyız</span>
                             {% else %}
                             <span class="badge bg-success">Tamam</span>
                             {% endif %}
                         </h4>
                     </div>
+                </div>
+                <div class="small text-muted mt-2 text-center">
+                    Faturalanmış + Faturalanmamış Kazanılan Teklif − Tahsil Edilen = Toplam Bakiye
                 </div>
             </div>
         </div>
@@ -280,7 +289,8 @@
                                 <tfoot class="table-light">
                                     <tr><td colspan="4"><strong>Toplam Borç:</strong></td><td><strong class="text-danger">{{ "{:,.2f}".format(total_debit) }} ₺</strong></td></tr>
                                     <tr><td colspan="4"><strong>Toplam Alacak:</strong></td><td><strong class="text-success">{{ "{:,.2f}".format(total_credit) }} ₺</strong></td></tr>
-                                    <tr class="table-warning"><td colspan="4"><strong>Bakiye:</strong></td><td><strong>{{ "{:,.2f}".format(total_debit - total_credit) }} ₺</strong></td></tr>
+                                    <tr class="table-warning"><td colspan="4"><strong>Ekstre Bakiyesi:</strong></td><td><strong>{{ "{:,.2f}".format(total_debit - total_credit) }} ₺</strong></td></tr>
+                                    <tr><td colspan="5"><small class="text-muted">Bu bakiye sadece aşağıdaki ekstre kayıtlarından (borç/alacak) hesaplanır - sayfanın üstündeki "Toplam Bakiye" güncel/kapsamlı hesaplamadır, esas alınmalıdır.</small></td></tr>
                                 </tfoot>
                             </table>
                         </div>

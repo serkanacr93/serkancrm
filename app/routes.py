@@ -16,6 +16,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 from flask_wtf.csrf import generate_csrf
 
+def calculate_customer_balance(customer):
+    """Cari Hesap Birlestirme: Faturalanmis + Faturalanmamis Kazanilan
+    Teklif - Tahsilat = Toplam Bakiye kirilimini dondurur. Customer.
+    total_invoiced/total_uninvoiced_won/total_collected/balance
+    property'leriyle (app/models.py) AYNI mantigi sarar - customer_detail()
+    ve Cari Hesap Ozeti'nin bulk GROUP BY hesaplamasi (cari_hesap_ozeti())
+    hep bu tek tanima dayanir, ikinci/farkli bir hesaplama yolu yok.
+    customer: zaten yuklenmis bir Customer instance'i (tekrar sorgu atmaz)."""
+    return {
+        'invoiced': customer.total_invoiced,
+        'uninvoiced_won': customer.total_uninvoiced_won,
+        'collected': customer.total_collected,
+        'balance': customer.balance,
+    }
+
 def _customers_with_activity_subquery():
     """'Islem yapilmis' musteri id'lerinin birlesimi - sadece Deal (teklif)
     degil, DailyReport (gorusme/rapor), Payment, Invoice, CustomerVisit
@@ -641,17 +656,34 @@ def register_routes(app):
     @login_required
     def cari_hesap_ozeti():
         """Is F: musteri bazli cari hesap ozeti. Performans icin (1600+ musteri)
-        Customer.total_invoiced/total_collected property'lerini tek tek her
-        musteride cagirmak yerine (N+1 sorgu), toplam tutarlari 2 GROUP BY
-        sorgusuyla topluca cekip Python tarafinda esler - sonuc matematiksel
-        olarak Customer property'leriyle birebir ayni (ayni Invoice/Payment
-        kayitlarindan, canli hesaplanir, onbelleklenmez)."""
+        Customer.total_invoiced/total_uninvoiced_won/total_collected
+        property'lerini tek tek her musteride cagirmak yerine (N+1 sorgu),
+        toplam tutarlari 3 GROUP BY sorgusuyla topluca cekip Python
+        tarafinda esler - sonuc matematiksel olarak Customer property'leriyle
+        (ve dolayisiyla Musteri Detayi sayfasiyla) birebir ayni (ayni Invoice/
+        Deal/Payment kayitlarindan, canli hesaplanir, onbelleklenmez).
+
+        Cari Hesap Birlestirme duzeltmesi: Bakiye artik sadece faturalanmis
+        tutarlari degil, kazanilmis (stage='kazanilan') ama HENUZ fatura
+        kesilmemis tekliflerin degerini de iceriyor - onceden bu tutar hic
+        gorunmuyordu, oysa canli veride kazanilan tekliflerin buyuk kismi
+        henuz faturalanmamisti (bkz. Customer.total_uninvoiced_won)."""
         filter_type = request.args.get('filter', '')
 
         invoiced_rows = db.session.query(
             Invoice.customer_id, db.func.sum(Invoice.total)
         ).filter(Invoice.type == 'fatura').group_by(Invoice.customer_id).all()
         invoiced_map = {cid: total or 0 for cid, total in invoiced_rows}
+
+        invoiced_deal_ids_subq = db.session.query(Invoice.deal_id).filter(
+            Invoice.type == 'fatura', Invoice.deal_id.isnot(None)
+        )
+        uninvoiced_won_rows = db.session.query(
+            Deal.customer_id, db.func.sum(Deal.value)
+        ).filter(
+            Deal.stage == 'kazanilan', ~Deal.id.in_(invoiced_deal_ids_subq)
+        ).group_by(Deal.customer_id).all()
+        uninvoiced_won_map = {cid: total or 0 for cid, total in uninvoiced_won_rows}
 
         collected_rows = db.session.query(
             Payment.customer_id, db.func.sum(Payment.amount)
@@ -662,9 +694,13 @@ def register_routes(app):
         rows = []
         for c in customers:
             invoiced = invoiced_map.get(c.id, 0)
+            uninvoiced_won = uninvoiced_won_map.get(c.id, 0)
             collected = collected_map.get(c.id, 0)
-            balance = invoiced - collected
-            rows.append({'customer': c, 'invoiced': invoiced, 'collected': collected, 'balance': balance})
+            balance = invoiced + uninvoiced_won - collected
+            rows.append({
+                'customer': c, 'invoiced': invoiced, 'uninvoiced_won': uninvoiced_won,
+                'collected': collected, 'balance': balance
+            })
 
         if filter_type == 'borclu':
             rows = [r for r in rows if r['balance'] > 0.01]
@@ -830,6 +866,7 @@ def register_routes(app):
     @login_required
     def customer_detail(id):
         customer = Customer.query.get_or_404(id)
+        balance_info = calculate_customer_balance(customer)
         deals = Deal.query.filter_by(customer_id=id).options(
             joinedload(Deal.production).joinedload(Production.shipments)
         ).order_by(Deal.created_at.desc()).all()
@@ -871,6 +908,7 @@ def register_routes(app):
 
         return render_template('customer_detail.html', customer=customer, deals=deals,
                              statements=statements, total_debit=total_debit, total_credit=total_credit,
+                             balance_info=balance_info,
                              daily_reports=daily_reports, pending_productions=pending_productions,
                              last_contact_date=last_contact_date, days_since_contact=days_since_contact)
 

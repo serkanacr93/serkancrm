@@ -125,6 +125,25 @@ class Customer(db.Model):
         return sum(inv.total for inv in Invoice.query.filter_by(customer_id=self.id, type='fatura').all())
 
     @property
+    def total_uninvoiced_won(self):
+        """Cari Hesap Birlestirme duzeltmesi: kazanilmis (stage='kazanilan')
+        ama bu teklif icin HENUZ hicbir fatura kesilmemis tekliflerin toplam
+        (KDV dahil) degeri. Onceden bu tutar Cari Hesap Ozeti'nde HIC
+        gorunmuyordu (sadece Invoice/Payment'a bakiyordu) - canli veride
+        kazanilan tekliflerin buyuk kismi (30'da 22'si) henuz faturalanmamis
+        oldugu icin bu, musterinin gercek borcunun onemli bir kismini
+        gostermiyordu."""
+        invoiced_deal_ids = db.session.query(Invoice.deal_id).filter(
+            Invoice.type == 'fatura', Invoice.deal_id.isnot(None)
+        )
+        return sum(
+            d.value for d in Deal.query.filter(
+                Deal.customer_id == self.id, Deal.stage == 'kazanilan',
+                ~Deal.id.in_(invoiced_deal_ids)
+            ).all()
+        )
+
+    @property
     def total_collected(self):
         """Musteriye ait, 'odendi' durumundaki TUM Payment kayitlarinin toplami
         (fatura/teklif baglantisindan bagimsiz - gercek tahsil edilen nakit)."""
@@ -132,9 +151,13 @@ class Customer(db.Model):
 
     @property
     def balance(self):
-        """Kalan Bakiye = Faturalanan - Tahsil Edilen. Pozitif: musteriden
-        alacagimiz var. Sifir/negatif: odeme tamam ya da fazla odenmis."""
-        return self.total_invoiced - self.total_collected
+        """Kalan Bakiye = Faturalanan + Faturalanmamis Kazanilan Teklif -
+        Tahsil Edilen. Pozitif: musteriden alacagimiz var. Sifir/negatif:
+        odeme tamam ya da fazla odenmis. Bu, Cari Hesap Ozeti sayfasindaki
+        toplu (GROUP BY) hesaplamayla AYNI mantigi kullanir (bkz.
+        cari_hesap_ozeti() route'u) - iki sayfa artik hep ayni bakiyeyi
+        gosterir."""
+        return self.total_invoiced + self.total_uninvoiced_won - self.total_collected
 
     def __repr__(self):
         return f'<Customer {self.display_name}>'
