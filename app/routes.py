@@ -1208,10 +1208,31 @@ def register_routes(app):
                 return q.filter(Deal.stage == 'kaybedilen')
             return q  # 'tumu'
 
-        tab_counts = {
-            t: apply_tab(base_query, t).count()
-            for t in ('aktif', 'kazanilan', 'kaybedilen', 'tumu')
+        # Performans: 4 bagimsiz .count() sorgusu (Neon RTT'si nedeniyle 4
+        # ayri round-trip) yerine scalar_subquery ile TEK sorguda (bkz.
+        # dashboard/musteri listesi/uretim listesi - ayni desen).
+        tab_count_filters = {
+            'aktif': ~Deal.stage.in_(RESOLVED_STAGES),
+            'kazanilan': Deal.stage == 'kazanilan',
+            'kaybedilen': Deal.stage == 'kaybedilen',
         }
+
+        def count_query(t):
+            q = db.session.query(db.func.count(Deal.id)).select_from(Deal)
+            if not current_user.is_admin:
+                q = q.filter(Deal.user_id == current_user.id)
+            if t in tab_count_filters:
+                q = q.filter(tab_count_filters[t])
+            return q.scalar_subquery()
+
+        row = db.session.query(
+            count_query('aktif').label('aktif'),
+            count_query('kazanilan').label('kazanilan'),
+            count_query('kaybedilen').label('kaybedilen'),
+            count_query('tumu').label('tumu'),
+        ).one()
+        tab_counts = {'aktif': row.aktif, 'kazanilan': row.kazanilan,
+                      'kaybedilen': row.kaybedilen, 'tumu': row.tumu}
 
         query = apply_tab(base_query, tab)
         if search:
@@ -1377,6 +1398,7 @@ def register_routes(app):
 
             DealItem.query.filter_by(deal_id=id).delete()
             i = 0
+            new_items = []
             while f'desc_{i}' in request.form:
                 qty = float(request.form[f'qty_{i}'])
                 price = float(request.form[f'price_{i}'])
@@ -1391,10 +1413,13 @@ def register_routes(app):
                                teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
                                deal_id=deal.id)
                 db.session.add(item)
+                new_items.append(item)
                 i += 1
-            
+
             db.session.flush()
-            deal.calculate_totals()
+            # new_items explicit veriliyor - performans denetimi (bkz. add_deal,
+            # commit 153bc85): self.items okumak gereksiz bir SELECT daha acardi.
+            deal.calculate_totals(items=new_items)
             db.session.commit()
             flash('Teklif güncellendi!', 'success')
             return redirect(url_for('deal_detail', id=id))
@@ -1890,7 +1915,14 @@ def register_routes(app):
         sekme filtresini paylasirlar, boylece ekranda gorunen ile
         aktarilan HER ZAMAN birebir ayni satirlari icerir (Is 2)."""
         latest_status_subq = _latest_shipment_status_subq()
-        query = Production.query.options(joinedload(Production.deal).joinedload(Deal.customer))
+        # Performans: production.items (specs_missing/uretim_items/gecen_gun
+        # gibi sablon icinde HER satirda okunan property'ler icin) burada
+        # joinedload edilmezse her satir kendi ayri SELECT'ini tetikliyordu
+        # (N+1 - 25 satirlik bir listede +25 round-trip'e mal oluyordu).
+        query = Production.query.options(
+            joinedload(Production.deal).joinedload(Deal.customer),
+            joinedload(Production.items),
+        )
         if tab in ('sevkiyatta', 'tamamlandi'):
             query = query.outerjoin(latest_status_subq, Production.id == latest_status_subq.c.production_id)
             joined = True
@@ -2982,6 +3014,11 @@ def register_routes(app):
             ))
         if type_filter:
             query = query.filter(Invoice.type == type_filter)
+        # Performans: sablon her satirda inv.customer.display_name VE (fatura
+        # tipi icin) inv.payment_status'u (self.payments okur) kullaniyor -
+        # eager load olmadan bu, sayfa basina 2N ekstra round-trip'e mal
+        # oluyordu (50 satirlik bir sayfada +~17 sorgu olculdu).
+        query = query.options(joinedload(Invoice.customer), joinedload(Invoice.payments))
         pagination = query.order_by(Invoice.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
         invoices = pagination.items
         return render_template('invoices.html', invoices=invoices, search=search, type_filter=type_filter, pagination=pagination)
@@ -3510,12 +3547,17 @@ def register_routes(app):
         if status_filter:
             query = query.filter(Payment.status == status_filter)
         
+        # Performans: sablon her satirda payment.customer/.invoice/.deal
+        # okuyor - eager load olmadan N+1'e mal oluyordu.
+        query = query.options(joinedload(Payment.customer), joinedload(Payment.invoice), joinedload(Payment.deal))
         payments = query.order_by(Payment.payment_date.desc()).all()
 
         # Tahsilat ozeti - sadece 'fatura' tipi belgeler uzerinden (irsaliyenin
         # tahsilati olmaz). Invoice.paid_amount/remaining_amount Payment.status
         # == 'odendi' olan kayitlar uzerinden hesaplanir (bkz. models.py).
-        all_invoices = Invoice.query.filter_by(type='fatura').all()
+        # Performans: paid_amount self.payments okuyor - eager load olmadan
+        # her fatura icin ayri bir SELECT (N+1) tetikliyordu.
+        all_invoices = Invoice.query.filter_by(type='fatura').options(joinedload(Invoice.payments)).all()
         total_invoiced = sum(inv.total for inv in all_invoices)
         total_collected = sum(inv.paid_amount for inv in all_invoices)
         total_outstanding = total_invoiced - total_collected
@@ -3698,14 +3740,18 @@ def register_routes(app):
             PotentialCustomer.city.isnot(None), PotentialCustomer.city != ''
         ).distinct().order_by(PotentialCustomer.city).all()]
 
+        # Performans: eskiden 4 ayri SUM sorgusuyla hesaplanan today_used/
+        # today_new/month/last_90_days artik combined_usage_stats() ile TEK
+        # round-trip'te geliyor (bkz. denetim, /potential-customers 10->7 sorgu).
         places_config = places_search.get_config()
+        usage = places_search.combined_usage_stats()
         places_stats = {
             'status': places_search.get_status(places_config),
-            'today_used': places_search.todays_request_count(),
+            'today_used': usage['today_used'],
             'today_limit': places_search.DAILY_REQUEST_LIMIT,
-            'today_new': places_search.todays_new_companies(),
-            'month': places_search.month_stats(),
-            'last_90_days': places_search.last_90_days_stats(),
+            'today_new': usage['today_new'],
+            'month': usage['month'],
+            'last_90_days': usage['last_90_days'],
             'recent_logs': PlacesSearchLog.query.order_by(PlacesSearchLog.run_at.desc()).limit(5).all(),
         }
 

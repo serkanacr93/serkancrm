@@ -124,6 +124,48 @@ def last_90_days_stats():
             'percent': round(min(cost / COST_90_DAY_BUDGET * 100, 100), 1)}
 
 
+def combined_usage_stats():
+    """todays_request_count/todays_new_companies/month_stats/last_90_days_stats
+    ile AYNI degerleri, TEK sorguda (conditional SUM) hesaplar - Neon'a 4 ayri
+    round-trip yerine 1 round-trip (bkz. potential_customers() route'u,
+    performans denetimi). Diger cagri yerleri (varsa) eski, bagimsiz
+    fonksiyonlari kullanmaya devam edebilir - bu sadece ek/opsiyonel bir
+    toplu hesaplama yolu."""
+    today_start, today_end = _tr_day_bounds()
+    month_start, month_end = _tr_month_bounds()
+    last_90_start = datetime.utcnow() - timedelta(days=90)
+
+    row = db.session.query(
+        db.func.coalesce(db.func.sum(
+            db.case((db.and_(PlacesSearchLog.run_at >= today_start, PlacesSearchLog.run_at < today_end),
+                      PlacesSearchLog.request_count), else_=0)
+        ), 0).label('today_requests'),
+        db.func.coalesce(db.func.sum(
+            db.case((db.and_(PlacesSearchLog.run_at >= today_start, PlacesSearchLog.run_at < today_end),
+                      PlacesSearchLog.new_companies), else_=0)
+        ), 0).label('today_new'),
+        db.func.coalesce(db.func.sum(
+            db.case((db.and_(PlacesSearchLog.run_at >= month_start, PlacesSearchLog.run_at < month_end),
+                      PlacesSearchLog.request_count), else_=0)
+        ), 0).label('month_requests'),
+        db.func.coalesce(db.func.sum(
+            db.case((PlacesSearchLog.run_at >= last_90_start, PlacesSearchLog.request_count), else_=0)
+        ), 0).label('last_90_requests'),
+    ).one()
+
+    month_cost = round(row.month_requests * COST_PER_REQUEST, 2)
+    last_90_cost = round(row.last_90_requests * COST_PER_REQUEST, 2)
+    return {
+        'today_used': row.today_requests,
+        'today_new': row.today_new,
+        'month': {'requests': row.month_requests, 'cost': month_cost},
+        'last_90_days': {
+            'requests': row.last_90_requests, 'cost': last_90_cost, 'budget': COST_90_DAY_BUDGET,
+            'percent': round(min(last_90_cost / COST_90_DAY_BUDGET * 100, 100), 1),
+        },
+    }
+
+
 def get_status(config=None):
     config = config or get_config()
     if not config.enabled:
