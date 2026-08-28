@@ -147,7 +147,12 @@
                     <tr><th width="100">Müşteri No:</th><td>{{ customer.musteri_no or '-' }}</td></tr>
                     <tr><th>Durum:</th><td><span class="badge bg-{{ 'success' if customer.status == 'aktif' else 'secondary' }}">{{ customer.status }}</span></td></tr>
                     <tr><th>E-posta:</th><td>{{ customer.email or '-' }}</td></tr>
-                    <tr><th>Telefon:</th><td>{{ customer.phone or '-' }}</td></tr>
+                    <tr><th>Telefon:</th><td>
+                        {{ customer.phone or '-' }}
+                        {% if customer.phone %}
+                        <a href="#" class="whatsapp-btn text-success ms-1" data-customer-id="{{ customer.id }}" data-customer-name="{{ customer.display_name }}" data-customer-phone="{{ customer.phone }}" title="WhatsApp Gönder"><i class="bi bi-whatsapp"></i></a>
+                        {% endif %}
+                    </td></tr>
                     <tr><th>Kayıt:</th><td>{{ customer.created_at.strftime('%d.%m.%Y') }}</td></tr>
                 </table>
             </div>

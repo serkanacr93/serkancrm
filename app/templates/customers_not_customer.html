@@ -59,7 +59,12 @@
                                 {{ customer.first_name }} {{ customer.last_name }}
                                 {% endif %}
                             </td>
-                            <td>{{ customer.phone or '-' }}</td>
+                            <td>
+                                {{ customer.phone or '-' }}
+                                {% if customer.phone %}
+                                <a href="#" class="whatsapp-btn text-success ms-1" data-customer-id="{{ customer.id }}" data-customer-name="{{ customer.display_name }}" data-customer-phone="{{ customer.phone }}" title="WhatsApp Gönder"><i class="bi bi-whatsapp"></i></a>
+                                {% endif %}
+                            </td>
                             <td>{{ customer.updated_at.strftime('%d.%m.%Y %H:%M') if customer.updated_at else '-' }}</td>
                         </tr>
                         {% endfor %}

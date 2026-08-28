@@ -11,7 +11,9 @@ from io import BytesIO
 from werkzeug.utils import secure_filename
 import openpyxl
 import os
+import re
 import uuid
+from urllib.parse import quote as _url_quote
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 from flask_wtf.csrf import generate_csrf
@@ -136,6 +138,21 @@ def _safe_filename_part(text):
     if not text:
         return 'Musteri'
     return text.translate(_TR_FILENAME_MAP)
+
+def _normalize_phone_for_whatsapp(phone):
+    """Turkce telefon formatlarini ('+90 533 721 83 26', '05397203547',
+    '0 549 265 44 49', '5395171392' gibi) wa.me'nin bekledigi ulke kodlu,
+    ayracsiz haline ('905397203547') cevirir (Is 5)."""
+    if not phone:
+        return None
+    digits = re.sub(r'\D', '', phone)
+    if digits.startswith('90') and len(digits) == 12:
+        return digits
+    if digits.startswith('0') and len(digits) == 11:
+        return '90' + digits[1:]
+    if len(digits) == 10:
+        return '90' + digits
+    return digits or None
 
 def _customer_full_name(customer):
     """Musterinin tam adini (kisaltmadan), gundelik hitaplardan (Abi/Amca/
@@ -896,6 +913,39 @@ def register_routes(app):
             return redirect(url_for('customers'))
         
         return render_template('import_customers.html')
+
+    @app.route('/customers/<int:id>/whatsapp-send', methods=['POST'])
+    @login_required
+    def customer_whatsapp_send(id):
+        """Is 5: WhatsApp modalindaki 'WhatsApp'ta Ac' butonu bu endpoint'e
+        AJAX POST atar - telefonu normallestirip wa.me linkini doner VE
+        AYNI ANDA otomatik bir DailyReport kaydi olusturur ('WhatsApp mesaji
+        gonderildi: ...' notuyla), boylece 60 gunluk takip sayaci
+        (_last_contact_subquery DailyReport.report_date'i de kaynak olarak
+        kullanir) sifirlanmis olur - ayri bir 'son irtibat' alani/mantigi
+        ACILMAZ, mevcut takip mekanizmasi otomatik faydalanir."""
+        customer = Customer.query.get_or_404(id)
+        message = request.form.get('message', '').strip()
+        if not message:
+            return jsonify({'error': 'Mesaj boş olamaz.'}), 400
+        normalized = _normalize_phone_for_whatsapp(customer.phone)
+        if not normalized:
+            return jsonify({'error': 'Bu müşterinin telefon numarası kayıtlı değil.'}), 400
+
+        report = DailyReport(
+            report_date=datetime.now().date(),
+            customer_name=customer.display_name,
+            phone=customer.phone,
+            notes=f'WhatsApp mesajı gönderildi: {message[:50]}',
+            status='tamamlandi',
+            user_id=current_user.id,
+            customer_id=customer.id,
+        )
+        db.session.add(report)
+        db.session.commit()
+
+        wa_url = f'https://wa.me/{normalized}?text={_url_quote(message)}'
+        return jsonify({'wa_url': wa_url})
 
     @app.route('/customers/<int:id>')
     @login_required

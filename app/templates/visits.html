@@ -34,7 +34,12 @@
                                 <strong>{{ visit.customer.display_name }}</strong>
                             </a>
                         </td>
-                        <td>{{ visit.customer.phone or '-' }}</td>
+                        <td>
+                            {{ visit.customer.phone or '-' }}
+                            {% if visit.customer.phone %}
+                            <a href="#" class="whatsapp-btn text-success ms-1" data-customer-id="{{ visit.customer.id }}" data-customer-name="{{ visit.customer.display_name }}" data-customer-phone="{{ visit.customer.phone }}" title="WhatsApp Gönder"><i class="bi bi-whatsapp"></i></a>
+                            {% endif %}
+                        </td>
                         <td>
                             <span class="badge bg-{{ 'primary' if visit.visit_type == 'ziyaret' else 'info' if visit.visit_type == 'gorisme' else 'warning' }}">
                                 {{ visit.visit_type }}

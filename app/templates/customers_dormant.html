@@ -42,7 +42,12 @@
                                 {% endif %}
                             </a>
                         </td>
-                        <td>{{ row.customer.company_phone or row.customer.phone or '-' }}</td>
+                        <td>
+                            {{ row.customer.company_phone or row.customer.phone or '-' }}
+                            {% if row.customer.phone %}
+                            <a href="#" class="whatsapp-btn text-success ms-1" data-customer-id="{{ row.customer.id }}" data-customer-name="{{ row.customer.display_name }}" data-customer-phone="{{ row.customer.phone }}" title="WhatsApp Gönder"><i class="bi bi-whatsapp"></i></a>
+                            {% endif %}
+                        </td>
                         <td>{{ row.last_deal_at.strftime('%d.%m.%Y') }}</td>
                         <td><span class="badge bg-{{ 'danger' if row.days_inactive >= 180 else 'warning text-dark' }}">{{ row.days_inactive }} gün</span></td>
                         <td>
