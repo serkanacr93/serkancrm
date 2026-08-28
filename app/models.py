@@ -381,6 +381,14 @@ class Production(db.Model):
         return max(self.shipments, key=lambda s: s.created_at) if self.shipments else None
 
     @property
+    def is_delivered(self):
+        """'sevkiyat' asamasindaki bir is emrinin en son sevkiyati fiilen
+        teslim edilmis mi - Uretim Listesi'ndeki 'Sevkiyatta'/'Tamamlandi'
+        sekmelerini ayirt etmek icin kullanilir (Is 3)."""
+        latest = self.latest_shipment
+        return self.status == 'sevkiyat' and latest is not None and latest.status == 'teslim_edildi'
+
+    @property
     def uretim_items(self):
         return [i for i in self.items if i.urun_tipi != 'ticaret']
 
@@ -396,6 +404,32 @@ class Production(db.Model):
         Bu, o durumu goze carpar hale getirmek icin kullanilir. Is 4: 'ticaret'
         tipi kalemler atolyede uretilmedigi icin bu kontrolun disinda tutulur."""
         return any(not item.kagit_tipi or not item.olcu for item in self.uretim_items)
+
+    @property
+    def gecen_gun(self):
+        """Is emrinin olusturulmasindan (Production.created_at) bugune kadar
+        gecen gun sayisi - Uretim Listesi'ndeki 'Gecen Gun' sutunu."""
+        return (datetime.utcnow().date() - self.created_at.date()).days
+
+    @property
+    def termin_durumu(self):
+        """due_date'e gore 'kirmizi' (termin asildi), 'sari' (gecen sure,
+        toplam sureye orantiyla %70'i asti), 'normal' veya None (due_date
+        girilmemis) dondurur. due_date yoksa renksiz sadece Gecen Gun
+        sayisi gosterilir (Uretim Listesi Is 1)."""
+        if not self.due_date:
+            return None
+        today = datetime.utcnow().date()
+        created = self.created_at.date()
+        if today > self.due_date:
+            return 'kirmizi'
+        total_window = (self.due_date - created).days
+        if total_window <= 0:
+            return 'kirmizi'
+        elapsed = (today - created).days
+        if elapsed / total_window >= 0.7:
+            return 'sari'
+        return 'normal'
 
 class ProductionItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)

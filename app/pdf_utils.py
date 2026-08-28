@@ -974,7 +974,58 @@ def generate_statement_pdf(customer, statements, total_debit, total_credit):
         elements.append(table)
     else:
         elements.append(Paragraph("<i>Henüz işlem bulunmuyor.</i>", turkish_style))
-    
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+def generate_production_list_pdf(productions, tab_label):
+    """Uretim Listesi'nin o an ekranda gorunen (sekme ile filtrelenmis)
+    halini PDF olarak disa aktarir - production_export_pdf() route'u
+    tarafindan cagrilir, ekranda gorunenle BIREBIR ayni satirlari icerir
+    (Is 2)."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+
+    styles = getSampleStyleSheet()
+    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=8)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Vera-Bold', fontSize=15)
+
+    elements = []
+    elements.append(Paragraph(f"ÜRETİM LİSTESİ — {tab_label}", title_style))
+    elements.append(Paragraph(f"Rapor Tarihi: {datetime.now().strftime('%d.%m.%Y %H:%M')} · Toplam: {len(productions)} kayıt", turkish_style))
+    elements.append(Spacer(1, 5*mm))
+
+    if productions:
+        data = [['#', 'Fırsat', 'Müşteri', 'Durum', 'Başlangıç', 'Bitiş', 'Geçen Gün', 'İş Emri']]
+        for p in productions:
+            data.append([
+                str(p.id),
+                Paragraph(_clean_for_pdf(p.deal.title) if p.deal else '-', turkish_style),
+                Paragraph(_clean_for_pdf(p.deal.customer.display_name) if p.deal and p.deal.customer else '-', turkish_style),
+                p.stage_label,
+                p.start_date.strftime('%d.%m.%Y') if p.start_date else '-',
+                p.end_date.strftime('%d.%m.%Y') if p.end_date else '-',
+                str(p.gecen_gun),
+                'Eksik Bilgi' if p.specs_missing else 'Tam',
+            ])
+        table = Table(data, colWidths=[1*cm, 4.5*cm, 4*cm, 2*cm, 2.2*cm, 2.2*cm, 2*cm, 2.5*cm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Vera'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('ALIGN', (3, 0), (-1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        elements.append(table)
+    else:
+        elements.append(Paragraph("<i>Bu sekmede kayıt bulunmuyor.</i>", turkish_style))
+
     doc.build(elements)
     buffer.seek(0)
     return buffer

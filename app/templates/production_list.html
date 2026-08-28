@@ -5,7 +5,43 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-gear"></i> Üretim Listesi</h2>
+    <div class="btn-group">
+        <a href="{{ url_for('production_export_excel', tab=tab) }}" class="btn btn-outline-success">
+            <i class="bi bi-file-earmark-excel"></i> Excel'e Aktar
+        </a>
+        <a href="{{ url_for('production_export_pdf', tab=tab) }}" class="btn btn-outline-danger">
+            <i class="bi bi-file-earmark-pdf"></i> PDF Yazdır
+        </a>
+    </div>
 </div>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if tab == 'uretimde' }}" href="{{ url_for('production_list', tab='uretimde') }}">
+            Üretimde <span class="badge bg-secondary">{{ tab_counts.uretimde }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if tab == 'hazir' }}" href="{{ url_for('production_list', tab='hazir') }}">
+            Hazır <span class="badge bg-secondary">{{ tab_counts.hazir }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if tab == 'sevkiyatta' }}" href="{{ url_for('production_list', tab='sevkiyatta') }}">
+            Sevkiyatta <span class="badge bg-secondary">{{ tab_counts.sevkiyatta }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if tab == 'tamamlandi' }}" href="{{ url_for('production_list', tab='tamamlandi') }}">
+            Tamamlandı <span class="badge bg-secondary">{{ tab_counts.tamamlandi }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if tab == 'tumu' }}" href="{{ url_for('production_list', tab='tumu') }}">
+            Tümü <span class="badge bg-secondary">{{ tab_counts.tumu }}</span>
+        </a>
+    </li>
+</ul>
 
 {% if productions %}
 <div class="table-responsive">
@@ -18,6 +54,7 @@
                 <th>Durum</th>
                 <th>Başlangıç</th>
                 <th>Bitiş</th>
+                <th>Geçen Gün</th>
                 <th>İş Emri</th>
                 <th>İşlem</th>
             </tr>
@@ -35,6 +72,22 @@
                 </td>
                 <td>{{ p.start_date.strftime('%d.%m.%Y') if p.start_date else '-' }}</td>
                 <td>{{ p.end_date.strftime('%d.%m.%Y') if p.end_date else '-' }}</td>
+                <td>
+                    {% set td = p.termin_durumu %}
+                    {% if td == 'kirmizi' %}
+                    <span class="badge bg-danger" title="Teslim tarihi geçti">
+                        {{ p.gecen_gun }} gün · Termin Aşıldı
+                    </span>
+                    {% elif td == 'sari' %}
+                    <span class="badge bg-warning text-dark" title="Termin süresinin %70'i geçti">
+                        {{ p.gecen_gun }} gün
+                    </span>
+                    {% elif td == 'normal' %}
+                    <span>{{ p.gecen_gun }} gün</span>
+                    {% else %}
+                    <span class="text-muted">{{ p.gecen_gun }} gün</span>
+                    {% endif %}
+                </td>
                 <td>
                     {% if p.specs_missing %}
                     <span class="badge bg-warning text-dark" title="Kağıt Cinsi / Ölçü gibi bilgiler eksik">
@@ -56,7 +109,7 @@
 </div>
 {% else %}
 <div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> Henüz üretim bulunmuyor.
+    <i class="bi bi-info-circle"></i> Bu sekmede üretim bulunmuyor.
 </div>
 {% endif %}
 {% endblock %}

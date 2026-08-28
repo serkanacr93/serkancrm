@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, _clean_for_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter
 from app.tcmb import fetch_tcmb_rate
@@ -1753,12 +1753,142 @@ def register_routes(app):
         buffer.seek(0)
         return send_file(buffer, as_attachment=True, download_name=f'teklifler_{datetime.now().strftime("%Y%m%d")}.xlsx')
 
+    def _latest_shipment_status_subq():
+        """Her production_id icin EN SON Shipment'in status'unu dondurur -
+        Uretim Listesi'ndeki 'Sevkiyatta' (henuz teslim edilmemis) ile
+        'Tamamlandi' (teslim edilmis) sekmelerini ayirt etmek icin (Is 3)."""
+        latest_at = db.session.query(
+            Shipment.production_id,
+            db.func.max(Shipment.created_at).label('latest_at')
+        ).group_by(Shipment.production_id).subquery()
+        return db.session.query(
+            Shipment.production_id,
+            Shipment.status.label('latest_status')
+        ).join(
+            latest_at,
+            db.and_(
+                Shipment.production_id == latest_at.c.production_id,
+                Shipment.created_at == latest_at.c.latest_at
+            )
+        ).subquery()
+
+    def _apply_production_tab(query, tab, latest_status_subq, joined=False):
+        """query uzerinde verilen sekme filtresini uygular. joined=True ise
+        query zaten latest_status_subq'ya outerjoin edilmis demektir (liste
+        sorgusunda oldugu gibi - tek join, tab_counts'ta ise her sekme kendi
+        bagimsiz alt sorgusunda ayri join kurar)."""
+        if not joined and tab in ('sevkiyatta', 'tamamlandi'):
+            query = query.outerjoin(latest_status_subq, Production.id == latest_status_subq.c.production_id)
+        if tab == 'uretimde':
+            return query.filter(Production.status == 'uretimde')
+        if tab == 'hazir':
+            return query.filter(Production.status == 'hazir')
+        if tab == 'sevkiyatta':
+            return query.filter(
+                Production.status == 'sevkiyat',
+                db.or_(
+                    latest_status_subq.c.latest_status.is_(None),
+                    latest_status_subq.c.latest_status != 'teslim_edildi'
+                )
+            )
+        if tab == 'tamamlandi':
+            return query.filter(
+                Production.status == 'sevkiyat',
+                latest_status_subq.c.latest_status == 'teslim_edildi'
+            )
+        return query  # 'tumu'
+
+    def _production_tab_counts():
+        """5 sekmenin sayacini TEK round-trip'te (scalar_subquery) hesaplar -
+        Neon'a ayri ayri 5 COUNT sorgusu atmak yerine (bkz. dashboard'daki
+        ayni performans deseni, commit 153bc85)."""
+        latest_status_subq = _latest_shipment_status_subq()
+
+        def count_subq(tab):
+            q = _apply_production_tab(
+                db.session.query(db.func.count(Production.id)).select_from(Production),
+                tab, latest_status_subq
+            )
+            return q.scalar_subquery()
+
+        row = db.session.query(
+            count_subq('uretimde').label('uretimde'),
+            count_subq('hazir').label('hazir'),
+            count_subq('sevkiyatta').label('sevkiyatta'),
+            count_subq('tamamlandi').label('tamamlandi'),
+            count_subq('tumu').label('tumu'),
+        ).one()
+        return {'uretimde': row.uretimde, 'hazir': row.hazir, 'sevkiyatta': row.sevkiyatta,
+                'tamamlandi': row.tamamlandi, 'tumu': row.tumu}
+
+    def _filtered_productions(tab):
+        """Uretim Listesi + Excel/PDF disa aktarma routelarinin UCU: ayni
+        sekme filtresini paylasirlar, boylece ekranda gorunen ile
+        aktarilan HER ZAMAN birebir ayni satirlari icerir (Is 2)."""
+        latest_status_subq = _latest_shipment_status_subq()
+        query = Production.query.options(joinedload(Production.deal).joinedload(Deal.customer))
+        if tab in ('sevkiyatta', 'tamamlandi'):
+            query = query.outerjoin(latest_status_subq, Production.id == latest_status_subq.c.production_id)
+            joined = True
+        else:
+            joined = False
+        query = _apply_production_tab(query, tab, latest_status_subq, joined=joined)
+        return query.order_by(Production.created_at.desc()).all()
+
     @app.route('/production')
     @login_required
     def production_list():
-        productions = Production.query.options(joinedload(Production.deal).joinedload(Deal.customer)) \
-            .order_by(Production.created_at.desc()).all()
-        return render_template('production_list.html', productions=productions)
+        tab = request.args.get('tab', 'uretimde')
+        if tab not in ('uretimde', 'hazir', 'sevkiyatta', 'tamamlandi', 'tumu'):
+            tab = 'uretimde'
+        productions = _filtered_productions(tab)
+        tab_counts = _production_tab_counts()
+        return render_template('production_list.html', productions=productions, tab=tab, tab_counts=tab_counts)
+
+    @app.route('/production/export/excel')
+    @login_required
+    def production_export_excel():
+        tab = request.args.get('tab', 'uretimde')
+        if tab not in ('uretimde', 'hazir', 'sevkiyatta', 'tamamlandi', 'tumu'):
+            tab = 'uretimde'
+        productions = _filtered_productions(tab)
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Üretim Listesi'
+        headers = ['#', 'Fırsat', 'Müşteri', 'Durum', 'Başlangıç', 'Bitiş', 'Geçen Gün', 'İş Emri']
+        ws.append(headers)
+        for p in productions:
+            ws.append([
+                p.id,
+                p.deal.title if p.deal else '',
+                p.deal.customer.display_name if p.deal and p.deal.customer else '',
+                p.stage_label,
+                p.start_date.strftime('%d.%m.%Y') if p.start_date else '',
+                p.end_date.strftime('%d.%m.%Y') if p.end_date else '',
+                p.gecen_gun,
+                'Eksik Bilgi' if p.specs_missing else 'Tam',
+            ])
+        for col_idx in range(1, len(headers) + 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 22
+
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        return send_file(buffer, as_attachment=True,
+                          download_name=f'uretim_listesi_{tab}_{datetime.now().strftime("%Y%m%d")}.xlsx')
+
+    @app.route('/production/export/pdf')
+    @login_required
+    def production_export_pdf():
+        tab = request.args.get('tab', 'uretimde')
+        if tab not in ('uretimde', 'hazir', 'sevkiyatta', 'tamamlandi', 'tumu'):
+            tab = 'uretimde'
+        productions = _filtered_productions(tab)
+        tab_label = {'uretimde': 'Üretimde', 'hazir': 'Hazır', 'sevkiyatta': 'Sevkiyatta',
+                     'tamamlandi': 'Tamamlandı', 'tumu': 'Tümü'}.get(tab, tab)
+        pdf = generate_production_list_pdf(productions, tab_label)
+        return send_file(pdf, as_attachment=True, download_name=f'uretim_listesi_{tab}_{datetime.now().strftime("%Y%m%d")}.pdf')
 
     def _planning_group_key(item):
         """Gramaj bazli gruplama - gramaj yoksa daha once elle girilmis
@@ -2125,7 +2255,7 @@ def register_routes(app):
             return redirect(url_for('production_detail', id=id))
 
         # Her kalem icin gercek uretilen adet (fiyat/kg istenmez - Is C)
-        for item in production.items:
+        for item in production.uretim_items:
             produced_str = request.form.get(f'produced_{item.id}', '').strip()
             if produced_str != '':
                 try:
@@ -2133,6 +2263,25 @@ def register_routes(app):
                 except ValueError:
                     pass
             item.status = 'uretilen' if item.produced_quantity > 0 else 'bekleniyor'
+
+        # Is 4: karma (Uretim + Ticaret) is emirlerinde eskiden bu buton
+        # TUM kalemler degil sadece uretim kalemlerini kontrol ederek
+        # durumu 'hazir'a geciriyordu - Ticaret kalemleri henuz "Teslime
+        # Hazir" olmasa bile genel durum degisiyor, bu da Sevkiyat'in
+        # eksik/gelmemis ticaret urunuyle acilmasina izin veriyordu. Artik
+        # TUM kalemler (uretim.is_produced icin gercek uretilen miktar,
+        # ticaret.is_produced icin ticaret_durumu='teslime_hazir') hazir
+        # olmadan durum degismiyor, kullaniciya net bir ilerleme mesaji
+        # gosteriliyor.
+        if not production.all_items_produced:
+            flash(
+                f'Tüm kalemler henüz hazır değil ({production.produced_items_count}/'
+                f'{production.total_items_count} kalem hazır) - Ticaret ürünlerinin '
+                f'"Teslime Hazır" durumuna gelmesini bekleyin, ya da Üretim kalemlerinin '
+                f'tamamı için gerçek üretilen adedi girin.', 'danger'
+            )
+            db.session.commit()  # girilen uretilen adetler kaybolmasin
+            return redirect(url_for('production_detail', id=id))
 
         production.status = 'hazir'
         production.end_date = datetime.now().date()

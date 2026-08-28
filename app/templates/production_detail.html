@@ -34,13 +34,37 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-box"></i> Üretim Kalemleri</span>
                 <span class="badge bg-{{ 'success' if production.all_items_produced else 'warning' }}">
-                    {{ production.produced_items_count }}/{{ production.total_items_count }} üretildi
+                    {{ production.produced_items_count }}/{{ production.total_items_count }} kalem hazır
+                    {% if not production.all_items_produced %}
+                    · {{ production.total_items_count - production.produced_items_count }} kalem bekliyor
+                    {% endif %}
                 </span>
             </div>
             <div class="card-body">
                 {% if not production.uretim_items %}
-                <p class="text-muted small mb-0">Bu iş emrinde üretim tipi kalem yok (tümü ticaret ürünü - aşağıda ayrıca gösteriliyor).</p>
+                <p class="text-muted small">Bu iş emrinde üretim tipi kalem yok (tümü ticaret ürünü - aşağıda ayrıca gösteriliyor).</p>
+                {% if production.status == 'uretimde' %}
+                {% if not production.all_items_produced %}
+                <div class="alert alert-warning py-2 small mb-2">
+                    <i class="bi bi-exclamation-triangle"></i> Ticaret ürünlerinin tamamı henüz "Teslime Hazır" durumuna gelmedi -
+                    "Hazır" işaretlemesi bu durumda reddedilecek.
+                </div>
+                {% endif %}
+                <form method="POST" action="{{ url_for('mark_production_ready', id=production.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-check-circle"></i> Hazır Olarak İşaretle
+                    </button>
+                </form>
+                {% endif %}
                 {% elif production.status == 'uretimde' %}
+                {% if production.ticaret_items and not production.all_items_produced %}
+                <div class="alert alert-warning py-2 small">
+                    <i class="bi bi-exclamation-triangle"></i> Bu iş emrindeki Ticaret ürünlerinin tamamı henüz "Teslime Hazır"
+                    durumuna gelmedi - aşağıdaki üretim kalemleri tamamlanmış olsa bile "Hazır" işaretlemesi reddedilecek,
+                    önce Ticaret ürünlerinin durumunu güncelleyin.
+                </div>
+                {% endif %}
                 <form method="POST" action="{{ url_for('mark_production_ready', id=production.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="table-responsive">
