@@ -223,8 +223,13 @@ class Deal(db.Model):
             return None
         return self.value * self.kullanilan_kur
 
-    def calculate_totals(self):
-        self.subtotal = sum(item.total_price for item in self.items)
+    def calculate_totals(self, items=None):
+        """items verilirse (yeni olusturulan/henuz self.items'a yuklenmemis
+        DealItem listesi) onlar uzerinden hesaplar - self.items'a erismek,
+        henuz yuklenmemis bir iliski icin ekstra bir SELECT tetikler (bkz.
+        add_deal), items parametresiyle bu onlenir."""
+        source = items if items is not None else self.items
+        self.subtotal = sum(item.total_price for item in source)
         self.vat_amount = self.subtotal * (self.vat_rate / 100)
         self.value = self.subtotal + self.vat_amount
 

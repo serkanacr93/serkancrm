@@ -220,17 +220,16 @@ def _create_prepayment_if_requested(invoice, form, user_id):
 
 def _musteri_no_max():
     """Mevcut en buyuk musteri_no'nun sayisal kismini dondurur (Is 2).
-    String siralama yerine Python'da gercek int max hesaplar - 4 haneyi
-    astiginda (9999+) string siralamanin bozulmasindan etkilenmez."""
-    all_nos = db.session.query(Customer.musteri_no).filter(Customer.musteri_no.isnot(None)).all()
-    max_n = 0
-    for (no,) in all_nos:
-        if no and no.startswith('M-'):
-            try:
-                max_n = max(max_n, int(no[2:]))
-            except ValueError:
-                pass
-    return max_n
+    String siralama yerine SQL tarafinda gercek int max hesaplar - 4 haneyi
+    astiginda (9999+) string siralamanin bozulmasindan etkilenmez.
+    Performans: onceden TUM musteri_no degerlerini (1800+ satir) Python'a
+    cekip dongude max hesapliyordu (Neon'a uzak RTT + veri transferi
+    yuzunden tek basina ~900ms'e mal oluyordu) - artik MAX() SQL tarafinda,
+    tek skaler deger olarak donuyor."""
+    max_n = db.session.query(
+        db.func.max(db.cast(db.func.substr(Customer.musteri_no, 3), db.Integer))
+    ).filter(Customer.musteri_no.op('~')(r'^M-\d+$')).scalar()
+    return max_n or 0
 
 def _next_musteri_no():
     """Tekil musteri olusturma noktalari icin - toplu ice aktarimda (CSV/
@@ -350,14 +349,47 @@ def register_routes(app):
     @login_required
     def index():
         today = datetime.now().date()
-        
-        customers = Customer.query.count()
-        deals = Deal.query.count()
-        total_value = db.session.query(db.func.sum(Deal.value)).scalar() or 0
-        active_deals = Deal.query.filter(Deal.stage.notin_(['kazanilan', 'kaybedilen'])).count()
-        production_count = Production.query.count()
-        pending_shipments = Shipment.query.filter(Shipment.status.notin_(['teslim_edildi'])).count()
-        product_count = Product.query.count()
+
+        # Performans: asagidaki 10 bagimsiz COUNT/SUM sorgusu Neon'a (uzak,
+        # yuksek RTT'li) ayri ayri 10 round-trip yerine TEK bir sorguda
+        # (her biri scalar_subquery olarak) calistirilir - dashboard'daki
+        # olcumde bu sorgular RTT basina ~400-900ms'e mal oluyordu.
+        stats = db.session.query(
+            db.session.query(db.func.count(Customer.id)).scalar_subquery().label('customers'),
+            db.session.query(db.func.count(Deal.id)).scalar_subquery().label('deals'),
+            db.session.query(db.func.sum(Deal.value)).scalar_subquery().label('total_value'),
+            db.session.query(db.func.count(Deal.id)).filter(
+                Deal.stage.notin_(['kazanilan', 'kaybedilen'])
+            ).scalar_subquery().label('active_deals'),
+            db.session.query(db.func.count(Production.id)).scalar_subquery().label('production_count'),
+            db.session.query(db.func.count(Shipment.id)).filter(
+                Shipment.status.notin_(['teslim_edildi'])
+            ).scalar_subquery().label('pending_shipments'),
+            db.session.query(db.func.count(Product.id)).scalar_subquery().label('product_count'),
+            db.session.query(db.func.count(Reminder.id)).filter(
+                Reminder.is_read == False
+            ).scalar_subquery().label('unread_reminders'),
+            db.session.query(db.func.count(Customer.id)).filter(
+                Customer.company_name.isnot(None)
+            ).scalar_subquery().label('customer_types'),
+            db.session.query(db.func.count(CustomerVisit.id)).scalar_subquery().label('total_visits'),
+            db.session.query(db.func.count(db.distinct(Customer.id))).select_from(Customer).join(
+                Deal, Deal.customer_id == Customer.id
+            ).filter(Deal.stage == 'kazanilan').scalar_subquery().label('customers_with_orders'),
+        ).one()
+
+        customers = stats.customers
+        deals = stats.deals
+        total_value = stats.total_value or 0
+        active_deals = stats.active_deals
+        production_count = stats.production_count
+        pending_shipments = stats.pending_shipments
+        product_count = stats.product_count
+        unread_reminders = stats.unread_reminders
+        customer_types = stats.customer_types
+        total_visits = stats.total_visits
+        customers_with_orders = stats.customers_with_orders
+
         low_stock_products = Product.query.filter(Product.stock_quantity <= Product.min_stock).order_by(Product.stock_quantity).all()
         low_stock = len(low_stock_products)
 
@@ -374,8 +406,6 @@ def register_routes(app):
             Deal.valid_until < today,
             Deal.stage.notin_(['kazanilan', 'kaybedilen', 'revize'])
         ).all()
-        
-        unread_reminders = Reminder.query.filter_by(is_read=False).count()
         
         recent_deals = Deal.query.order_by(Deal.created_at.desc()).limit(5).all()
         recent_customers = Customer.query.order_by(Customer.created_at.desc()).limit(5).all()
@@ -401,17 +431,12 @@ def register_routes(app):
             db.func.count(Deal.id)
         ).group_by(Deal.stage).all()
         
-        customer_types = db.session.query(
-            db.func.count(Customer.id)
-        ).filter(Customer.company_name.isnot(None)).scalar() or 0
         individual_customers = customers - customer_types
-        
+
         # Yeni müşteri istatistikleri
-        total_visits = CustomerVisit.query.count()
         recent_visits = CustomerVisit.query.order_by(CustomerVisit.visit_date.desc()).limit(5).all()
         
         # Ortalama sipariş dönüşümü (ilk siparişi olan müşteri / toplam müşteri)
-        customers_with_orders = db.session.query(Customer.id).join(Deal).filter(Deal.stage == 'kazanilan').distinct().count()
         conversion_rate = (customers_with_orders / customers * 100) if customers > 0 else 0
         
         # Müşteri ortalama yaşı (ilk müşterinin eklenme tarihinden bugüne)
@@ -516,24 +541,34 @@ def register_routes(app):
             )
         pagination = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
         customers = pagination.items
-        not_customer_count = Customer.query.filter_by(status='musteri_degil').count()
-
-        never_transacted_count = Customer.query.filter(
-            Customer.status != 'musteri_degil',
-            ~Customer.id.in_(_customers_with_activity_subquery())
-        ).count()
 
         dormant_cutoff = datetime.utcnow() - timedelta(days=90)
         last_deal_subq2 = db.session.query(
             Deal.customer_id,
             db.func.max(Deal.created_at).label('last_deal_at')
         ).group_by(Deal.customer_id).subquery()
-        dormant_count = db.session.query(Customer).join(
-            last_deal_subq2, Customer.id == last_deal_subq2.c.customer_id
-        ).filter(
-            Customer.status != 'musteri_degil',
-            last_deal_subq2.c.last_deal_at < dormant_cutoff
-        ).count()
+
+        # Performans: bu 3 bagimsiz COUNT sorgusu (once ayri ayri 3
+        # round-trip) tek sorguda (scalar_subquery) birlestirildi - bkz.
+        # dashboard'daki (index()) ayni desen.
+        list_stats = db.session.query(
+            db.session.query(db.func.count(Customer.id)).filter_by(
+                status='musteri_degil'
+            ).scalar_subquery().label('not_customer_count'),
+            db.session.query(db.func.count(Customer.id)).filter(
+                Customer.status != 'musteri_degil',
+                ~Customer.id.in_(_customers_with_activity_subquery())
+            ).scalar_subquery().label('never_transacted_count'),
+            db.session.query(db.func.count(Customer.id)).select_from(Customer).join(
+                last_deal_subq2, Customer.id == last_deal_subq2.c.customer_id
+            ).filter(
+                Customer.status != 'musteri_degil',
+                last_deal_subq2.c.last_deal_at < dormant_cutoff
+            ).scalar_subquery().label('dormant_count'),
+        ).one()
+        not_customer_count = list_stats.not_customer_count
+        never_transacted_count = list_stats.never_transacted_count
+        dormant_count = list_stats.dormant_count
 
         takip_gerekiyor_count = _takip_gerekiyor_query().count()
 
@@ -1186,6 +1221,7 @@ def register_routes(app):
                 db.session.flush()
 
                 i = 0
+                new_items = []
                 while f'desc_{i}' in request.form:
                     qty = float(request.form[f'qty_{i}'])
                     price = float(request.form[f'price_{i}'])
@@ -1205,10 +1241,14 @@ def register_routes(app):
                         deal_id=deal.id
                     )
                     db.session.add(item)
+                    new_items.append(item)
                     i += 1
 
                 db.session.flush()
-                deal.calculate_totals()
+                # new_items burada explicit veriliyor - deal.items (henuz
+                # yuklenmemis bir iliski) okumak, Neon'a gereksiz bir
+                # SELECT round-trip'i (~300-450ms) daha acardi.
+                deal.calculate_totals(items=new_items)
 
                 reminder = Reminder(
                     customer_id=deal.customer_id,
