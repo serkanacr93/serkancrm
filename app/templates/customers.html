@@ -105,18 +105,24 @@
                             <form method="POST" action="{{ url_for('merge_customers_by_phone') }}" style="display: inline;" onsubmit="return confirm('Bu telefon numarasına sahip tüm müşteriler birleştirilecektir. Emin misiniz?')">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="phone" value="{{ customer.phone }}">
+                                <input type="hidden" name="page" value="{{ pagination.page }}">
+                                <input type="hidden" name="search" value="{{ search }}">
                                 <button type="submit" class="btn btn-sm btn-outline-warning" title="Tekrarları Birleştir" {% if not customer.phone %}disabled{% endif %}>
                                     <i class="bi bi-people"></i>
                                 </button>
                             </form>
                             <form method="POST" action="{{ url_for('mark_not_customer', id=customer.id) }}" style="display: inline;" onsubmit="return confirm('Bu kaydı \'Müşteri Değil\' olarak işaretlemek istediğinize emin misiniz? Listeden gizlenecek, silinmeyecek.')">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="page" value="{{ pagination.page }}">
+                                <input type="hidden" name="search" value="{{ search }}">
                                 <button type="submit" class="btn btn-sm btn-outline-secondary" title="Müşteri Değil Olarak İşaretle">
                                     <i class="bi bi-person-dash"></i>
                                 </button>
                             </form>
                             <form method="POST" action="{{ url_for('delete_customer', id=customer.id) }}" style="display: inline;" onsubmit="return confirm('Bu müşteriyi ve tüm ilişkili verileri silmek istediğinize emin misiniz?')">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="page" value="{{ pagination.page }}">
+                                <input type="hidden" name="search" value="{{ search }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Sil">
                                     <i class="bi bi-trash"></i>
                                 </button>

@@ -556,7 +556,7 @@ def register_routes(app):
                     Customer.phone.ilike(f'%{search}%')
                 )
             )
-        pagination = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
+        pagination = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=200, error_out=False)
         customers = pagination.items
 
         dormant_cutoff = datetime.utcnow() - timedelta(days=90)
@@ -593,6 +593,20 @@ def register_routes(app):
                                 not_customer_count=not_customer_count, never_transacted_count=never_transacted_count,
                                 dormant_count=dormant_count, takip_gerekiyor_count=takip_gerekiyor_count)
 
+    def _customers_return_url():
+        """Is 6: musteri listesindeki satir-ici islem formlari (sil/musteri
+        degil/birlestir) sayfa/arama parametrelerini gizli alan olarak
+        tasir - boylece islem sonrasi kullanici hep sayfa 1'e degil,
+        islem yaptigi sayfaya geri doner."""
+        page = request.form.get('page', '').strip()
+        search = request.form.get('search', '').strip()
+        kwargs = {}
+        if page.isdigit():
+            kwargs['page'] = int(page)
+        if search:
+            kwargs['search'] = search
+        return url_for('customers', **kwargs)
+
     @app.route('/customers/<int:id>/mark-not-customer', methods=['POST'])
     @login_required
     def mark_not_customer(id):
@@ -600,7 +614,7 @@ def register_routes(app):
         customer.status = 'musteri_degil'
         db.session.commit()
         flash(f'"{customer.display_name}" "Müşteri Değil" olarak işaretlendi ve listeden gizlendi.', 'success')
-        return redirect(url_for('customers'))
+        return redirect(_customers_return_url())
 
     @app.route('/customers/not-customer')
     @login_required
@@ -1094,14 +1108,14 @@ def register_routes(app):
         phone = request.form.get('phone', '').strip()
         if not phone:
             flash('Telefon numarası gereklidir.', 'danger')
-            return redirect(url_for('customers'))
-        
+            return redirect(_customers_return_url())
+
         # Aynı telefona sahip tüm müşterileri bul
         customers = Customer.query.filter_by(phone=phone).all()
-        
+
         if len(customers) <= 1:
             flash('Bu telefon numarası ile tekrar eden müşteri bulunamadı.', 'info')
-            return redirect(url_for('customers'))
+            return redirect(_customers_return_url())
         
         # En eski müşteriyi ana müşteri olarak seç
         main_customer = sorted(customers, key=lambda x: x.id)[0]
@@ -1130,10 +1144,10 @@ def register_routes(app):
         except Exception:
             db.session.rollback()
             flash('Müşteriler birleştirilirken bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
-            return redirect(url_for('customers'))
+            return redirect(_customers_return_url())
 
         flash(f'{len(duplicate_customers)} tekrar eden müşteri birleştirildi! Ana müşteri: {main_customer.display_name}', 'success')
-        return redirect(url_for('customers'))
+        return redirect(_customers_return_url())
 
     @app.route('/customers/<int:id>/delete', methods=['POST'])
     @login_required
@@ -1142,7 +1156,7 @@ def register_routes(app):
         db.session.delete(customer)
         db.session.commit()
         flash('Müşteri silindi!', 'success')
-        return redirect(url_for('customers'))
+        return redirect(_customers_return_url())
 
     @app.route('/customers/<int:id>/statement/pdf')
     @login_required
