@@ -55,12 +55,28 @@
 </div>
 
 {% if customers %}
+<div id="bulkToolbar" class="alert alert-primary d-none d-flex align-items-center gap-3 py-2">
+    <span id="selectedCountText" class="fw-bold"></span>
+    <a href="#" id="selectAllFilteredLink" class="d-none"></a>
+    <button type="button" id="clearSelectionBtn" class="btn btn-sm btn-outline-secondary">Seçimi Temizle</button>
+    <button type="button" id="bulkMarkNotCustomerBtn" class="btn btn-sm btn-secondary ms-auto">
+        <i class="bi bi-person-dash"></i> Seçileni "Müşteri Değil" Yap
+    </button>
+</div>
+<form id="bulkActionForm" method="POST" action="{{ url_for('bulk_mark_not_customer') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="page" value="{{ pagination.page }}">
+    <input type="hidden" name="search" value="{{ search }}">
+    <input type="hidden" id="selectAllFilteredInput" name="select_all_filtered" value="0">
+    <div id="bulkIdsContainer"></div>
+</form>
 <div class="card shadow-sm">
     <div class="card-body">
         <div class="table-responsive">
             <table class="table table-hover">
                 <thead class="table-dark">
                     <tr>
+                        <th><input type="checkbox" id="selectAllCb"></th>
                         <th>Müşteri No</th>
                         <th>Firma / Müşteri</th>
                         <th>Yetkili</th>
@@ -74,6 +90,7 @@
                 <tbody>
                     {% for customer in customers %}
                     <tr>
+                        <td><input type="checkbox" class="row-cb" value="{{ customer.id }}"></td>
                         <td>{{ customer.musteri_no or customer.id }}</td>
                         <td>
                             <a href="{{ url_for('customer_detail', id=customer.id) }}">
@@ -160,5 +177,97 @@
 <div class="alert alert-info">
     <i class="bi bi-info-circle"></i> Henüz müşteri bulunmuyor. İlk müşterinizi ekleyin!
 </div>
+{% endif %}
+
+{% if customers %}
+<script>
+(function () {
+    var selectAllFilteredMode = false;
+    var totalFiltered = {{ pagination.total }};
+    var pageCount = {{ customers|length }};
+
+    var selectAllCb = document.getElementById('selectAllCb');
+    var toolbar = document.getElementById('bulkToolbar');
+    var countText = document.getElementById('selectedCountText');
+    var selectAllLink = document.getElementById('selectAllFilteredLink');
+
+    function rowCbs() { return document.querySelectorAll('.row-cb'); }
+    function checkedCount() { return document.querySelectorAll('.row-cb:checked').length; }
+
+    function updateToolbar() {
+        var n = selectAllFilteredMode ? totalFiltered : checkedCount();
+        if (n === 0) {
+            toolbar.classList.add('d-none');
+            return;
+        }
+        toolbar.classList.remove('d-none');
+        if (selectAllFilteredMode) {
+            countText.textContent = 'Filtrelenmiş TÜM ' + totalFiltered + ' müşteri seçildi.';
+            selectAllLink.classList.add('d-none');
+        } else {
+            countText.textContent = n + ' müşteri seçildi (bu sayfada).';
+            if (totalFiltered > pageCount) {
+                selectAllLink.textContent = 'Filtrelenmiş TÜM ' + totalFiltered + ' müşteriyi seç';
+                selectAllLink.classList.remove('d-none');
+            } else {
+                selectAllLink.classList.add('d-none');
+            }
+        }
+    }
+
+    selectAllCb.addEventListener('change', function () {
+        selectAllFilteredMode = false;
+        rowCbs().forEach(function (cb) { cb.checked = selectAllCb.checked; });
+        updateToolbar();
+    });
+
+    rowCbs().forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            selectAllFilteredMode = false;
+            selectAllCb.checked = checkedCount() === pageCount;
+            updateToolbar();
+        });
+    });
+
+    selectAllLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        selectAllFilteredMode = true;
+        rowCbs().forEach(function (cb) { cb.checked = true; });
+        selectAllCb.checked = true;
+        updateToolbar();
+    });
+
+    document.getElementById('clearSelectionBtn').addEventListener('click', function () {
+        selectAllFilteredMode = false;
+        rowCbs().forEach(function (cb) { cb.checked = false; });
+        selectAllCb.checked = false;
+        updateToolbar();
+    });
+
+    document.getElementById('bulkMarkNotCustomerBtn').addEventListener('click', function () {
+        var n = selectAllFilteredMode ? totalFiltered : checkedCount();
+        if (n === 0) {
+            alert('Hiçbir kayıt seçmediniz.');
+            return;
+        }
+        if (!confirm(n + ' müşteri "Müşteri Değil" olarak işaretlenecek. Bu işlem listeden gizler, silmez. Emin misiniz?')) {
+            return;
+        }
+        document.getElementById('selectAllFilteredInput').value = selectAllFilteredMode ? '1' : '0';
+        var container = document.getElementById('bulkIdsContainer');
+        container.innerHTML = '';
+        if (!selectAllFilteredMode) {
+            document.querySelectorAll('.row-cb:checked').forEach(function (cb) {
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = 'customer_ids';
+                inp.value = cb.value;
+                container.appendChild(inp);
+            });
+        }
+        document.getElementById('bulkActionForm').submit();
+    });
+})();
+</script>
 {% endif %}
 {% endblock %}

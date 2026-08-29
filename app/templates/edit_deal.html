@@ -7,7 +7,7 @@
 
 <div class="card">
     <div class="card-body">
-        <form method="POST">
+        <form method="POST" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="row">
                 <div class="col-md-6 mb-3">
@@ -121,6 +121,13 @@
                     <div class="col"><input type="text" class="form-control form-control-sm" name="en_{{ loop.index0 }}" value="{{ item.en or '' }}" placeholder="En"></div>
                     <div class="col"><input type="text" class="form-control form-control-sm" name="renk_{{ loop.index0 }}" value="{{ item.renk or '' }}" placeholder="Renk"></div>
                     <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_{{ loop.index0 }}" value="{{ item.teslim_tarihi.strftime('%Y-%m-%d') if item.teslim_tarihi else '' }}" title="Teslim Tarihi"></div>
+                    <div class="col">
+                        {% if item.numune_gorseli %}
+                        <img src="{{ url_for('static', filename=item.numune_gorseli) }}" alt="Numune" style="height:31px;border:1px solid #dee2e6;border-radius:3px;vertical-align:middle;margin-right:4px;">
+                        {% endif %}
+                        <input type="hidden" name="existing_numune_gorseli_{{ loop.index0 }}" value="{{ item.numune_gorseli or '' }}">
+                        <input type="file" class="form-control form-control-sm d-inline-block" style="width:auto" name="numune_gorseli_{{ loop.index0 }}" accept="image/jpeg,image/png" title="Numune Görseli {{ '(değiştirmek için seçin)' if item.numune_gorseli else '' }}">
+                    </div>
                 </div>
                 {% endfor %}
             </div>
@@ -222,6 +229,7 @@ document.getElementById('add-item').addEventListener('click', function() {
         <div class="col"><input type="text" class="form-control form-control-sm" name="en_${itemCount}" placeholder="En"></div>
         <div class="col"><input type="text" class="form-control form-control-sm" name="renk_${itemCount}" placeholder="Renk"></div>
         <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_${itemCount}" title="Teslim Tarihi"></div>
+        <div class="col"><input type="file" class="form-control form-control-sm" name="numune_gorseli_${itemCount}" accept="image/jpeg,image/png" title="Numune Görseli"></div>
     `;
     container.appendChild(row);
     container.appendChild(specsRow);

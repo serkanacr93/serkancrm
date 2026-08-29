@@ -36,29 +36,38 @@ def _sanitize_pdf_free_text(text):
     return text.replace('₺', 'TL')
 
 def _draw_watermark(canvas, doc, text):
-    """Sayfa ortasinda TEK, buyuk, ince cerceveli (sadece kontur - ici bos)
-    bir filigran ciziyor, -25 derece egik. onFirstPage/onLaterPages
-    callback'i olarak cagrilir - reportlab bu callback'i sayfanin flowable
-    icerigi (tablo/metin) cizilmeden ONCE calistirir, bu yuzden filigran
-    otomatik olarak icerigin ALTINDA kalir, ustune binmez. Ici dolu
-    olmamasi icin PDFTextObject.setTextRenderMode(1) (Tr 1 = sadece kontur
-    ciz, doldurma) kullanilir - drawString gibi normal metin cizim
-    fonksiyonlari her zaman ICI DOLU (fill) cizer, bu yuzden dogrudan
-    text object uzerinden calisilir."""
+    """Is 2 (yeniden tasarim): eskiden sayfa ortasini kaplayan buyuk kontur
+    filigran KALDIRILDI - ana icerik alani artik TAMAMEN temiz. Bunun
+    yerine SADECE iki noktada, dikkat cekmeyen bir marka izi birakilir:
+    (1) sag ust kosede, 35 derece egik, koyu dolgu renkli kucuk bir damga/
+    etiket (resmi belge/cek tarzi) - sayfanin ust kenar bosluguna (topMargin
+    1.3cm) sigacak sekilde konumlandirilir, flowable icerikle (TEKLIF
+    basligi vb.) CAKISMAZ. (2) sayfanin en altinda (bottomMargin 1.3cm
+    bosluguna sigan), ince/soluk, tekrarlayan mikro-metin seridi.
+    onFirstPage/onLaterPages callback'i olarak cagrilir - flowable icerik
+    cizilmeden ONCE calisir, bu yuzden damga/serit icerigin ALTINDA kalir."""
     if not text:
         return
+    stamp_color = colors.HexColor('#1a252f')
+
+    # ---- (1) Sag ust kose damgasi ----
     canvas.saveState()
-    canvas.translate(A4[0] / 2.0, A4[1] / 2.0)
-    canvas.rotate(-25)
-    font_size = 65
-    canvas.setLineWidth(1.1)
-    canvas.setStrokeColorRGB(20 / 255.0, 20 / 255.0, 40 / 255.0)
-    text_w = canvas.stringWidth(text, 'Vera-Bold', font_size)
-    text_obj = canvas.beginText(-text_w / 2.0, -font_size / 3.0)
-    text_obj.setFont('Vera-Bold', font_size)
-    text_obj.setTextRenderMode(1)  # 1 = stroke only (kontur), fill yok
-    text_obj.textOut(text)
-    canvas.drawText(text_obj)
+    canvas.translate(A4[0] - 2.1*cm, A4[1] - 0.7*cm)
+    canvas.rotate(35)
+    canvas.setFillColor(stamp_color)
+    canvas.setFont('Vera-Bold', 9)
+    canvas.drawCentredString(0, 0, text)
+    canvas.restoreState()
+
+    # ---- (2) Alt serit mikro-metin ----
+    canvas.saveState()
+    canvas.setFont('Vera', 6)
+    canvas.setFillColor(colors.HexColor('#c9c9c9'))
+    unit = f'{text}  •  '
+    unit_w = canvas.stringWidth(unit, 'Vera', 6)
+    available_w = A4[0] - 1.0*cm
+    repeats = max(1, int(available_w // unit_w) + 1) if unit_w > 0 else 1
+    canvas.drawString(0.5*cm, 0.5*cm, unit * repeats)
     canvas.restoreState()
 
 def register_fonts():
@@ -75,10 +84,10 @@ def register_fonts():
 register_fonts()
 
 def _payment_method_checkboxes(text_style):
-    """Nakit/KK/Cek/Senet icin cizilmis kutucuklar dondurur (Vera fontunda
-    Unicode checkbox glifi (U+2610) bulunmuyor, o yuzden kucuk BOX kenarli
-    hucreler kullanilir)."""
-    labels = ['Nakit', 'KK', 'Çek', 'Senet']
+    """Nakit/KK icin cizilmis kutucuklar dondurur (Vera fontunda Unicode
+    checkbox glifi (U+2610) bulunmuyor, o yuzden kucuk BOX kenarli hucreler
+    kullanilir). Is 4: Cek/Senet secenekleri kaldirildi - artik kullanilmiyor."""
+    labels = ['Nakit', 'KK']
     row = []
     widths = []
     for label in labels:
@@ -330,6 +339,39 @@ def generate_deal_pdf(deal):
     elements.append(Spacer(1, 4*mm))
     elements.append(Paragraph("<i>Fiyatlarımıza yürürlükteki K.D.V oranları ilave edilecektir.</i>", normal))
     elements.append(Spacer(1, 4*mm))
+
+    # ===== NUMUNE GORSELLERI (Is 3) - sadece gorseli olan kalemler icin,
+    # hicbir kalemde gorsel yoksa bu bolum tamamen atlanir. Bozuk/eksik bir
+    # dosya PDF'in tamamini kirmasin diye her gorsel kendi try/except'inde
+    # islenir - o kalem icin sadece etiket kalir, hata verilmez. =====
+    items_with_numune = [item for item in deal.items if item.numune_gorseli]
+    if items_with_numune:
+        numune_label_style = ParagraphStyle('NumuneLabel', parent=small, fontSize=7, alignment=1)
+        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+        thumb_cells = []
+        for item in items_with_numune:
+            img_flowable = None
+            try:
+                img_path = os.path.join(static_dir, item.numune_gorseli)
+                if os.path.isfile(img_path):
+                    img_flowable = Image(img_path, width=2.6*cm, height=2.6*cm, kind='proportional')
+            except Exception:
+                img_flowable = None
+            if img_flowable is not None:
+                thumb_cells.append([img_flowable, Paragraph(_pdf_cell_text(item.description), numune_label_style)])
+        if thumb_cells:
+            elements.append(Paragraph("NUMUNE GÖRSELLERİ", box_heading))
+            elements.append(Spacer(1, 1.5*mm))
+            row = [Table([[c[0]], [c[1]]], colWidths=[3*cm]) for c in thumb_cells]
+            gallery = Table([row], colWidths=[3*cm] * len(row))
+            gallery.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            elements.append(gallery)
+            elements.append(Spacer(1, 4*mm))
 
     # ===== ACIKLAMA (deal.notes'tan doldurulur, bossa bos kutu kalir) =====
     elements.append(Paragraph("AÇIKLAMA", box_heading))

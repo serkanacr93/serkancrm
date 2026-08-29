@@ -544,18 +544,9 @@ def register_routes(app):
     def customers():
         search = request.args.get('search', '')
         page = request.args.get('page', 1, type=int)
-        query = Customer.query.filter(Customer.status != 'musteri_degil')
-        if search:
-            query = query.filter(
-                db.or_(
-                    Customer.first_name.ilike(f'%{search}%'),
-                    Customer.last_name.ilike(f'%{search}%'),
-                    Customer.company_name.ilike(f'%{search}%'),
-                    Customer.email.ilike(f'%{search}%'),
-                    Customer.tax_id.ilike(f'%{search}%'),
-                    Customer.phone.ilike(f'%{search}%')
-                )
-            )
+        query = _apply_customers_search_filter(
+            Customer.query.filter(Customer.status != 'musteri_degil'), search
+        )
         pagination = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=200, error_out=False)
         customers = pagination.items
 
@@ -606,6 +597,56 @@ def register_routes(app):
         if search:
             kwargs['search'] = search
         return url_for('customers', **kwargs)
+
+    def _apply_customers_search_filter(query, search):
+        """customers() ve toplu islem route'u (bulk_mark_not_customer) AYNI
+        arama mantigini paylasir - 'Tumunu Sec (Filtrelenmis Tumu)' modunda
+        toplu islemin GERCEKTEN ekrandaki filtreyle ayni satirlari
+        kapsadigindan emin olmak icin (Is 1)."""
+        if search:
+            query = query.filter(
+                db.or_(
+                    Customer.first_name.ilike(f'%{search}%'),
+                    Customer.last_name.ilike(f'%{search}%'),
+                    Customer.company_name.ilike(f'%{search}%'),
+                    Customer.email.ilike(f'%{search}%'),
+                    Customer.tax_id.ilike(f'%{search}%'),
+                    Customer.phone.ilike(f'%{search}%')
+                )
+            )
+        return query
+
+    @app.route('/customers/bulk/mark-not-customer', methods=['POST'])
+    @login_required
+    def bulk_mark_not_customer():
+        """Is 1: 'Tumunu Sec' iki modu destekler - (a) sadece o an ekrandaki
+        sayfa (customer_ids[] ile acik liste) veya (b) 'Filtrelenmis TUMU'
+        (select_all_filtered=1 + search). (b) modunda 1716+ satir icin
+        tek tek ID gondermek/Python'da donmek yerine, AYNI filtre kriteriyle
+        TEK bir bulk UPDATE calistirilir - performans (zaman asimi riski
+        olmadan) ve dogruluk (customers() ile ayni kaynak) birlikte saglanir."""
+        select_all_filtered = request.form.get('select_all_filtered') == '1'
+        search = request.form.get('search', '').strip()
+
+        if select_all_filtered:
+            query = _apply_customers_search_filter(
+                Customer.query.filter(Customer.status != 'musteri_degil'), search
+            )
+            count = query.update({'status': 'musteri_degil'}, synchronize_session=False)
+            db.session.commit()
+            flash(f'{count} müşteri "Müşteri Değil" olarak işaretlendi.', 'success')
+        else:
+            ids = request.form.getlist('customer_ids')
+            if not ids:
+                flash('Hiçbir kayıt seçmediniz.', 'warning')
+                return redirect(_customers_return_url())
+            count = Customer.query.filter(Customer.id.in_(ids)).update(
+                {'status': 'musteri_degil'}, synchronize_session=False
+            )
+            db.session.commit()
+            flash(f'{count} müşteri "Müşteri Değil" olarak işaretlendi.', 'success')
+
+        return redirect(_customers_return_url())
 
     @app.route('/customers/<int:id>/mark-not-customer', methods=['POST'])
     @login_required
@@ -1307,10 +1348,19 @@ def register_routes(app):
 
                 i = 0
                 new_items = []
+                numune_errors = []
                 while f'desc_{i}' in request.form:
                     qty = float(request.form[f'qty_{i}'])
                     price = float(request.form[f'price_{i}'])
                     teslim_tarihi_raw = request.form.get(f'teslim_tarihi_{i}', '').strip()
+                    # Is 3: kalem bazli numune gorseli - opsiyonel, gecersiz/
+                    # cok buyuk dosya yuklenirse teklifin tamamini iptal
+                    # etmez, sadece o kalem icin gorsel bos kalir.
+                    numune_path, numune_error = _save_uploaded_image(
+                        request.files.get(f'numune_gorseli_{i}'), 'numune'
+                    )
+                    if numune_error:
+                        numune_errors.append(f'{i + 1}. kalem: {numune_error}')
                     item = DealItem(
                         description=request.form[f'desc_{i}'],
                         quantity=qty,
@@ -1323,6 +1373,7 @@ def register_routes(app):
                         en=request.form.get(f'en_{i}', '').strip() or None,
                         renk=request.form.get(f'renk_{i}', '').strip() or None,
                         teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
+                        numune_gorseli=numune_path,
                         deal_id=deal.id
                     )
                     db.session.add(item)
@@ -1350,6 +1401,8 @@ def register_routes(app):
                 return redirect(url_for('add_deal'))
 
             flash(f'Teklif oluşturuldu! KDV dahil: {deal.value:,.2f} {deal.para_birimi_sembol}', 'success')
+            if numune_errors:
+                flash('Bazı numune görselleri kaydedilemedi: ' + '; '.join(numune_errors), 'warning')
             return redirect(url_for('deal_detail', id=deal.id))
         # Not: customers listesi burada kasitli olarak cekilmiyor - form
         # merkezi musteri arama bilesenini (customer-search.js) kullaniyor,
@@ -1399,10 +1452,23 @@ def register_routes(app):
             DealItem.query.filter_by(deal_id=id).delete()
             i = 0
             new_items = []
+            numune_errors = []
             while f'desc_{i}' in request.form:
                 qty = float(request.form[f'qty_{i}'])
                 price = float(request.form[f'price_{i}'])
                 teslim_tarihi_raw = request.form.get(f'teslim_tarihi_{i}', '').strip()
+                # Is 3: yeni dosya yuklendiyse onu kullan; yuklenmediyse
+                # (kalem duzenlemede daha once yuklenmis olabilir) mevcut
+                # yolu (existing_numune_gorseli_i hidden alani) koru - kalemler
+                # her duzenlemede silinip yeniden olusturuldugu icin bu
+                # alan olmadan mevcut gorsel sessizce kaybolurdu.
+                numune_path, numune_error = _save_uploaded_image(
+                    request.files.get(f'numune_gorseli_{i}'), 'numune'
+                )
+                if numune_error:
+                    numune_errors.append(f'{i + 1}. kalem: {numune_error}')
+                elif not numune_path:
+                    numune_path = request.form.get(f'existing_numune_gorseli_{i}', '').strip() or None
                 item = DealItem(description=request.form[f'desc_{i}'], quantity=qty, unit=request.form.get(f'unit_{i}', 'adet'),
                                unit_price=price, total_price=qty * price,
                                urun_tipi=request.form.get(f'urun_tipi_{i}', 'uretim'),
@@ -1411,6 +1477,7 @@ def register_routes(app):
                                en=request.form.get(f'en_{i}', '').strip() or None,
                                renk=request.form.get(f'renk_{i}', '').strip() or None,
                                teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
+                               numune_gorseli=numune_path,
                                deal_id=deal.id)
                 db.session.add(item)
                 new_items.append(item)
@@ -1422,6 +1489,8 @@ def register_routes(app):
             deal.calculate_totals(items=new_items)
             db.session.commit()
             flash('Teklif güncellendi!', 'success')
+            if numune_errors:
+                flash('Bazı numune görselleri kaydedilemedi: ' + '; '.join(numune_errors), 'warning')
             return redirect(url_for('deal_detail', id=id))
         return render_template('edit_deal.html', deal=deal)
 

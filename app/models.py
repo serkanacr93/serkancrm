@@ -308,6 +308,9 @@ class DealItem(db.Model):
     en = db.Column(db.String(50), nullable=True)
     renk = db.Column(db.String(50), nullable=True)
     teslim_tarihi = db.Column(db.Date, nullable=True)
+    # Is 3 - kalem bazli numune gorseli (opsiyonel, static/ koku itibariyle
+    # goreli yol) - Teklif PDF'inde ilgili kalemin yaninda gosterilir.
+    numune_gorseli = db.Column(db.String(300), nullable=True)
 
 # Uretim asama akisi: basit 3 durumlu siralama. 'iptal' bilincli olarak bu
 # akisin disinda tutulur (sadece edit_production'dan elle secilir).

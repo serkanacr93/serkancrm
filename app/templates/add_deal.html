@@ -8,7 +8,7 @@
     <a href="{{ url_for('deals') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Geri</a>
 </div>
 
-<form method="POST">
+<form method="POST" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="row">
         <div class="col-md-8">
@@ -177,6 +177,7 @@
                                             <div class="col"><input type="text" class="form-control form-control-sm" name="en_0" placeholder="En"></div>
                                             <div class="col"><input type="text" class="form-control form-control-sm" name="renk_0" placeholder="Renk"></div>
                                             <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_0" title="Teslim Tarihi"></div>
+                                            <div class="col"><input type="file" class="form-control form-control-sm" name="numune_gorseli_0" accept="image/jpeg,image/png" title="Numune Görseli"></div>
                                         </div>
                                     </td>
                                 </tr>
@@ -326,6 +327,7 @@ document.getElementById('add-item').addEventListener('click', function() {
                 <div class="col"><input type="text" class="form-control form-control-sm" name="en_${itemCount}" placeholder="En"></div>
                 <div class="col"><input type="text" class="form-control form-control-sm" name="renk_${itemCount}" placeholder="Renk"></div>
                 <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_${itemCount}" title="Teslim Tarihi"></div>
+                <div class="col"><input type="file" class="form-control form-control-sm" name="numune_gorseli_${itemCount}" accept="image/jpeg,image/png" title="Numune Görseli"></div>
             </div>
         </td>
     `;
