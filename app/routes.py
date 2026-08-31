@@ -1,4 +1,4 @@
-from flask import render_template, request, redirect, url_for, flash, send_file, jsonify
+from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, _clean_for_pdf
@@ -153,6 +153,36 @@ def _normalize_phone_for_whatsapp(phone):
     if len(digits) == 10:
         return '90' + digits
     return digits or None
+
+def _admin_deals_own_only():
+    """Is 3: admin'in oturum bazli 'Sadece Benim Tekliflerim' tercihi.
+    Normal kullanicilar icin bu ayarin hicbir etkisi yok - onlar zaten her
+    zaman sadece kendi tekliflerini gorur."""
+    return bool(session.get('admin_deals_own_only'))
+
+def _deal_visibility_user_id():
+    """Bu istekte teklif gorunurlugunun kime kisitlanacagini dondurur:
+    normal kullanici icin HER ZAMAN kendi id'si; admin icin varsayilan
+    olarak None (kisitlama yok - herkesin teklifi gorunur), ama Is 3'teki
+    gecis anahtari 'sadece benim tekliflerim' konumundaysa admin icin de
+    kendi id'si. Is 1: teklif gorunurlugunun TUM route/istatistiklerde
+    (Dashboard, /deals, /deals/export/excel, /calendar, /reports dahil)
+    TEK bu fonksiyondan beslenmesini saglar - onceden bu kontrol bazi
+    yerlerde hic yapilmiyordu, bu da ayni kullaniciya gore tutarsiz
+    teklif sayilari/listeleri gorunmesine yol aciyordu."""
+    if not current_user.is_admin:
+        return current_user.id
+    if _admin_deals_own_only():
+        return current_user.id
+    return None
+
+def _apply_deal_visibility(query):
+    """Deal.query veya Deal uzerinden kurulmus bir db.session.query(...)'a
+    _deal_visibility_user_id()'nin dondurdugu kisitlamayi uygular."""
+    scope_user_id = _deal_visibility_user_id()
+    if scope_user_id is not None:
+        query = query.filter(Deal.user_id == scope_user_id)
+    return query
 
 def _customer_full_name(customer):
     """Musterinin tam adini (kisaltmadan), gundelik hitaplardan (Abi/Amca/
@@ -371,13 +401,18 @@ def register_routes(app):
         # yuksek RTT'li) ayri ayri 10 round-trip yerine TEK bir sorguda
         # (her biri scalar_subquery olarak) calistirilir - dashboard'daki
         # olcumde bu sorgular RTT basina ~400-900ms'e mal oluyordu.
+        # Is 1: deals/total_value/active_deals/customers_with_orders - hepsi
+        # teklif gorunurluk kuralina tabi (_apply_deal_visibility) - eskiden
+        # bu 4'u HICBIR kisitlama uygulamiyordu, normal bir kullanici
+        # Dashboard'da "73 teklif" gorup /deals'ta sadece 12 tanesini
+        # gorebiliyordu (tutarsizlik).
         stats = db.session.query(
             db.session.query(db.func.count(Customer.id)).scalar_subquery().label('customers'),
-            db.session.query(db.func.count(Deal.id)).scalar_subquery().label('deals'),
-            db.session.query(db.func.sum(Deal.value)).scalar_subquery().label('total_value'),
-            db.session.query(db.func.count(Deal.id)).filter(
+            _apply_deal_visibility(db.session.query(db.func.count(Deal.id))).scalar_subquery().label('deals'),
+            _apply_deal_visibility(db.session.query(db.func.sum(Deal.value))).scalar_subquery().label('total_value'),
+            _apply_deal_visibility(db.session.query(db.func.count(Deal.id)).filter(
                 Deal.stage.notin_(['kazanilan', 'kaybedilen'])
-            ).scalar_subquery().label('active_deals'),
+            )).scalar_subquery().label('active_deals'),
             db.session.query(db.func.count(Production.id)).scalar_subquery().label('production_count'),
             db.session.query(db.func.count(Shipment.id)).filter(
                 Shipment.status.notin_(['teslim_edildi'])
@@ -390,9 +425,11 @@ def register_routes(app):
                 Customer.company_name.isnot(None)
             ).scalar_subquery().label('customer_types'),
             db.session.query(db.func.count(CustomerVisit.id)).scalar_subquery().label('total_visits'),
-            db.session.query(db.func.count(db.distinct(Customer.id))).select_from(Customer).join(
-                Deal, Deal.customer_id == Customer.id
-            ).filter(Deal.stage == 'kazanilan').scalar_subquery().label('customers_with_orders'),
+            _apply_deal_visibility(
+                db.session.query(db.func.count(db.distinct(Customer.id))).select_from(Customer).join(
+                    Deal, Deal.customer_id == Customer.id
+                ).filter(Deal.stage == 'kazanilan')
+            ).scalar_subquery().label('customers_with_orders'),
         ).one()
 
         customers = stats.customers
@@ -413,18 +450,18 @@ def register_routes(app):
         pending_price_reports = DailyReport.query.filter_by(status='fiyat_verilecek').order_by(DailyReport.report_date.asc()).all()
         pending_price_list = [(r, (today - r.report_date).days) for r in pending_price_reports]
 
-        expiring_deals = Deal.query.filter(
+        expiring_deals = _apply_deal_visibility(Deal.query.filter(
             Deal.valid_until <= today + timedelta(days=2),
             Deal.valid_until >= today,
             Deal.stage.notin_(['kazanilan', 'kaybedilen', 'revize'])
-        ).all()
-        
-        expired_deals = Deal.query.filter(
+        )).all()
+
+        expired_deals = _apply_deal_visibility(Deal.query.filter(
             Deal.valid_until < today,
             Deal.stage.notin_(['kazanilan', 'kaybedilen', 'revize'])
-        ).all()
-        
-        recent_deals = Deal.query.order_by(Deal.created_at.desc()).limit(5).all()
+        )).all()
+
+        recent_deals = _apply_deal_visibility(Deal.query).order_by(Deal.created_at.desc()).limit(5).all()
         recent_customers = Customer.query.order_by(Customer.created_at.desc()).limit(5).all()
         
         upcoming_tasks = Task.query.filter(
@@ -437,16 +474,16 @@ def register_routes(app):
             Task.status.notin_(['tamamlandi'])
         ).all()
         
-        monthly_sales_rows = db.session.query(
+        monthly_sales_rows = _apply_deal_visibility(db.session.query(
             db.func.to_char(Deal.created_at, 'YYYY-MM').label('month'),
             db.func.sum(Deal.value).label('total')
-        ).filter(Deal.stage == 'kazanilan').group_by(db.func.to_char(Deal.created_at, 'YYYY-MM')).order_by(db.text('1 DESC')).limit(6).all()
+        ).filter(Deal.stage == 'kazanilan')).group_by(db.func.to_char(Deal.created_at, 'YYYY-MM')).order_by(db.text('1 DESC')).limit(6).all()
         monthly_sales = [(r.month, r.total) for r in monthly_sales_rows]
 
-        stage_stats = db.session.query(
+        stage_stats = _apply_deal_visibility(db.session.query(
             Deal.stage,
             db.func.count(Deal.id)
-        ).group_by(Deal.stage).all()
+        )).group_by(Deal.stage).all()
         
         individual_customers = customers - customer_types
 
@@ -1234,9 +1271,7 @@ def register_routes(app):
         tab = request.args.get('tab', 'aktif')
         page = request.args.get('page', 1, type=int)
 
-        base_query = Deal.query
-        if not current_user.is_admin:
-            base_query = base_query.filter(Deal.user_id == current_user.id)
+        base_query = _apply_deal_visibility(Deal.query)
 
         RESOLVED_STAGES = ('kazanilan', 'kaybedilen', 'revize')
 
@@ -1259,9 +1294,7 @@ def register_routes(app):
         }
 
         def count_query(t):
-            q = db.session.query(db.func.count(Deal.id)).select_from(Deal)
-            if not current_user.is_admin:
-                q = q.filter(Deal.user_id == current_user.id)
+            q = _apply_deal_visibility(db.session.query(db.func.count(Deal.id)).select_from(Deal))
             if t in tab_count_filters:
                 q = q.filter(tab_count_filters[t])
             return q.scalar_subquery()
@@ -1285,11 +1318,27 @@ def register_routes(app):
             )).join(Customer)
         if stage_filter:
             query = query.filter(Deal.stage == stage_filter)
-        query = query.options(joinedload(Deal.customer))
+        # Is 2: sablon her satirda deal.seller (olusturan kullanici)
+        # gosteriyor - joinedload olmadan N+1'e mal olurdu.
+        query = query.options(joinedload(Deal.customer), joinedload(Deal.seller))
         pagination = query.order_by(Deal.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
         deals = pagination.items
         return render_template('deals.html', deals=deals, search=search, stage_filter=stage_filter,
-                                tab=tab, tab_counts=tab_counts, pagination=pagination)
+                                tab=tab, tab_counts=tab_counts, pagination=pagination,
+                                admin_deals_own_only=_admin_deals_own_only())
+
+    @app.route('/deals/view-toggle', methods=['POST'])
+    @login_required
+    def deals_view_toggle():
+        """Is 3: SADECE admin icin - 'Tum Teklifler' / 'Sadece Benim
+        Tekliflerim' gecis anahtari, oturum (session) boyunca hatirlanir.
+        Normal kullanici bu route'a POST atarsa (ornegin dogrudan URL ile)
+        hicbir etkisi olmaz - _deal_visibility_user_id() zaten admin
+        olmayanlar icin bu session degerini hic okumuyor, ama yine de
+        yaniltici olmasin diye admin degilse sessizce yok sayilir."""
+        if current_user.is_admin:
+            session['admin_deals_own_only'] = request.form.get('mode') == 'own'
+        return redirect(url_for('deals', tab=request.form.get('tab', 'aktif'), page=request.form.get('page', 1)))
 
     @app.route('/deals/add', methods=['GET', 'POST'])
     @login_required
@@ -1897,7 +1946,10 @@ def register_routes(app):
     @app.route('/deals/export/excel')
     @login_required
     def deals_export_excel():
-        deals = Deal.query.all()
+        # Is 1: eskiden TUM tekliflerin (baskalarininkiler dahil) disa
+        # aktarilmasina izin veriyordu - liste sayfasindaki gorunurluk
+        # kuraliyla tutarsizdi. Artik ayni gorunurluk kaynagini kullanir.
+        deals = _apply_deal_visibility(Deal.query).all()
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = 'Teklifler'
@@ -2880,7 +2932,9 @@ def register_routes(app):
             last_day = date(year, month + 1, 1) - timedelta(days=1)
         
         tasks = Task.query.filter(Task.due_date.between(first_day, last_day)).all()
-        deals_expiring = Deal.query.filter(Deal.valid_until.between(first_day, last_day)).all()
+        deals_expiring = _apply_deal_visibility(
+            Deal.query.filter(Deal.valid_until.between(first_day, last_day))
+        ).all()
         
         cal_tasks = {}
         for t in tasks:
@@ -2901,17 +2955,26 @@ def register_routes(app):
     @app.route('/reports')
     @login_required
     def reports():
-        stage_stats = db.session.query(Deal.stage, db.func.count(Deal.id), db.func.sum(Deal.value)).group_by(Deal.stage).all()
-        recent_deals = Deal.query.order_by(Deal.created_at.desc()).limit(5).all()
-        top_customers = db.session.query(Customer, db.func.count(Deal.id).label('deal_count'),
-                                        db.func.sum(Deal.value).label('total_value')).join(Deal).group_by(Customer).order_by(db.text('total_value DESC')).limit(5).all()
-        
+        # Is 1: bu 4 sorgunun tamami eskiden gorunurluk kisitlamasi hic
+        # uygulamiyordu - normal bir kullanici /reports'ta baskalarinin
+        # tekliflerinden turetilen istatistikleri gorebiliyordu.
+        stage_stats = _apply_deal_visibility(
+            db.session.query(Deal.stage, db.func.count(Deal.id), db.func.sum(Deal.value))
+        ).group_by(Deal.stage).all()
+        recent_deals = _apply_deal_visibility(Deal.query).order_by(Deal.created_at.desc()).limit(5).all()
+        top_customers = _apply_deal_visibility(
+            db.session.query(Customer, db.func.count(Deal.id).label('deal_count'),
+                              db.func.sum(Deal.value).label('total_value')).join(Deal)
+        ).group_by(Customer).order_by(db.text('total_value DESC')).limit(5).all()
+
         production_stats = db.session.query(Production.status, db.func.count(Production.id)).group_by(Production.status).all()
-        
-        monthly_sales_rows2 = db.session.query(
-            db.func.to_char(Deal.created_at, 'YYYY-MM').label('month'),
-            db.func.sum(Deal.value).label('total')
-        ).filter(Deal.stage == 'kazanilan').group_by(db.func.to_char(Deal.created_at, 'YYYY-MM')).order_by(db.text('1 DESC')).limit(12).all()
+
+        monthly_sales_rows2 = _apply_deal_visibility(
+            db.session.query(
+                db.func.to_char(Deal.created_at, 'YYYY-MM').label('month'),
+                db.func.sum(Deal.value).label('total')
+            ).filter(Deal.stage == 'kazanilan')
+        ).group_by(db.func.to_char(Deal.created_at, 'YYYY-MM')).order_by(db.text('1 DESC')).limit(12).all()
         monthly_sales = [(r.month, r.total) for r in monthly_sales_rows2]
         return render_template('reports.html', stage_stats=stage_stats, recent_deals=recent_deals,
                              top_customers=top_customers, production_stats=production_stats, monthly_sales=monthly_sales)
@@ -2919,11 +2982,15 @@ def register_routes(app):
     @app.route('/api/chart-data')
     @login_required
     def chart_data():
-        stage_stats = db.session.query(Deal.stage, db.func.count(Deal.id)).group_by(Deal.stage).all()
-        monthly_sales = db.session.query(
-            db.func.to_char(Deal.created_at, 'YYYY-MM').label('month'),
-            db.func.sum(Deal.value).label('total')
-        ).filter(Deal.stage == 'kazanilan').group_by(db.func.to_char(Deal.created_at, 'YYYY-MM')).order_by(db.text('1 DESC')).limit(6).all()
+        stage_stats = _apply_deal_visibility(
+            db.session.query(Deal.stage, db.func.count(Deal.id))
+        ).group_by(Deal.stage).all()
+        monthly_sales = _apply_deal_visibility(
+            db.session.query(
+                db.func.to_char(Deal.created_at, 'YYYY-MM').label('month'),
+                db.func.sum(Deal.value).label('total')
+            ).filter(Deal.stage == 'kazanilan')
+        ).group_by(db.func.to_char(Deal.created_at, 'YYYY-MM')).order_by(db.text('1 DESC')).limit(6).all()
         
         return jsonify({
             'stages': [{'stage': s[0], 'count': s[1]} for s in stage_stats],

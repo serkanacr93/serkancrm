@@ -5,9 +5,32 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-file-earmark-text"></i> Teklifler <span class="badge bg-secondary">{{ pagination.total }}</span></h2>
-    <a href="{{ url_for('add_deal') }}" class="btn btn-success">
-        <i class="bi bi-plus-circle"></i> Yeni Teklif
-    </a>
+    <div class="d-flex align-items-center gap-2">
+        {% if current_user.is_admin %}
+        <!-- Is 3: SADECE admin gorur - "Tum Teklifler" / "Sadece Benim Tekliflerim" -->
+        <div class="btn-group" role="group">
+            <form method="POST" action="{{ url_for('deals_view_toggle') }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="mode" value="all">
+                <input type="hidden" name="tab" value="{{ tab }}">
+                <button type="submit" class="btn btn-sm {{ 'btn-primary' if not admin_deals_own_only else 'btn-outline-primary' }}">
+                    <i class="bi bi-people"></i> Tüm Teklifler
+                </button>
+            </form>
+            <form method="POST" action="{{ url_for('deals_view_toggle') }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="mode" value="own">
+                <input type="hidden" name="tab" value="{{ tab }}">
+                <button type="submit" class="btn btn-sm {{ 'btn-primary' if admin_deals_own_only else 'btn-outline-primary' }}">
+                    <i class="bi bi-person"></i> Sadece Benim Tekliflerim
+                </button>
+            </form>
+        </div>
+        {% endif %}
+        <a href="{{ url_for('add_deal') }}" class="btn btn-success">
+            <i class="bi bi-plus-circle"></i> Yeni Teklif
+        </a>
+    </div>
 </div>
 
 <ul class="nav nav-tabs mb-3">
@@ -82,6 +105,7 @@
                         <th>Toplam</th>
                         <th>Durum</th>
                         <th>Geçerlilik</th>
+                        <th>Oluşturan</th>
                         <th>İşlem</th>
                     </tr>
                 </thead>
@@ -109,6 +133,15 @@
                             {% elif deal.is_expiring_soon %}
                             <br><span class="badge bg-warning text-dark">{{ deal.days_until_expire }} gün kaldı</span>
                             {% endif %}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if deal.seller %}
+                            <span class="badge bg-secondary" title="Teklifi oluşturan kullanıcı">
+                                <i class="bi bi-person"></i> {{ deal.seller.full_name or deal.seller.username }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted small">-</span>
                             {% endif %}
                         </td>
                         <td>

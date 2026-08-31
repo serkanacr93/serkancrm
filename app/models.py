@@ -203,6 +203,9 @@ class Deal(db.Model):
     production = db.relationship('Production', backref='deal', uselist=False)
     statements = db.relationship('CustomerStatement', backref='deal', lazy=True)
     invoices = db.relationship('Invoice', backref='deal', lazy=True)
+    # NOT: User.deals = db.relationship('Deal', backref='seller', ...) zaten
+    # var (bkz. User modeli) - deal.seller ile olusturan kullaniciya erisilir,
+    # ayri bir 'user' iliskisi acmaya gerek yok (Is 2).
 
     @property
     def display_no(self):
