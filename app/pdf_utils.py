@@ -340,35 +340,119 @@ def generate_deal_pdf(deal):
     elements.append(Paragraph("<i>Fiyatlarımıza yürürlükteki K.D.V oranları ilave edilecektir.</i>", normal))
     elements.append(Spacer(1, 4*mm))
 
-    # ===== NUMUNE GORSELLERI (Is 3) - sadece gorseli olan kalemler icin,
-    # hicbir kalemde gorsel yoksa bu bolum tamamen atlanir. Bozuk/eksik bir
-    # dosya PDF'in tamamini kirmasin diye her gorsel kendi try/except'inde
-    # islenir - o kalem icin sadece etiket kalir, hata verilmez. =====
+    # ===== NUMUNE GORSELLERI (Is 3, buyutulup "kart" gorunumune yeniden
+    # tasarlandi) - sadece gorseli olan kalemler icin, hicbir kalemde
+    # gorsel yoksa bu bolum tamamen atlanir. Bozuk/eksik bir dosya PDF'in
+    # tamamini kirmasin diye her gorsel kendi try/except'inde islenir - o
+    # kalem icin sadece etiket kalir, hata verilmez. =====
     items_with_numune = [item for item in deal.items if item.numune_gorseli]
     if items_with_numune:
-        numune_label_style = ParagraphStyle('NumuneLabel', parent=small, fontSize=7, alignment=1)
+        numune_label_style = ParagraphStyle(
+            'NumuneLabel', parent=small, fontName='Vera-Bold', fontSize=8.5,
+            alignment=1, textColor=colors.HexColor('#333333')
+        )
         static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
-        thumb_cells = []
+
+        CARD_W = 248  # points - ~250-300pt istenen araligin alt siniri, gercek
+        # A4 icerik genisliginde (~521pt, 1.3cm kenar bosluklariyla) 2 karti
+        # yan yana sigdirabilmek icin (cerceve/golge payi dahil ~251pt/kart).
+        IMG_BOX = CARD_W - 12  # kart ic dolgusu icin gorsel kutusu biraz kucuk
+
+        cards = []
         for item in items_with_numune:
             img_flowable = None
             try:
                 img_path = os.path.join(static_dir, item.numune_gorseli)
                 if os.path.isfile(img_path):
-                    img_flowable = Image(img_path, width=2.6*cm, height=2.6*cm, kind='proportional')
+                    # Gercek dosya coz unurlugu korunur - sadece GORUNUM
+                    # kutusu buyutulur, kaynak gorsele hicbir yeniden
+                    # sikistirma/kucultme uygulanmaz (bulaniklasmayi onler).
+                    img_flowable = Image(img_path, width=IMG_BOX, height=IMG_BOX, kind='proportional')
             except Exception:
                 img_flowable = None
-            if img_flowable is not None:
-                thumb_cells.append([img_flowable, Paragraph(_pdf_cell_text(item.description), numune_label_style)])
-        if thumb_cells:
+            if img_flowable is None:
+                continue
+
+            # Beyaz zeminli, ince gri cerceveli "kart" - gorsel
+            inner = Table([[img_flowable]], colWidths=[CARD_W])
+            inner.setStyle(TableStyle([
+                ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#a0a0a0')),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ]))
+            # Golge efekti: karti gri zeminli bir tabloya, ust/sol dolgu
+            # SIFIR, sag/alt dolgu birkac punto birakarak yerlestirmek,
+            # kartin sag-alt kenarinda ince bir gri "golge" seridi birakir.
+            shadow = Table([[inner]], colWidths=[CARD_W + 4])
+            shadow.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#c4c4c4')),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
+
+            # Urun adi - gorselin altinda ayri, acik gri bir serit/kutu icinde
+            label_table = Table(
+                [[Paragraph(_pdf_cell_text(item.description), numune_label_style)]],
+                colWidths=[CARD_W + 4]
+            )
+            label_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#eef0f2')),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+
+            card = Table([[shadow], [label_table]], colWidths=[CARD_W + 4])
+            card.setStyle(TableStyle([
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 1), (-1, 1), 0),
+                ('TOPPADDING', (0, 1), (-1, 1), 2),
+            ]))
+            cards.append(card)
+
+        if cards:
             elements.append(Paragraph("NUMUNE GÖRSELLERİ", box_heading))
-            elements.append(Spacer(1, 1.5*mm))
-            row = [Table([[c[0]], [c[1]]], colWidths=[3*cm]) for c in thumb_cells]
-            gallery = Table([row], colWidths=[3*cm] * len(row))
+            elements.append(Spacer(1, 3*mm))
+
+            # Grid: kac kartin bir satira sigacagini gercek sayfa
+            # genisliginden (kenar bosluklari haric) otomatik hesaplar -
+            # birden fazla kart varsa yan yana, sigmayan satira kaydirir.
+            # N sutun + (N-1) aralik toplam genisligi asmadigi surece
+            # sutun sayisi artirilir (onceki floor-bolme denemesi hatali
+            # cikip her karti ayri sayfaya dusuruyordu - PDF->PNG render
+            # ile yakalanip duzeltildi).
+            gap = 8
+            card_total_w = CARD_W + 4  # kart + golge tasmasi
+            content_width = A4[0] - doc.leftMargin - doc.rightMargin
+            max_cols = 1
+            while (max_cols + 1) * card_total_w + max_cols * gap <= content_width:
+                max_cols += 1
+            col_w = card_total_w + gap
+
+            grid_rows = []
+            for i in range(0, len(cards), max_cols):
+                row_cards = cards[i:i + max_cols]
+                row_cards += [''] * (max_cols - len(row_cards))
+                grid_rows.append(row_cards)
+            gallery = Table(grid_rows, colWidths=[col_w] * max_cols)
             gallery.setStyle(TableStyle([
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), gap / 2),
+                ('RIGHTPADDING', (0, 0), (-1, -1), gap / 2),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ]))
             elements.append(gallery)
             elements.append(Spacer(1, 4*mm))
