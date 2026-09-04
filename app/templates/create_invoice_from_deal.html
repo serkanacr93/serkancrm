@@ -52,7 +52,7 @@
                                         <input type="text" class="form-control" name="unit_{{ loop.index0 }}" value="{{ item.unit }}" readonly>
                                     </td>
                                     <td>
-                                        <input type="number" step="0.01" class="form-control price-input" name="price_{{ loop.index0 }}" value="{{ item.unit_price }}" required>
+                                        <input type="number" step="any" class="form-control price-input" name="price_{{ loop.index0 }}" value="{{ item.unit_price }}" required>
                                     </td>
                                     <td>
                                         <span class="row-total fw-bold">{{ "{:,.2f}".format(item.total_price) }} ₺</span>
@@ -111,7 +111,7 @@
                     <div id="on_odeme_box" style="display:none;">
                         <div class="mb-2">
                             <label class="form-label small mb-1">Ön Ödeme Tutarı</label>
-                            <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="on_odeme_tutari" name="on_odeme_tutari">
+                            <input type="number" step="any" min="0" class="form-control form-control-sm" id="on_odeme_tutari" name="on_odeme_tutari">
                         </div>
                         <div class="mb-2">
                             <label class="form-label small mb-1">Ödeme Tarihi</label>
@@ -243,7 +243,7 @@ document.getElementById('add-extra-item').addEventListener('click', function () 
         '<td><input type="text" class="form-control" name="desc_' + extraItemCount + '" required></td>' +
         '<td><input type="number" step="0.001" class="form-control qty-input" name="qty_' + extraItemCount + '" required></td>' +
         '<td><input type="text" class="form-control" name="unit_' + extraItemCount + '" value="adet"></td>' +
-        '<td><input type="number" step="0.01" class="form-control price-input" name="price_' + extraItemCount + '" required></td>' +
+        '<td><input type="number" step="any" class="form-control price-input" name="price_' + extraItemCount + '" required></td>' +
         '<td><span class="row-total fw-bold">0,00 ₺</span></td>' +
         '<td><button type="button" class="btn btn-sm btn-danger remove-extra-item"><i class="bi bi-trash"></i></button></td>';
     tbody.appendChild(row);

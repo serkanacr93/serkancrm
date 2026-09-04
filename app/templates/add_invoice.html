@@ -84,7 +84,7 @@
                                     <td><input type="text" class="form-control form-control-sm" name="desc_0" required></td>
                                     <td><input type="number" class="form-control form-control-sm item-qty" name="qty_0" min="0" step="0.01" required></td>
                                     <td><input type="text" class="form-control form-control-sm" name="unit_0" value="adet"></td>
-                                    <td><input type="number" class="form-control form-control-sm item-price" name="price_0" min="0" step="0.01" required></td>
+                                    <td><input type="number" class="form-control form-control-sm item-price" name="price_0" min="0" step="any" required></td>
                                     <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
                                     <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
                                 </tr>
@@ -131,7 +131,7 @@
                     <div id="on_odeme_box" style="display:none;">
                         <div class="mb-2">
                             <label class="form-label small mb-1">Ön Ödeme Tutarı</label>
-                            <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="on_odeme_tutari" name="on_odeme_tutari">
+                            <input type="number" step="any" min="0" class="form-control form-control-sm" id="on_odeme_tutari" name="on_odeme_tutari">
                         </div>
                         <div class="mb-2">
                             <label class="form-label small mb-1">Ödeme Tarihi</label>
@@ -215,7 +215,7 @@ document.getElementById('add-item').addEventListener('click', function () {
         '<td><input type="text" class="form-control form-control-sm" name="desc_' + itemCount + '" required></td>' +
         '<td><input type="number" class="form-control form-control-sm item-qty" name="qty_' + itemCount + '" min="0" step="0.01" required></td>' +
         '<td><input type="text" class="form-control form-control-sm" name="unit_' + itemCount + '" value="adet"></td>' +
-        '<td><input type="number" class="form-control form-control-sm item-price" name="price_' + itemCount + '" min="0" step="0.01" required></td>' +
+        '<td><input type="number" class="form-control form-control-sm item-price" name="price_' + itemCount + '" min="0" step="any" required></td>' +
         '<td><input type="text" class="form-control form-control-sm item-total" readonly></td>' +
         '<td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>';
     tbody.appendChild(row);

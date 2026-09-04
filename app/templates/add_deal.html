@@ -159,7 +159,7 @@
                                             <option value="set">Set</option>
                                         </select>
                                     </td>
-                                    <td><input type="number" class="form-control form-control-sm item-price" name="price_0" min="0" step="0.01" required></td>
+                                    <td><input type="number" class="form-control form-control-sm item-price" name="price_0" min="0" step="any" required></td>
                                     <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
                                     <td>
                                         <select class="form-select form-select-sm" name="urun_tipi_0" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır.">
@@ -307,7 +307,7 @@ document.getElementById('add-item').addEventListener('click', function() {
                 <option value="set">Set</option>
             </select>
         </td>
-        <td><input type="number" class="form-control form-control-sm item-price" name="price_${itemCount}" min="0" step="0.01" required></td>
+        <td><input type="number" class="form-control form-control-sm item-price" name="price_${itemCount}" min="0" step="any" required></td>
         <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
         <td>
             <select class="form-select form-select-sm" name="urun_tipi_${itemCount}" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır.">

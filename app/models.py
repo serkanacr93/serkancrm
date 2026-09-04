@@ -7,6 +7,31 @@ from app import db, login_manager
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+def format_price_precise(value):
+    """Birim fiyat gibi yuksek hassasiyetli deger gerekebilecek alanlar
+    icin - eskiden HER YERDE '{:,.2f}' kullanildigi icin 0.012458 gibi
+    2 ondalikten fazla girilen bir fiyat ekranda/PDF'te '0.01'e
+    yuvarlanmis GORUNUYORDU (veritabaninda deger dogru duruyordu, sadece
+    GORUNUM yuvarliyordu). Python'un str(float)'i IEEE754'un en kisa
+    round-trip temsilini verdigi icin (sabit '.10f' formati aksine, buyuk
+    tam sayili degerlerde '1234567.8899999999' gibi ikili temsil
+    gurultusu ACIGA CIKARMAZ) temel alinir; en az 2 ondalik gosterilir
+    (5 -> '5.00'), 2'den fazla ondalik varsa TAMAMI korunur, kirpilmaz."""
+    if value is None:
+        return '-'
+    value = float(value)
+    text = str(value)
+    if 'e' in text or 'E' in text:
+        text = f'{value:.10f}'.rstrip('0').rstrip('.')
+    sign = ''
+    if text.startswith('-'):
+        sign = '-'
+        text = text[1:]
+    int_part, _, dec_part = text.partition('.')
+    if len(dec_part) < 2:
+        dec_part = dec_part.ljust(2, '0')
+    return f'{sign}{int(int_part):,}.{dec_part}'
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)

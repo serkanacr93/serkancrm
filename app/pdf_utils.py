@@ -9,6 +9,7 @@ from io import BytesIO
 import os
 import re
 from datetime import datetime
+from app.models import format_price_precise
 
 # PDF ciktilarinda temizlenecek samimi/gundelik hitaplar (Bey/Usta/Hoca
 # bilincli olarak HARIC tutuldu - bunlar Turkce'de resmi/saygi ifadesi
@@ -289,7 +290,7 @@ def generate_deal_pdf(deal):
                 Paragraph(_pdf_cell_text(item.renk), table_narrow),
                 f"{item.quantity:.2f}",
                 item.unit,
-                f"{item.unit_price:,.2f}",
+                format_price_precise(item.unit_price),
                 item_delivery_str
             ])
         table = Table(data, colWidths=col_widths, repeatRows=1)
@@ -615,8 +616,8 @@ def generate_invoice_pdf(invoice):
                 Paragraph(item.description, small),
                 f"{item.quantity:.2f}",
                 item.unit,
-                f"{item.unit_price:,.2f} TL",
-                f"{item.total_price:,.2f} TL"
+                f"{format_price_precise(item.unit_price)} TL",
+                f"{format_price_precise(item.total_price)} TL"
             ])
         data.append(['', '', '', 'Ara Toplam:', f"{invoice.subtotal:,.2f} TL"])
         data.append(['', '', '', f'KDV (%{invoice.vat_rate:.0f}):', f"{invoice.vat_amount:,.2f} TL"])

@@ -126,8 +126,8 @@
                                 <td>{{ item.description }}</td>
                                 <td>{{ item.quantity }}</td>
                                 <td>{{ item.unit }}</td>
-                                <td>{{ "{:,.2f}".format(item.unit_price) }} {{ deal.para_birimi_sembol }}</td>
-                                <td><strong>{{ "{:,.2f}".format(item.total_price) }} {{ deal.para_birimi_sembol }}</strong></td>
+                                <td>{{ item.unit_price|price_precise }} {{ deal.para_birimi_sembol }}</td>
+                                <td><strong>{{ item.total_price|price_precise }} {{ deal.para_birimi_sembol }}</strong></td>
                             </tr>
                             {% endfor %}
                         </tbody>

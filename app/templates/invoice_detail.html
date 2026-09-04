@@ -84,8 +84,8 @@
                                 <td>{{ item.description }}</td>
                                 <td>{{ item.quantity }}</td>
                                 <td>{{ item.unit }}</td>
-                                <td>{{ "{:,.2f}".format(item.unit_price) }} ₺</td>
-                                <td><strong>{{ "{:,.2f}".format(item.total_price) }} ₺</strong></td>
+                                <td>{{ item.unit_price|price_precise }} ₺</td>
+                                <td><strong>{{ item.total_price|price_precise }} ₺</strong></td>
                             </tr>
                             {% endfor %}
                         </tbody>

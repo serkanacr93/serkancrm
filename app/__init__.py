@@ -73,6 +73,13 @@ def create_app():
     from app.routes import register_routes
     register_routes(app)
 
+    @app.template_filter('price_precise')
+    def price_precise_filter(value):
+        """Sablonlarda birim fiyat gibi yuksek hassasiyetli degerleri
+        (0.012458 gibi) '{:,.2f}' ile yuvarlamadan gostermek icin."""
+        from app.models import format_price_precise
+        return format_price_precise(value)
+
     @app.template_global()
     def asset_url(filename):
         """static/ altindaki bir dosya icin, dosyanin degisiklik tarihini
