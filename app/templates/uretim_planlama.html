@@ -96,6 +96,127 @@
 </div>
 {% endif %}
 
+<!-- İş 2: Gramaj/Adet Hesaplama Aracı - SADECE dahili kullanım icin, bu
+     bolum kasitli olarak no-print sinifinda (yazdirilinca/PDF alinca
+     gorunmez) ve Teklif PDF'iyle HICBIR baglantisi yok. -->
+<div class="card mb-4 shadow-sm no-print">
+    <div class="card-header bg-secondary text-white">
+        <i class="bi bi-calculator"></i> Gramaj / Adet Hesaplama Aracı <small class="ms-2">(sadece dahili kullanım)</small>
+    </div>
+    <div class="card-body">
+        <h6 class="mb-2">Sabit Referans Tablosu</h6>
+        <div class="table-responsive mb-4">
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr>
+                        <th>Gramaj Sınıfı</th>
+                        <th>Ölçü (En×Körük×Boy)</th>
+                        <th>Esmer-Beyaz Adet/kg</th>
+                        <th>Küşe Adet/kg</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>100 gr</td><td>8×5,5×15</td><td>220-225</td><td>155-160</td></tr>
+                    <tr><td>250 gr</td><td>9×5,5×17</td><td>170-175</td><td>125-130</td></tr>
+                    <tr><td>500 gr</td><td>11×6×22</td><td>115-120</td><td>85-90</td></tr>
+                    <tr><td>1000 gr</td><td>12,5×7×29</td><td>80-85</td><td>60-65</td></tr>
+                    <tr><td>2000 gr</td><td>16×10×32</td><td>50-55</td><td>40-45</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h6 class="mb-2">Hesap Makinesi</h6>
+        <div class="row g-3 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label small">En (cm)</label>
+                <input type="number" step="any" min="0" class="form-control form-control-sm" id="gramaj_en">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Boy (cm)</label>
+                <input type="number" step="any" min="0" class="form-control form-control-sm" id="gramaj_boy">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Körük (cm)</label>
+                <input type="number" step="any" min="0" class="form-control form-control-sm" id="gramaj_korugu">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Kağıt Gramajı (g/m²)</label>
+                <input type="number" step="any" min="0" class="form-control form-control-sm" id="gramaj_gramaj">
+            </div>
+        </div>
+        <div class="row g-3 mt-2">
+            <div class="col-md-4">
+                <div class="border rounded p-2 text-center bg-light">
+                    <div class="small text-muted">Kağıt Alanı</div>
+                    <div class="fw-bold fs-5" id="gramaj_sonuc_alan">-</div>
+                    <div class="small text-muted">cm²</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="border rounded p-2 text-center bg-light">
+                    <div class="small text-muted">Bir Adet Ağırlığı</div>
+                    <div class="fw-bold fs-5" id="gramaj_sonuc_agirlik">-</div>
+                    <div class="small text-muted">gram</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="border rounded p-2 text-center bg-success bg-opacity-10">
+                    <div class="small text-muted">1 kg'dan Çıkan Tahmini Adet</div>
+                    <div class="fw-bold fs-4 text-success" id="gramaj_sonuc_adet">-</div>
+                    <div class="small text-muted">adet</div>
+                </div>
+            </div>
+        </div>
+        <p class="small text-muted mt-2 mb-0">Bu hesaplama hiçbir kalıcı kayıt oluşturmaz, sadece anlık gösterge amaçlıdır.</p>
+    </div>
+</div>
+
+<script>
+(function () {
+    var enInput = document.getElementById('gramaj_en');
+    var boyInput = document.getElementById('gramaj_boy');
+    var korukInput = document.getElementById('gramaj_korugu');
+    var gramajInput = document.getElementById('gramaj_gramaj');
+    var outAlan = document.getElementById('gramaj_sonuc_alan');
+    var outAgirlik = document.getElementById('gramaj_sonuc_agirlik');
+    var outAdet = document.getElementById('gramaj_sonuc_adet');
+
+    function fmt(n) {
+        return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function hesapla() {
+        var en = parseFloat(enInput.value);
+        var boy = parseFloat(boyInput.value);
+        var koruk = parseFloat(korukInput.value);
+        var gramaj = parseFloat(gramajInput.value);
+
+        if (isNaN(en) || isNaN(boy) || isNaN(koruk) || isNaN(gramaj) || gramaj <= 0) {
+            outAlan.textContent = '-';
+            outAgirlik.textContent = '-';
+            outAdet.textContent = '-';
+            return;
+        }
+
+        var x = koruk / 2 + 3;
+        var y = 2 * en + 2 * koruk + 3;
+        var v = boy + 2;
+        var a = v + x;
+        var kagitAlani = y * a;
+        var birAdetAgirligi = (kagitAlani / 10000) * gramaj;
+        var kgdanCikanAdet = birAdetAgirligi > 0 ? 1000 / birAdetAgirligi : 0;
+
+        outAlan.textContent = fmt(kagitAlani);
+        outAgirlik.textContent = fmt(birAdetAgirligi);
+        outAdet.textContent = Math.round(kgdanCikanAdet).toLocaleString('tr-TR');
+    }
+
+    [enInput, boyInput, korukInput, gramajInput].forEach(function (el) {
+        el.addEventListener('input', hesapla);
+    });
+})();
+</script>
+
 <style>
 .plan-total-row td {
     background-color: #fd7e14 !important;

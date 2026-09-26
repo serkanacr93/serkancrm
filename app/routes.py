@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, _clean_for_pdf
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter
 from app.tcmb import fetch_tcmb_rate
@@ -1420,6 +1420,7 @@ def register_routes(app):
                         kagit_cinsi=request.form.get(f'kagit_cinsi_{i}', '').strip() or None,
                         boy=request.form.get(f'boy_{i}', '').strip() or None,
                         en=request.form.get(f'en_{i}', '').strip() or None,
+                        korugu=request.form.get(f'korugu_{i}', '').strip() or None,
                         renk=request.form.get(f'renk_{i}', '').strip() or None,
                         teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
                         numune_gorseli=numune_path,
@@ -1524,6 +1525,7 @@ def register_routes(app):
                                kagit_cinsi=request.form.get(f'kagit_cinsi_{i}', '').strip() or None,
                                boy=request.form.get(f'boy_{i}', '').strip() or None,
                                en=request.form.get(f'en_{i}', '').strip() or None,
+                               korugu=request.form.get(f'korugu_{i}', '').strip() or None,
                                renk=request.form.get(f'renk_{i}', '').strip() or None,
                                teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
                                numune_gorseli=numune_path,
@@ -2434,6 +2436,157 @@ def register_routes(app):
         db.session.commit()
         flash('Manuel kayıt silindi!', 'success')
         return redirect(url_for('tedarik_takip'))
+
+    @app.route('/gunluk-uretim')
+    @login_required
+    def gunluk_uretim():
+        """Is 3: atolyenin gun icinde elle doldurdugu uretim takip
+        kagidinin dijital karsiligi - tarihe gore gruplanmis, her gunun
+        altinda o gune ait TUM girisler + gun sonu TOPLAM kg."""
+        entries = DailyProductionOutput.query.options(joinedload(DailyProductionOutput.customer)) \
+            .order_by(DailyProductionOutput.tarih.desc(), DailyProductionOutput.created_at.asc()).all()
+        photos = DailyProductionPhoto.query.order_by(
+            DailyProductionPhoto.tarih.desc(), DailyProductionPhoto.created_at.asc()
+        ).all()
+
+        photos_by_date = {}
+        for p in photos:
+            photos_by_date.setdefault(p.tarih, []).append(p)
+
+        groups = {}
+        for e in entries:
+            groups.setdefault(e.tarih, []).append(e)
+
+        day_groups = []
+        for d in sorted(groups.keys(), reverse=True):
+            rows = groups[d]
+            day_groups.append({
+                'tarih': d,
+                'rows': rows,
+                'total_kg': sum(r.toplam_kg for r in rows),
+                'photos': photos_by_date.get(d, []),
+            })
+
+        return render_template('gunluk_uretim.html', day_groups=day_groups, today=datetime.now().date())
+
+    @app.route('/gunluk-uretim/bos-form-pdf')
+    @login_required
+    def gunluk_uretim_bos_form_pdf():
+        """Is 5: veritabanindan veri cekmeyen, atolyede elle doldurulacak
+        BOS form PDF'i - her gun yeniden basilabilsin diye buradan
+        indirilir."""
+        pdf = generate_gunluk_uretim_form_pdf()
+        return send_file(pdf, as_attachment=True,
+                          download_name=f'gunluk_uretim_takip_formu_{datetime.now().strftime("%Y%m%d")}.pdf')
+
+    @app.route('/gunluk-uretim/add', methods=['POST'])
+    @login_required
+    def add_daily_production_output():
+        """AJAX (JSON) endpoint - sayfa yenilenmeden art arda kalem
+        eklenebilsin diye fetch() ile cagrilir (Is 3), olusturulan kaydi
+        JSON olarak doner; JS bunu ilgili gun grubuna ekler."""
+        tarih_raw = request.form.get('tarih', '').strip()
+        musteri_adi = request.form.get('musteri_adi', '').strip()
+        customer_id = request.form.get('customer_id') or None
+        koli_basi_kg_raw = request.form.get('koli_basi_kg', '').strip()
+        koli_adedi_raw = request.form.get('koli_adedi', '').strip()
+        toplam_kg_raw = request.form.get('toplam_kg', '').strip()
+        aciklama = request.form.get('aciklama', '').strip() or None
+
+        if not tarih_raw:
+            return jsonify({'error': 'Tarih girilmelidir.'}), 400
+        if not musteri_adi:
+            return jsonify({'error': 'Müşteri/Firma girilmelidir.'}), 400
+        try:
+            koli_basi_kg = float(koli_basi_kg_raw)
+            koli_adedi = float(koli_adedi_raw)
+        except ValueError:
+            return jsonify({'error': 'Koli Başı Kg ve Koli Adedi geçerli bir sayı olmalıdır.'}), 400
+        if koli_basi_kg <= 0 or koli_adedi <= 0:
+            return jsonify({'error': "Koli Başı Kg ve Koli Adedi 0'dan büyük olmalıdır."}), 400
+
+        if toplam_kg_raw:
+            try:
+                toplam_kg = float(toplam_kg_raw)
+            except ValueError:
+                return jsonify({'error': 'Toplam Kg geçerli bir sayı olmalıdır.'}), 400
+        else:
+            toplam_kg = koli_basi_kg * koli_adedi
+
+        customer = Customer.query.get(int(customer_id)) if customer_id else None
+
+        try:
+            entry = DailyProductionOutput(
+                tarih=datetime.strptime(tarih_raw, '%Y-%m-%d').date(),
+                musteri_adi=customer.display_name if customer else musteri_adi,
+                customer_id=customer.id if customer else None,
+                koli_basi_kg=koli_basi_kg,
+                koli_adedi=koli_adedi,
+                toplam_kg=toplam_kg,
+                aciklama=aciklama,
+                user_id=current_user.id,
+            )
+            db.session.add(entry)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            return jsonify({'error': 'Kayıt eklenirken bir hata oluştu, hiçbir değişiklik kaydedilmedi.'}), 500
+
+        return jsonify({
+            'id': entry.id,
+            'tarih': entry.tarih.strftime('%Y-%m-%d'),
+            'tarih_display': entry.tarih.strftime('%d.%m.%Y'),
+            'musteri_adi': entry.musteri_adi,
+            'koli_basi_kg': entry.koli_basi_kg,
+            'koli_adedi': entry.koli_adedi,
+            'toplam_kg': entry.toplam_kg,
+            'aciklama': entry.aciklama or '',
+        }), 201
+
+    @app.route('/gunluk-uretim/<int:id>/sil', methods=['POST'])
+    @login_required
+    def delete_daily_production_output(id):
+        entry = DailyProductionOutput.query.get_or_404(id)
+        db.session.delete(entry)
+        db.session.commit()
+        flash('Kayıt silindi!', 'success')
+        return redirect(url_for('gunluk_uretim'))
+
+    @app.route('/gunluk-uretim/foto-ekle', methods=['POST'])
+    @login_required
+    def add_daily_production_photo():
+        """Is 4: SADECE arsivleme - hicbir OCR/okuma yapilmaz. foto_turu
+        'form' (elle doldurulan kagidin fotografi) veya 'urun' (uretilen
+        malin gorseli) olabilir, TARIHE baglidir (tekil satira degil)."""
+        tarih_raw = request.form.get('tarih', '').strip()
+        foto_turu = request.form.get('foto_turu', '').strip()
+        photo_file = request.files.get('foto')
+
+        if foto_turu not in ('form', 'urun'):
+            flash('Geçersiz fotoğraf türü.', 'danger')
+            return redirect(url_for('gunluk_uretim'))
+        if not tarih_raw:
+            flash('Tarih girilmelidir.', 'danger')
+            return redirect(url_for('gunluk_uretim'))
+
+        path, error = _save_uploaded_image(photo_file, 'gunluk_uretim')
+        if error:
+            flash(error, 'danger')
+            return redirect(url_for('gunluk_uretim'))
+        if not path:
+            flash('Bir fotoğraf seçmediniz.', 'warning')
+            return redirect(url_for('gunluk_uretim'))
+
+        photo = DailyProductionPhoto(
+            tarih=datetime.strptime(tarih_raw, '%Y-%m-%d').date(),
+            foto_turu=foto_turu,
+            dosya_yolu=path,
+            user_id=current_user.id,
+        )
+        db.session.add(photo)
+        db.session.commit()
+        flash('Fotoğraf eklendi!', 'success')
+        return redirect(url_for('gunluk_uretim'))
 
     @app.route('/production/<int:id>/tasarim-yukle', methods=['POST'])
     @login_required

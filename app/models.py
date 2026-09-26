@@ -334,6 +334,9 @@ class DealItem(db.Model):
     # kirpilmesi engellenmeli). 50'ye genisletildi (renk ile ayni).
     boy = db.Column(db.String(50), nullable=True)
     en = db.Column(db.String(50), nullable=True)
+    # Is 1 - korfez/korugu olcusu (kraft torba/poset uretiminde yan katlama
+    # payi) - Boy/En ile ayni gerekce (serbest metin, opsiyonel).
+    korugu = db.Column(db.String(50), nullable=True)
     renk = db.Column(db.String(50), nullable=True)
     teslim_tarihi = db.Column(db.Date, nullable=True)
     # Is 3 - kalem bazli numune gorseli (opsiyonel, static/ koku itibariyle
@@ -923,3 +926,39 @@ class PlacesSearchLog(db.Model):
 
     def __repr__(self):
         return f'<PlacesSearchLog {self.city}/{self.sector} - {self.run_at}>'
+
+class DailyProductionOutput(db.Model):
+    """Is 3 - Gunluk Uretim Takibi: atolyenin gun icinde elle doldurdugu
+    kagit formdaki her satiri (musteri, koli basi kg, koli adedi, toplam
+    kg) dijital olarak kaydeder. Musteri/Firma ManualPlanningEntry ile
+    AYNI desen - serbest metin + opsiyonel gercek musteri eslestirmesi."""
+    id = db.Column(db.Integer, primary_key=True)
+    tarih = db.Column(db.Date, default=datetime.utcnow, nullable=False, index=True)
+    musteri_adi = db.Column(db.String(200), nullable=False)  # serbest metin
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)  # opsiyonel, mevcut musteri secilebilir
+    koli_basi_kg = db.Column(db.Float, nullable=False)
+    koli_adedi = db.Column(db.Float, nullable=False)
+    toplam_kg = db.Column(db.Float, nullable=False)  # varsayilan koli_basi_kg*koli_adedi, elle degistirilebilir
+    aciklama = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    customer = db.relationship('Customer')
+    user = db.relationship('User')
+
+class DailyProductionPhoto(db.Model):
+    """Is 4 - Gunluk Uretim fotograf arsivi: bir TARIHE bagli (tekil satira
+    degil - 'Uretim Formu' zaten gunluk tek bir kagit) 'form' (elle
+    doldurulan kagidin fotografi) veya 'urun' (uretilen malin gorseli)
+    turunde dosyalar. SADECE arsivleme icindir - hicbir OCR/okuma
+    yapilmaz; foto_turu alani ileride bir AI Vision entegrasyonu
+    eklendiginde ayni tabloya 'okundu_metni'/'islendi_mi' gibi kolonlar
+    eklenerek genisletilebilecek sekilde ayri tutuldu."""
+    id = db.Column(db.Integer, primary_key=True)
+    tarih = db.Column(db.Date, nullable=False, index=True)
+    foto_turu = db.Column(db.String(20), nullable=False)  # 'form' / 'urun'
+    dosya_yolu = db.Column(db.String(300), nullable=False)  # static/ koku itibariyle goreli
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    user = db.relationship('User')

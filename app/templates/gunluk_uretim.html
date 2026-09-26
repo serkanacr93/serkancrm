@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+
+{% block title %}Günlük Üretim Takibi - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-journal-check"></i> Günlük Üretim Takibi</h2>
+    <a href="{{ url_for('gunluk_uretim_bos_form_pdf') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-file-earmark-pdf"></i> Boş Form Yazdır
+    </a>
+</div>
+
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-primary text-white">
+        <i class="bi bi-plus-circle"></i> Yeni Kayıt Ekle
+    </div>
+    <div class="card-body">
+        <div id="entryErrorBox" class="alert alert-danger py-2 d-none"></div>
+        <form id="entryForm" class="row g-3">
+            <input type="hidden" id="csrf_token_value" value="{{ csrf_token() }}">
+            <div class="col-md-2">
+                <label class="form-label">Tarih</label>
+                <input type="date" class="form-control" id="entry_tarih" value="{{ today.strftime('%Y-%m-%d') }}" required>
+            </div>
+            <div class="col-md-3 position-relative">
+                <label class="form-label">Müşteri / Firma</label>
+                <input type="text" class="form-control" id="customer_search" placeholder="Müşteri adı yazın veya sistemden arayın..." autocomplete="off" required>
+                <input type="hidden" id="customer_id" value="">
+                <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 220px; overflow-y: auto; display: none;"></div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Koli Başı Kg</label>
+                <input type="number" step="any" min="0" class="form-control" id="entry_koli_basi_kg" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Koli Adedi</label>
+                <input type="number" step="any" min="0" class="form-control" id="entry_koli_adedi" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Toplam Kg</label>
+                <input type="number" step="any" min="0" class="form-control" id="entry_toplam_kg" placeholder="Otomatik hesaplanır">
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button type="submit" class="btn btn-success w-100" id="entrySubmitBtn">
+                    <i class="bi bi-plus-lg"></i> Ekle
+                </button>
+            </div>
+            <div class="col-md-8">
+                <label class="form-label">Açıklama</label>
+                <input type="text" class="form-control" id="entry_aciklama" placeholder="Opsiyonel">
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="dayGroupsContainer">
+    {% for g in day_groups %}
+    <div class="card mb-4 shadow-sm day-group" data-tarih="{{ g.tarih.strftime('%Y-%m-%d') }}">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span><i class="bi bi-calendar3"></i> {{ g.tarih.strftime('%d.%m.%Y') }}</span>
+            <div class="d-flex align-items-center gap-2">
+                {% for p in g.photos %}
+                <a href="{{ url_for('static', filename=p.dosya_yolu) }}" target="_blank" title="{{ 'Üretim Formu Fotoğrafı' if p.foto_turu == 'form' else 'Ürün Fotoğrafı' }}">
+                    <img src="{{ url_for('static', filename=p.dosya_yolu) }}" style="height:32px;width:32px;object-fit:cover;border-radius:4px;border:2px solid {{ '#ffc107' if p.foto_turu == 'form' else '#0dcaf0' }};">
+                </a>
+                {% endfor %}
+                <button type="button" class="btn btn-sm btn-outline-light" data-bs-toggle="modal" data-bs-target="#photoModal" data-tarih="{{ g.tarih.strftime('%Y-%m-%d') }}">
+                    <i class="bi bi-camera"></i> Fotoğraf Ekle
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-bordered mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Müşteri / Firma</th>
+                            <th>Koli Başı Kg</th>
+                            <th>Koli Adedi</th>
+                            <th>Toplam Kg</th>
+                            <th>Açıklama</th>
+                            <th class="no-print">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody class="day-rows">
+                        {% for r in g.rows %}
+                        <tr>
+                            <td>{{ r.musteri_adi }}</td>
+                            <td>{{ "%.2f"|format(r.koli_basi_kg) }}</td>
+                            <td>{{ "%.2f"|format(r.koli_adedi) }}</td>
+                            <td>{{ "%.2f"|format(r.toplam_kg) }}</td>
+                            <td>{{ r.aciklama or '-' }}</td>
+                            <td class="no-print">
+                                <form method="POST" action="{{ url_for('delete_daily_production_output', id=r.id) }}" onsubmit="return confirm('Bu kaydı silmek istediğinize emin misiniz?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="table-warning">
+                            <td colspan="3" class="text-end"><strong>GÜNÜN TOPLAM KİLOSU:</strong></td>
+                            <td colspan="3"><strong class="day-total">{{ "%.2f"|format(g.total_kg) }}</strong> kg</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> Henüz günlük üretim kaydı bulunmuyor.
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Fotoğraf ekleme modalı -->
+<div class="modal fade" id="photoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" action="{{ url_for('add_daily_production_photo') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="tarih" id="photoModalTarih" value="">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-camera"></i> Fotoğraf Ekle - <span id="photoModalTarihText"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Fotoğraf Türü</label>
+                        <select class="form-select" name="foto_turu" required>
+                            <option value="form">Üretim Formu Fotoğrafı</option>
+                            <option value="urun">Ürün Fotoğrafı</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Dosya (JPG/PNG)</label>
+                        <input type="file" class="form-control" name="foto" accept="image/jpeg,image/png" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Yükle</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="{{ asset_url('js/customer-search.js') }}"></script>
+<script>
+initCustomerSearch({
+    inputId: 'customer_search',
+    hiddenIdInputId: 'customer_id',
+    resultsId: 'customer_results'
+});
+
+// Toplam Kg otomatik hesaplama - kullanici elle de degistirebilir, o
+// yuzden sadece kullanici Toplam Kg'a HENUZ dokunmadiysa otomatik guncellenir.
+var toplamManuelDegistirildi = false;
+document.getElementById('entry_toplam_kg').addEventListener('input', function () {
+    toplamManuelDegistirildi = true;
+});
+function otomatikToplamHesapla() {
+    if (toplamManuelDegistirildi) return;
+    var basi = parseFloat(document.getElementById('entry_koli_basi_kg').value);
+    var adet = parseFloat(document.getElementById('entry_koli_adedi').value);
+    if (!isNaN(basi) && !isNaN(adet)) {
+        document.getElementById('entry_toplam_kg').value = (basi * adet).toFixed(2);
+    }
+}
+document.getElementById('entry_koli_basi_kg').addEventListener('input', otomatikToplamHesapla);
+document.getElementById('entry_koli_adedi').addEventListener('input', otomatikToplamHesapla);
+
+function fmt2(n) {
+    return Number(n).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function buildRowHtml(entry) {
+    return '<tr>' +
+        '<td>' + entry.musteri_adi + '</td>' +
+        '<td>' + fmt2(entry.koli_basi_kg) + '</td>' +
+        '<td>' + fmt2(entry.koli_adedi) + '</td>' +
+        '<td>' + fmt2(entry.toplam_kg) + '</td>' +
+        '<td>' + (entry.aciklama || '-') + '</td>' +
+        '<td class="no-print">' +
+        '<form method="POST" action="/gunluk-uretim/' + entry.id + '/sil" onsubmit="return confirm(\'Bu kaydı silmek istediğinize emin misiniz?\')">' +
+        '<input type="hidden" name="csrf_token" value="' + document.getElementById('csrf_token_value').value + '">' +
+        '<button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>' +
+        '</form></td></tr>';
+}
+
+function buildGroupHtml(entry) {
+    return '<div class="card mb-4 shadow-sm day-group" data-tarih="' + entry.tarih + '">' +
+        '<div class="card-header bg-dark text-white d-flex justify-content-between align-items-center flex-wrap gap-2">' +
+        '<span><i class="bi bi-calendar3"></i> ' + entry.tarih_display + '</span>' +
+        '<div class="d-flex align-items-center gap-2">' +
+        '<button type="button" class="btn btn-sm btn-outline-light" data-bs-toggle="modal" data-bs-target="#photoModal" data-tarih="' + entry.tarih + '">' +
+        '<i class="bi bi-camera"></i> Fotoğraf Ekle</button></div></div>' +
+        '<div class="card-body p-0"><div class="table-responsive"><table class="table table-bordered mb-0">' +
+        '<thead class="table-light"><tr><th>Müşteri / Firma</th><th>Koli Başı Kg</th><th>Koli Adedi</th><th>Toplam Kg</th><th>Açıklama</th><th class="no-print">İşlem</th></tr></thead>' +
+        '<tbody class="day-rows">' + buildRowHtml(entry) + '</tbody>' +
+        '<tfoot><tr class="table-warning"><td colspan="3" class="text-end"><strong>GÜNÜN TOPLAM KİLOSU:</strong></td>' +
+        '<td colspan="3"><strong class="day-total">' + fmt2(entry.toplam_kg) + '</strong> kg</td></tr></tfoot>' +
+        '</table></div></div></div>';
+}
+
+document.getElementById('entryForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var errorBox = document.getElementById('entryErrorBox');
+    errorBox.classList.add('d-none');
+
+    var formData = new FormData();
+    formData.append('csrf_token', document.getElementById('csrf_token_value').value);
+    formData.append('tarih', document.getElementById('entry_tarih').value);
+    formData.append('musteri_adi', document.getElementById('customer_search').value);
+    formData.append('customer_id', document.getElementById('customer_id').value);
+    formData.append('koli_basi_kg', document.getElementById('entry_koli_basi_kg').value);
+    formData.append('koli_adedi', document.getElementById('entry_koli_adedi').value);
+    formData.append('toplam_kg', document.getElementById('entry_toplam_kg').value);
+    formData.append('aciklama', document.getElementById('entry_aciklama').value);
+
+    var submitBtn = document.getElementById('entrySubmitBtn');
+    var submitBtnOriginalHtml = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Ekleniyor...';
+
+    fetch('/gunluk-uretim/add', { method: 'POST', body: formData })
+        .then(function (resp) {
+            return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+        })
+        .then(function (result) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = submitBtnOriginalHtml;
+            if (!result.ok) {
+                errorBox.textContent = result.data.error || 'Bir hata oluştu.';
+                errorBox.classList.remove('d-none');
+                return;
+            }
+            var entry = result.data;
+            var existingGroup = document.querySelector('.day-group[data-tarih="' + entry.tarih + '"]');
+            if (existingGroup) {
+                existingGroup.querySelector('.day-rows').insertAdjacentHTML('beforeend', buildRowHtml(entry));
+                var totalEl = existingGroup.querySelector('.day-total');
+                var yeniToplam = parseFloat(totalEl.textContent.replace(/\./g, '').replace(',', '.')) + entry.toplam_kg;
+                totalEl.textContent = fmt2(yeniToplam);
+            } else {
+                var container = document.getElementById('dayGroupsContainer');
+                var emptyAlert = container.querySelector('.alert-info');
+                if (emptyAlert) emptyAlert.remove();
+                container.insertAdjacentHTML('afterbegin', buildGroupHtml(entry));
+            }
+
+            // Formu temizle (Tarih haric - ayni gun icin hizli art arda giris)
+            document.getElementById('customer_search').value = '';
+            document.getElementById('customer_id').value = '';
+            document.getElementById('entry_koli_basi_kg').value = '';
+            document.getElementById('entry_koli_adedi').value = '';
+            document.getElementById('entry_toplam_kg').value = '';
+            document.getElementById('entry_aciklama').value = '';
+            toplamManuelDegistirildi = false;
+            document.getElementById('customer_search').focus();
+        })
+        .catch(function () {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = submitBtnOriginalHtml;
+            errorBox.textContent = 'Bağlantı hatası, tekrar deneyin.';
+            errorBox.classList.remove('d-none');
+        });
+});
+
+document.getElementById('photoModal').addEventListener('show.bs.modal', function (e) {
+    var btn = e.relatedTarget;
+    var tarih = btn.getAttribute('data-tarih');
+    document.getElementById('photoModalTarih').value = tarih;
+    var parts = tarih.split('-');
+    document.getElementById('photoModalTarihText').textContent = parts[2] + '.' + parts[1] + '.' + parts[0];
+});
+</script>
+{% endblock %}

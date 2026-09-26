@@ -268,8 +268,8 @@ def generate_deal_pdf(deal):
         # bu yuzden uzun bir deger hucre sinirini asip yandaki sutune biniyordu.
         # Paragraph'a cevirip dar sutunlara uygun kucuk/ortali bir stil verildi.
         table_narrow = ParagraphStyle('TableNarrow', parent=small, fontSize=7.5, leading=9, alignment=1)
-        col_widths = [4.0*cm, 2.1*cm, 1.6*cm, 1.6*cm, 1.3*cm, 1.6*cm, 1.3*cm, 1.8*cm, 1.8*cm]
-        headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Renk', 'Miktar', 'Birim', f'Fiyat\n({para_birimi_text})', 'Teslim\nTarihi']
+        col_widths = [3.8*cm, 1.9*cm, 1.6*cm, 1.6*cm, 1.4*cm, 1.3*cm, 1.6*cm, 1.3*cm, 1.8*cm, 1.8*cm]
+        headers = ['Ürün Cinsi', 'Kağıt Cinsi', 'Boy', 'En', 'Körük', 'Renk', 'Miktar', 'Birim', f'Fiyat\n({para_birimi_text})', 'Teslim\nTarihi']
         data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style_normal) for h in headers]]
 
         def _pdf_cell_text(value):
@@ -287,6 +287,7 @@ def generate_deal_pdf(deal):
                 Paragraph(_pdf_cell_text(item.kagit_cinsi), table_narrow),
                 Paragraph(_pdf_cell_text(item.boy), table_narrow),
                 Paragraph(_pdf_cell_text(item.en), table_narrow),
+                Paragraph(_pdf_cell_text(item.korugu), table_narrow),
                 Paragraph(_pdf_cell_text(item.renk), table_narrow),
                 f"{item.quantity:.2f}",
                 item.unit,
@@ -1152,6 +1153,82 @@ def generate_production_list_pdf(productions, tab_label):
         elements.append(table)
     else:
         elements.append(Paragraph("<i>Bu sekmede kayıt bulunmuyor.</i>", turkish_style))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+def generate_gunluk_uretim_form_pdf():
+    """Is 5: atolyede elle doldurulacak BOS Gunluk Uretim Takip Formu -
+    veritabanindan hicbir veri cekmez, sabit bir sablondur. /gunluk-uretim
+    sayfasindaki 'Bos Form Yazdir' butonundan indirilir, her gun yeniden
+    basilip atolyeye verilir."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+
+    styles = getSampleStyleSheet()
+    tarih_style = ParagraphStyle('TarihStyle', parent=styles['Normal'], fontName='Vera', fontSize=11, alignment=2)
+    company_style = ParagraphStyle('CompanyStyle', parent=styles['Normal'], fontName='Vera-Bold', fontSize=24, leading=29, alignment=1, spaceAfter=4)
+    subcompany_style = ParagraphStyle('SubCompanyStyle', parent=styles['Normal'], fontName='Vera', fontSize=11, leading=14, alignment=1)
+    form_title_style = ParagraphStyle('FormTitleStyle', parent=styles['Normal'], fontName='Vera-Bold', fontSize=15, leading=18, alignment=1)
+    table_header_style = ParagraphStyle('GUTableHeader', parent=styles['Normal'], fontName='Vera-Bold', fontSize=10,
+                                         textColor=colors.white, alignment=1)
+    signature_label_style = ParagraphStyle('SigLabel', parent=styles['Normal'], fontName='Vera-Bold', fontSize=10)
+
+    elements = []
+    elements.append(Paragraph("Tarih: .................................", tarih_style))
+    elements.append(Spacer(1, 3*mm))
+    elements.append(Paragraph("LEMA AMBALAJ", company_style))
+    elements.append(Paragraph("Expertmak Makine Ambalaj Sanayi Tic. Ltd. Şti.", subcompany_style))
+    elements.append(Spacer(1, 6*mm))
+    elements.append(Paragraph("GÜNLÜK ÜRETİM TAKİP FORMU", form_title_style))
+    elements.append(Spacer(1, 8*mm))
+
+    headers = ['#', 'Müşteri / Firma', '1 Koli\nKaç Kg', 'Kaç\nKoli', 'Toplam\nKg']
+    data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style) for h in headers]]
+    for i in range(1, 9):
+        data.append([str(i), '', '', '', ''])
+    toplam_label = Paragraph('GÜNÜN TOPLAM KİLOSU:', ParagraphStyle(
+        'ToplamLabel', parent=styles['Normal'], fontName='Vera-Bold', fontSize=11, leading=13, alignment=2))
+    data.append([toplam_label, '', '', '', ''])
+
+    col_widths = [1.2*cm, 7.3*cm, 3*cm, 2.5*cm, 3*cm]
+    table = Table(data, colWidths=col_widths, rowHeights=[1.1*cm] + [1.1*cm]*8 + [1.3*cm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTNAME', (0, 1), (-1, -2), 'Vera'),
+        ('FONTSIZE', (0, 1), (-1, -2), 10),
+        ('GRID', (0, 0), (-1, -2), 0.75, colors.black),
+        ('SPAN', (0, -1), (3, -1)),
+        ('ALIGN', (0, -1), (3, -1), 'RIGHT'),
+        ('RIGHTPADDING', (3, -1), (3, -1), 8),
+        ('LINEABOVE', (0, -1), (-1, -1), 1.25, colors.black),
+        ('LINEBELOW', (0, -1), (-1, -1), 1.25, colors.black),
+        ('LINEBEFORE', (0, 0), (0, -1), 0.75, colors.black),
+        ('LINEAFTER', (-1, 0), (-1, -1), 0.75, colors.black),
+        ('LINEAFTER', (3, -1), (3, -1), 0.75, colors.black),
+    ]))
+    elements.append(table)
+    elements.append(Spacer(1, 20*mm))
+
+    signature_data = [
+        ['Adı Soyadı - İmza', '', 'Kontrol Eden'],
+        ['', '', ''],
+        ['', '', ''],
+    ]
+    signature_table = Table(signature_data, colWidths=[7.5*cm, 2.2*cm, 7.5*cm])
+    signature_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Vera-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('LINEBELOW', (0, -1), (0, -1), 1, colors.black),
+        ('LINEBELOW', (2, -1), (2, -1), 1, colors.black),
+        ('TOPPADDING', (0, 1), (-1, -1), 6*mm),
+    ]))
+    elements.append(signature_table)
 
     doc.build(elements)
     buffer.seek(0)
