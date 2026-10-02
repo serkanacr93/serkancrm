@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Hızlı İletişim - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-lightning-charge"></i> Hızlı İletişim</h2>
+    <a href="{{ url_for('takip_gerekiyor_customers') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Takip Gerekiyor'a Dön
+    </a>
+</div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Son <strong>{{ takip_gereken_gun }} gündür</strong> irtibat kurulmayan müşterileriniz, şehre göre gruplanmış olarak aşağıda listelenir. Bir gruba tıklayıp içindeki müşterilere doğrudan WhatsApp mesajı gönderebilirsiniz.
+</div>
+
+{% macro customer_row(item) %}
+<tr>
+    <td>
+        <a href="{{ url_for('customer_detail', id=item.customer.id) }}">
+            {% if item.customer.company_name %}
+            <strong><i class="bi bi-building"></i> {{ item.customer.company_name }}</strong><br>
+            <small class="text-muted">{{ item.customer.first_name }} {{ item.customer.last_name }}</small>
+            {% else %}
+            {{ item.customer.first_name }} {{ item.customer.last_name }}
+            {% endif %}
+        </a>
+    </td>
+    <td>
+        {{ item.customer.company_phone or item.customer.phone or '-' }}
+        <a href="#" class="whatsapp-btn text-success ms-1" data-customer-id="{{ item.customer.id }}" data-customer-name="{{ item.customer.display_name }}" data-customer-phone="{{ item.customer.phone }}" title="WhatsApp Gönder"><i class="bi bi-whatsapp"></i></a>
+    </td>
+    <td>
+        {% if item.days_since is none %}
+        <span class="badge bg-dark">Hiç irtibat yok</span>
+        {% else %}
+        <span class="badge bg-{{ 'danger' if item.days_since >= 120 else 'warning text-dark' }}">{{ item.days_since }} gün önce</span>
+        {% endif %}
+    </td>
+</tr>
+{% endmacro %}
+
+{% if not near_region and not other_cities %}
+<div class="alert alert-secondary">
+    <i class="bi bi-info-circle"></i> Takip gereken ve şehri belirlenebilen müşteriniz bulunmuyor.
+</div>
+{% endif %}
+
+{% if near_region %}
+<div class="card shadow-sm mb-3 border-success">
+    <div class="card-header bg-success-subtle" role="button" data-bs-toggle="collapse" data-bs-target="#grpYakinBolge" style="cursor: pointer;">
+        <strong><i class="bi bi-geo-alt-fill text-success"></i> Yakın Bölge (Konya &amp; Aksaray)</strong>
+        <span class="badge bg-success ms-2">{{ near_region|length }}</span>
+    </div>
+    <div class="collapse show" id="grpYakinBolge">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr><th>Firma / Müşteri</th><th>Telefon</th><th>Son İrtibat</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for item in near_region %}{{ customer_row(item) }}{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if other_cities %}
+<h5 class="mt-4 mb-2"><i class="bi bi-map"></i> Diğer İller</h5>
+{% for city, items in other_cities %}
+<div class="card shadow-sm mb-2">
+    <div class="card-header" role="button" data-bs-toggle="collapse" data-bs-target="#grpCity{{ loop.index }}" style="cursor: pointer;">
+        <strong>{{ city }}</strong>
+        <span class="badge bg-secondary ms-2">{{ items|length }}</span>
+    </div>
+    <div class="collapse" id="grpCity{{ loop.index }}">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr><th>Firma / Müşteri</th><th>Telefon</th><th>Son İrtibat</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for item in items %}{{ customer_row(item) }}{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

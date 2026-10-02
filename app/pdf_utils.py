@@ -1158,6 +1158,54 @@ def generate_production_list_pdf(productions, tab_label):
     buffer.seek(0)
     return buffer
 
+def generate_cari_hesap_pdf(rows):
+    """Is 7: Cari Hesap Ozeti'nin o an ekranda gorunen (filtrelenmis) halini
+    PDF olarak disa aktarir - cari_hesap_export_pdf() route'u tarafindan
+    cagrilir, ekrandaki ile BIREBIR ayni satirlari icerir (bkz.
+    generate_production_list_pdf'teki ayni desen)."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+
+    styles = getSampleStyleSheet()
+    turkish_style = ParagraphStyle('TurkishStyle', parent=styles['Normal'], fontName='Vera', fontSize=8)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontName='Vera-Bold', fontSize=15)
+
+    elements = []
+    elements.append(Paragraph("CARİ HESAP ÖZETİ", title_style))
+    elements.append(Paragraph(f"Rapor Tarihi: {datetime.now().strftime('%d.%m.%Y %H:%M')} · Toplam: {len(rows)} kayıt", turkish_style))
+    elements.append(Spacer(1, 5*mm))
+
+    if rows:
+        data = [['Müşteri', 'Şehir', 'Faturalanmış', 'Fat.yok Kazanılan', 'Tahsil Edilen', 'Toplam Bakiye']]
+        for r in rows:
+            data.append([
+                Paragraph(_clean_for_pdf(r['customer'].display_name), turkish_style),
+                _clean_for_pdf(r['city']) if r['city'] else '-',
+                format_price_precise(r['invoiced']),
+                format_price_precise(r['uninvoiced_won']),
+                format_price_precise(r['collected']),
+                format_price_precise(r['balance']),
+            ])
+        table = Table(data, colWidths=[4.5*cm, 2.5*cm, 2.8*cm, 2.8*cm, 2.8*cm, 2.8*cm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Vera'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        elements.append(table)
+    else:
+        elements.append(Paragraph("<i>Bu filtreye uyan müşteri bulunmuyor.</i>", turkish_style))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 def generate_gunluk_uretim_form_pdf():
     """Is 5: atolyede elle doldurulacak BOS Gunluk Uretim Takip Formu -
     veritabanindan hicbir veri cekmez, sabit bir sablondur. /gunluk-uretim

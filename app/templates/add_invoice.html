@@ -25,8 +25,8 @@
                     <div class="row">
                         <div class="col-md-12 mb-3 position-relative">
                             <label for="customer_search" class="form-label">Müşteri *</label>
-                            <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..." autocomplete="off" required>
-                            <input type="hidden" id="customer_id" name="customer_id">
+                            <input type="text" class="form-control" id="customer_search" placeholder="Ad, soyad, telefon veya firma ara..." autocomplete="off" required value="{{ prefill_customer.display_name if prefill_customer else '' }}">
+                            <input type="hidden" id="customer_id" name="customer_id" value="{{ prefill_customer.id if prefill_customer else '' }}">
                             <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
                         </div>
                     </div>
@@ -189,6 +189,24 @@ initCustomerSearch({
         } else {
             missingBox.style.display = 'none';
         }
+
+        // Is 8 madde 1: musterinin aktif uretimine bagli Gunluk Uretim
+        // kayitlarinin toplam kg'si varsa, SADECE ilk kalem bos ise
+        // (kullanicinin zaten girdigi bir degeri EZMEDEN) miktar alanina
+        // otomatik oneri olarak doldur - elle degistirilebilir.
+        fetch('/api/customers/' + c.id + '/uretim-oneri')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.total_kg) return;
+                var firstQty = document.querySelector('#items-table .item-qty');
+                var firstUnit = document.querySelector('#items-table .item-row input[name="unit_0"]');
+                if (firstQty && !firstQty.value) {
+                    firstQty.value = data.total_kg;
+                    if (firstUnit && firstUnit.value === 'adet') firstUnit.value = 'kg';
+                    calculateTotals();
+                }
+            })
+            .catch(function () {});
     },
     onClear: function () {
         document.getElementById('missing_info_box').style.display = 'none';

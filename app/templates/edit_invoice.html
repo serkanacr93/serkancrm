@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}{{ invoice.display_no }} Düzenle - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-pencil"></i> {{ invoice.display_no }} - Kalemleri Düzenle</h2>
+    <a href="{{ url_for('invoice_detail', id=invoice.id) }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Geri</a>
+</div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Müşteri: <strong>{{ invoice.customer.display_name }}</strong> — sadece kalemler düzenlenebilir, müşteri/teklif bağlantısı değiştirilemez.
+</div>
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card mb-4">
+        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-box"></i> Kalemler</span>
+            <button type="button" class="btn btn-sm btn-light" id="add-item">
+                <i class="bi bi-plus"></i> Kalem Ekle
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="items-table">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 34%">Açıklama</th>
+                            <th style="width: 14%">Miktar</th>
+                            <th style="width: 14%">Birim</th>
+                            <th style="width: 17%">Birim Fiyat</th>
+                            <th style="width: 17%">Toplam</th>
+                            <th style="width: 4%"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in invoice.items %}
+                        <tr class="item-row">
+                            <td><input type="text" class="form-control form-control-sm" name="desc_{{ loop.index0 }}" value="{{ item.description }}" required></td>
+                            <td><input type="number" class="form-control form-control-sm item-qty" name="qty_{{ loop.index0 }}" value="{{ item.quantity }}" min="0" step="0.01" required></td>
+                            <td><input type="text" class="form-control form-control-sm" name="unit_{{ loop.index0 }}" value="{{ item.unit }}"></td>
+                            <td><input type="number" class="form-control form-control-sm item-price" name="price_{{ loop.index0 }}" value="{{ item.unit_price }}" min="0" step="any" required></td>
+                            <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
+                            <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="table-light">
+                            <td colspan="4" class="text-end"><strong>Ara Toplam:</strong></td>
+                            <td colspan="2"><strong id="subtotal">0,00 ₺</strong></td>
+                        </tr>
+                        <tr class="table-light">
+                            <td colspan="4" class="text-end"><strong>KDV (%{{ invoice.vat_rate }}):</strong></td>
+                            <td colspan="2"><strong id="vat-amount">0,00 ₺</strong></td>
+                        </tr>
+                        <tr class="table-success">
+                            <td colspan="4" class="text-end"><strong>GENEL TOPLAM:</strong></td>
+                            <td colspan="2"><strong id="grand-total">0,00 ₺</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-lg">
+        <i class="bi bi-check-lg"></i> Değişiklikleri Kaydet
+    </button>
+</form>
+
+<script>
+let itemCount = {{ invoice.items|length }};
+let vatRate = {{ invoice.vat_rate }};
+
+function fmt(n) { return n.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺'; }
+
+function renumberItemRows() {
+    var rows = document.querySelectorAll('#items-table tbody tr');
+    rows.forEach(function (row, idx) {
+        row.querySelectorAll('[name]').forEach(function (input) {
+            var base = input.getAttribute('name').replace(/_\d+$/, '');
+            input.setAttribute('name', base + '_' + idx);
+        });
+    });
+}
+
+document.getElementById('add-item').addEventListener('click', function () {
+    var tbody = document.querySelector('#items-table tbody');
+    var row = document.createElement('tr');
+    row.className = 'item-row';
+    row.innerHTML =
+        '<td><input type="text" class="form-control form-control-sm" name="desc_' + itemCount + '" required></td>' +
+        '<td><input type="number" class="form-control form-control-sm item-qty" name="qty_' + itemCount + '" min="0" step="0.01" required></td>' +
+        '<td><input type="text" class="form-control form-control-sm" name="unit_' + itemCount + '" value="adet"></td>' +
+        '<td><input type="number" class="form-control form-control-sm item-price" name="price_' + itemCount + '" min="0" step="any" required></td>' +
+        '<td><input type="text" class="form-control form-control-sm item-total" readonly></td>' +
+        '<td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>';
+    tbody.appendChild(row);
+    itemCount++;
+    attachEvents();
+    calculateTotals();
+});
+
+document.addEventListener('click', function (e) {
+    if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
+        var row = e.target.closest('.item-row');
+        if (document.querySelectorAll('.item-row').length > 1) {
+            row.remove();
+            renumberItemRows();
+            calculateTotals();
+        }
+    }
+});
+
+function attachEvents() {
+    document.querySelectorAll('.item-qty, .item-price').forEach(function (input) {
+        input.removeEventListener('input', calculateTotals);
+        input.addEventListener('input', calculateTotals);
+    });
+}
+
+function calculateTotals() {
+    var subtotal = 0;
+    document.querySelectorAll('.item-row').forEach(function (row) {
+        var qty = parseFloat(row.querySelector('.item-qty')?.value) || 0;
+        var price = parseFloat(row.querySelector('.item-price')?.value) || 0;
+        var total = qty * price;
+        var totalInput = row.querySelector('.item-total');
+        if (totalInput) totalInput.value = fmt(total);
+        subtotal += total;
+    });
+
+    var vatAmount = subtotal * (vatRate / 100);
+    var grandTotal = subtotal + vatAmount;
+
+    document.getElementById('subtotal').textContent = fmt(subtotal);
+    document.getElementById('vat-amount').textContent = fmt(vatAmount);
+    document.getElementById('grand-total').textContent = fmt(grandTotal);
+}
+
+attachEvents();
+calculateTotals();
+
+document.querySelector('form').addEventListener('submit', function () {
+    var btn = this.querySelector('button[type="submit"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Kaydediliyor...';
+    }
+});
+</script>
+{% endblock %}

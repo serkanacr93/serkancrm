@@ -127,8 +127,15 @@ class Customer(db.Model):
     siparis_dongusu_gun = db.Column(db.Integer, default=120, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+    # Is 1 - musteri sahipligi: yeni musteri eklenirken ekleyen kullaniciya
+    # otomatik atanir; eski kayitlar icin geriye donuk olarak ilk Deal/
+    # DailyReport'un user_id'sinden doldurulur (bkz. backfill migration).
+    # Takip Gerekiyor/60 gunluk liste gibi "benim musterilerim" gorunumlerinde
+    # kullanilir - Deal'in user_id'sinden (satis sahipligi) AYRI bir kavram.
+    owner_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
+
     deals = db.relationship('Deal', backref='customer', lazy=True)
+    owner = db.relationship('User', foreign_keys=[owner_user_id])
     statements = db.relationship('CustomerStatement', backref='customer', lazy=True)
 
     @property
@@ -157,15 +164,23 @@ class Customer(db.Model):
         gorunmuyordu (sadece Invoice/Payment'a bakiyordu) - canli veride
         kazanilan tekliflerin buyuk kismi (30'da 22'si) henuz faturalanmamis
         oldugu icin bu, musterinin gercek borcunun onemli bir kismini
-        gostermiyordu."""
+        gostermiyordu.
+
+        Is 5A: sadece HENUZ URETIME BASLANMAMIS (Production.status='uretimde'
+        ya da hic Production kaydi yok - approve_deal normalde otomatik
+        olusturur ama garanti olsun diye kontrol ediliyor) tekliflerin
+        bakiyeye dahil EDILMEMESI icin - musteri gercekte henuz 'Hazir'/
+        'Sevkiyat' asamasina gelmemis bir siparisin borcunu gormemeli."""
         invoiced_deal_ids = db.session.query(Invoice.deal_id).filter(
             Invoice.type == 'fatura', Invoice.deal_id.isnot(None)
         )
+        deals = Deal.query.filter(
+            Deal.customer_id == self.id, Deal.stage == 'kazanilan',
+            ~Deal.id.in_(invoiced_deal_ids)
+        ).all()
         return sum(
-            d.value for d in Deal.query.filter(
-                Deal.customer_id == self.id, Deal.stage == 'kazanilan',
-                ~Deal.id.in_(invoiced_deal_ids)
-            ).all()
+            d.value for d in deals
+            if d.production and d.production.status in ('hazir', 'sevkiyat')
         )
 
     @property
@@ -684,9 +699,15 @@ class Invoice(db.Model):
     total = db.Column(db.Float, nullable=False, default=0)
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+    # Is 8: kalem duzenleme sonrasi basit log - "Son duzenleyen: X, tarih: Y".
+    # Hic duzenlenmemis faturalarda NULL kalir (olusturuldugundan beri
+    # degismemis demektir).
+    updated_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=True)
+
     customer = db.relationship('Customer', backref='invoices')
     items = db.relationship('InvoiceItem', backref='invoice', lazy=True, cascade='all, delete-orphan')
+    updated_by = db.relationship('User', foreign_keys=[updated_by_user_id])
 
     @property
     def owner_id(self):
@@ -936,6 +957,11 @@ class DailyProductionOutput(db.Model):
     tarih = db.Column(db.Date, default=datetime.utcnow, nullable=False, index=True)
     musteri_adi = db.Column(db.String(200), nullable=False)  # serbest metin
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True)  # opsiyonel, mevcut musteri secilebilir
+    # Is 3: aktif bir Production (is emri) kaydina baglanabilir - musteri
+    # secimi artik bu uzerinden yapiliyor (bkz. routes.py gunluk_uretim()).
+    # Eski kayitlarda (bu alan eklenmeden once girilmis) NULL kalir, geriye
+    # donuk hicbir islem/otomatik tamamlanma UYGULANMAZ (kullanici talebi).
+    production_id = db.Column(db.Integer, db.ForeignKey('production.id'), nullable=True, index=True)
     koli_basi_kg = db.Column(db.Float, nullable=False)
     koli_adedi = db.Column(db.Float, nullable=False)
     toplam_kg = db.Column(db.Float, nullable=False)  # varsayilan koli_basi_kg*koli_adedi, elle degistirilebilir
@@ -945,6 +971,7 @@ class DailyProductionOutput(db.Model):
 
     customer = db.relationship('Customer')
     user = db.relationship('User')
+    production = db.relationship('Production', backref='daily_outputs')
 
 class DailyProductionPhoto(db.Model):
     """Is 4 - Gunluk Uretim fotograf arsivi: bir TARIHE bagli (tekil satira

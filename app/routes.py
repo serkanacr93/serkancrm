@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, _clean_for_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter
 from app.tcmb import fetch_tcmb_rate
@@ -77,10 +77,14 @@ def _takip_gerekiyor_query():
     """60 gunluk takip dongusu: son irtibatin (Gunluk Rapor/Teklif/Odeme)
     uzerinden TAKIP_GEREKEN_GUN gunden fazla gecmis (veya hic irtibat
     kaydi olmayan) musterileri dondurur. Gercek zamanli hesaplanir,
-    onbelleklenmez - her cagrida guncel veriye gore calisir."""
+    onbelleklenmez - her cagrida guncel veriye gore calisir.
+    Is 1 madde 3: admin olmayan kullanicilar SADECE kendi musterilerini
+    (owner_user_id == current_user.id) gorur; admin TUMUNU gorur. Sahipsiz
+    (owner_user_id IS NULL) musteriler 'kimsenin musterisi degil' sayilir,
+    normal kullaniciya gosterilmez (ama admin'in gordugu tum listede yer alir)."""
     cutoff = date.today() - timedelta(days=TAKIP_GEREKEN_GUN)
     last_contact = _last_contact_subquery()
-    return db.session.query(Customer, last_contact.c.last_contact).outerjoin(
+    query = db.session.query(Customer, last_contact.c.last_contact).outerjoin(
         last_contact, Customer.id == last_contact.c.customer_id
     ).filter(
         Customer.status != 'musteri_degil',
@@ -88,7 +92,10 @@ def _takip_gerekiyor_query():
             last_contact.c.last_contact.is_(None),
             last_contact.c.last_contact < cutoff
         )
-    ).order_by(last_contact.c.last_contact.asc().nullsfirst())
+    )
+    if not current_user.is_admin:
+        query = query.filter(Customer.owner_user_id == current_user.id)
+    return query.order_by(last_contact.c.last_contact.asc().nullsfirst())
 
 def _get_company_settings():
     """Tekil satir (id=1) - yoksa varsayilan degerlerle olusturur."""
@@ -153,6 +160,81 @@ def _normalize_phone_for_whatsapp(phone):
     if len(digits) == 10:
         return '90' + digits
     return digits or None
+
+# Is 2 - Sehir Bazli Hizli Iletisim: 81 il (Konya/Aksaray haric, onlar
+# ilceleriyle birlikte asagida ayrica taniliyor - Yakin Bolge grubu).
+_IL_LISTESI = [
+    'Adana', 'Adıyaman', 'Afyonkarahisar', 'Ağrı', 'Amasya', 'Ankara', 'Antalya',
+    'Artvin', 'Aydın', 'Balıkesir', 'Bilecik', 'Bingöl', 'Bitlis', 'Bolu', 'Burdur',
+    'Bursa', 'Çanakkale', 'Çankırı', 'Çorum', 'Denizli', 'Diyarbakır', 'Edirne',
+    'Elazığ', 'Erzincan', 'Erzurum', 'Eskişehir', 'Gaziantep', 'Giresun', 'Gümüşhane',
+    'Hakkari', 'Hatay', 'Isparta', 'Mersin', 'İstanbul', 'İzmir', 'Kars', 'Kastamonu',
+    'Kayseri', 'Kırklareli', 'Kırşehir', 'Kocaeli', 'Kütahya', 'Malatya', 'Manisa',
+    'Kahramanmaraş', 'Mardin', 'Muğla', 'Muş', 'Nevşehir', 'Niğde', 'Ordu', 'Rize',
+    'Sakarya', 'Samsun', 'Siirt', 'Sinop', 'Sivas', 'Tekirdağ', 'Tokat', 'Trabzon',
+    'Tunceli', 'Şanlıurfa', 'Uşak', 'Van', 'Yozgat', 'Zonguldak', 'Bayburt', 'Karaman',
+    'Kırıkkale', 'Batman', 'Şırnak', 'Bartın', 'Ardahan', 'Iğdır', 'Yalova', 'Karabük',
+    'Kilis', 'Osmaniye', 'Düzce',
+]
+
+_KONYA_ILCELERI = [
+    'Akşehir', 'Akören', 'Altınekin', 'Beyşehir', 'Bozkır', 'Cihanbeyli', 'Çeltik',
+    'Derbent', 'Derebucak', 'Doğanhisar', 'Emirgazi', 'Ereğli', 'Güneysınır', 'Hadim',
+    'Halkapınar', 'Hüyük', 'Ilgın', 'Kadınhanı', 'Karapınar', 'Karatay', 'Kulu',
+    'Meram', 'Sarayönü', 'Selçuklu', 'Seydişehir', 'Taşkent', 'Tuzlukçu', 'Yalıhüyük',
+    'Yunak',
+]
+
+_AKSARAY_ILCELERI = ['Ağaçören', 'Eskil', 'Gülağaç', 'Güzelyurt', 'Ortaköy', 'Sarıyahşi', 'Sultanhanı']
+
+_TR_NORMALIZE_MAP = str.maketrans({'İ': 'i', 'I': 'ı', 'Ğ': 'ğ', 'Ü': 'ü', 'Ş': 'ş', 'Ö': 'ö', 'Ç': 'ç'})
+
+def _tr_normalize(text):
+    """Standart str.lower() Turkce 'İ'yi dogru kucultemedigi (i-nokta
+    sorunu) icin once Turkce buyuk harfleri elle kucultup sonra lower()
+    uyguluyoruz - il/ilce adi eslestirmesinde buyuk/kucuk harf farkini
+    guvenilir sekilde yok etmek icin (Is 2)."""
+    return text.translate(_TR_NORMALIZE_MAP).lower()
+
+def _build_city_matchers():
+    """(derlenmis regex, il adi) ciftlerini, en uzun/spesifik isim once
+    denensin diye uzunluga gore azalan sirada hazirlar - orn. 'Kahramanmaras'
+    'Mus' ile karismasin, 'Aksaray' ilceleri 'Aksaray' ilinden once denenebilir
+    (ikisi de ayni degeri dondurdugunden sira onemli degil ama tutarlilik icin)."""
+    entries = []
+    for ilce in _KONYA_ILCELERI:
+        entries.append((ilce, 'Konya'))
+    entries.append(('Konya', 'Konya'))
+    for ilce in _AKSARAY_ILCELERI:
+        entries.append((ilce, 'Aksaray'))
+    entries.append(('Aksaray', 'Aksaray'))
+    for il in _IL_LISTESI:
+        entries.append((il, il))
+    entries.sort(key=lambda e: -len(e[0]))
+    return [(re.compile(r'\b' + re.escape(_tr_normalize(name)) + r'\b'), value) for name, value in entries]
+
+_CITY_MATCHERS = _build_city_matchers()
+
+def extract_customer_city(customer):
+    """Musteri metin alanlarindan (first_name/last_name/company_name/
+    address/company_address birlestirilmis) il/ilce adi gecirerek il
+    cikarir (Is 2). Bu CRM'de cogu musterinin address/company_address
+    alani BOS - sehir bilgisi genelde last_name/company_name icine serbest
+    metin olarak girilmis (orn. 'Ambalaj Aksaray', 'Kutahya Yasin'), bu
+    yuzden TUM metin alanlari birlikte taranir, sadece adres degil. Konya/
+    Aksaray ilceleri de ilgili ile eslenir (Yakin Bolge grubu icin).
+    Bulunamazsa None doner (Diger Iller grubuna da girmez)."""
+    text = ' '.join(filter(None, [
+        customer.first_name, customer.last_name, customer.company_name,
+        customer.address, customer.company_address,
+    ]))
+    if not text:
+        return None
+    normalized = _tr_normalize(text)
+    for pattern, value in _CITY_MATCHERS:
+        if pattern.search(normalized):
+            return value
+    return None
 
 def _admin_deals_own_only():
     """Is 3: admin'in oturum bazli 'Sadece Benim Tekliflerim' tercihi.
@@ -531,7 +613,18 @@ def register_routes(app):
         # zamanli hesaplanir, her istekte guncel veriye gore calisir.
         takip_gerekiyor_count = _takip_gerekiyor_query().count()
 
+        # Is 6: Dashboard sag panel - Prim ozeti (admin TUMUNU, normal
+        # kullanici SADECE kendi odenmemis primini gorur - Commission.user_id).
+        commission_query = Commission.query.filter_by(status='odenmedi')
+        if not current_user.is_admin:
+            commission_query = commission_query.filter_by(user_id=current_user.id)
+        pending_commissions = commission_query.all()
+        pending_commission_total = sum(c.amount for c in pending_commissions)
+        pending_commission_count = len(pending_commissions)
+
         return render_template('index.html',
+                             pending_commission_total=pending_commission_total,
+                             pending_commission_count=pending_commission_count,
                              takip_gerekiyor_count=takip_gerekiyor_count,
                              customers=customers, 
                              deals=deals,
@@ -796,6 +889,38 @@ def register_routes(app):
         return render_template('customers_takip_gerekiyor.html', rows=rows, pagination=pagination,
                                 takip_gereken_gun=TAKIP_GEREKEN_GUN)
 
+    @app.route('/hizli-iletisim')
+    @login_required
+    def hizli_iletisim():
+        """Is 2: Sehir bazli hizli iletisim - kullanicinin (admin icin
+        TUMUNUN) 60+ gun sessiz musterilerini Yakin Bolge (Konya+Aksaray,
+        ilceler dahil - tek grup) ve Diger Iller (il bazinda ayri gruplu)
+        olarak gosterir. Telefonu olmayan musteriler WhatsApp gonderilemedigi
+        icin listelenmez. Sehri cikarilamayan musteriler (adres/isimde il adi
+        gecmeyen) hicbir gruba girmez - bu CRM'de musterilerin buyuk kismi
+        boyle (bkz. extract_customer_city docstring)."""
+        rows = _takip_gerekiyor_query().all()
+        today = date.today()
+        near_region = []
+        other_cities = {}
+        for customer, last_contact in rows:
+            if not customer.phone:
+                continue
+            city = extract_customer_city(customer)
+            item = {
+                'customer': customer,
+                'last_contact': last_contact,
+                'days_since': (today - last_contact).days if last_contact else None,
+            }
+            if city in ('Konya', 'Aksaray'):
+                near_region.append(item)
+            elif city:
+                other_cities.setdefault(city, []).append(item)
+        other_cities_sorted = sorted(other_cities.items(), key=lambda kv: kv[0])
+        return render_template('hizli_iletisim.html', near_region=near_region,
+                                other_cities=other_cities_sorted,
+                                takip_gereken_gun=TAKIP_GEREKEN_GUN)
+
     @app.route('/cari-hesap-ozeti')
     @login_required
     def cari_hesap_ozeti():
@@ -811,40 +936,24 @@ def register_routes(app):
         tutarlari degil, kazanilmis (stage='kazanilan') ama HENUZ fatura
         kesilmemis tekliflerin degerini de iceriyor - onceden bu tutar hic
         gorunmuyordu, oysa canli veride kazanilan tekliflerin buyuk kismi
-        henuz faturalanmamisti (bkz. Customer.total_uninvoiced_won)."""
+        henuz faturalanmamisti (bkz. Customer.total_uninvoiced_won).
+
+        Is 7: profesyonel gelistirmeler - borc yaslandirma (en eski acik
+        fatura/faturalanmamis kazanilan teklif tarihinden bugune gun sayisi),
+        sehir/temsilci filtresi + Benim Musterilerim/Tumu (admin), son
+        WhatsApp mesaji bilgisi. Hepsi TOPLU sorgularla (N+1 YOK - RTT-bound
+        Neon'da 1700+ musteri icin tek tek sorgu pratik degil)."""
         filter_type = request.args.get('filter', '')
+        city_filter = request.args.get('city', '')
+        owner_filter = request.args.get('owner', type=int)
+        sort = request.args.get('sort', '')
 
-        invoiced_rows = db.session.query(
-            Invoice.customer_id, db.func.sum(Invoice.total)
-        ).filter(Invoice.type == 'fatura').group_by(Invoice.customer_id).all()
-        invoiced_map = {cid: total or 0 for cid, total in invoiced_rows}
+        rows, available_cities, cari_own_only = _cari_hesap_rows()
 
-        invoiced_deal_ids_subq = db.session.query(Invoice.deal_id).filter(
-            Invoice.type == 'fatura', Invoice.deal_id.isnot(None)
-        )
-        uninvoiced_won_rows = db.session.query(
-            Deal.customer_id, db.func.sum(Deal.value)
-        ).filter(
-            Deal.stage == 'kazanilan', ~Deal.id.in_(invoiced_deal_ids_subq)
-        ).group_by(Deal.customer_id).all()
-        uninvoiced_won_map = {cid: total or 0 for cid, total in uninvoiced_won_rows}
-
-        collected_rows = db.session.query(
-            Payment.customer_id, db.func.sum(Payment.amount)
-        ).filter(Payment.status == 'odendi').group_by(Payment.customer_id).all()
-        collected_map = {cid: total or 0 for cid, total in collected_rows}
-
-        customers = Customer.query.filter(Customer.status != 'musteri_degil').all()
-        rows = []
-        for c in customers:
-            invoiced = invoiced_map.get(c.id, 0)
-            uninvoiced_won = uninvoiced_won_map.get(c.id, 0)
-            collected = collected_map.get(c.id, 0)
-            balance = invoiced + uninvoiced_won - collected
-            rows.append({
-                'customer': c, 'invoiced': invoiced, 'uninvoiced_won': uninvoiced_won,
-                'collected': collected, 'balance': balance
-            })
+        if city_filter:
+            rows = [r for r in rows if r['city'] == city_filter]
+        if owner_filter:
+            rows = [r for r in rows if r['customer'].owner_user_id == owner_filter]
 
         if filter_type == 'borclu':
             rows = [r for r in rows if r['balance'] > 0.01]
@@ -853,9 +962,147 @@ def register_routes(app):
         elif filter_type == 'sifir':
             rows = [r for r in rows if -0.01 <= r['balance'] <= 0.01]
 
-        rows.sort(key=lambda r: abs(r['balance']), reverse=True)
+        if sort == 'balance_asc':
+            rows.sort(key=lambda r: r['balance'])
+        elif sort == 'balance_desc':
+            rows.sort(key=lambda r: r['balance'], reverse=True)
+        else:
+            rows.sort(key=lambda r: abs(r['balance']), reverse=True)
 
-        return render_template('cari_hesap_ozeti.html', rows=rows, filter_type=filter_type)
+        all_users = User.query.order_by(User.username).all()
+
+        return render_template('cari_hesap_ozeti.html', rows=rows, filter_type=filter_type,
+                                city_filter=city_filter, owner_filter=owner_filter, sort=sort,
+                                available_cities=available_cities, all_users=all_users,
+                                cari_own_only=cari_own_only)
+
+    def _cari_hesap_rows():
+        """Cari Hesap Ozeti'nin TUM satir verisini (bakiye + Is 7 ek
+        alanlari: sehir, borc yasi, son whatsapp mesaji) toplu sorgularla
+        hazirlar - /cari-hesap-ozeti, Excel/PDF disa aktarim route'lari
+        ayni fonksiyonu kullanir (ekranda gorunenle disa aktarilan HER ZAMAN
+        birebir ayni satirlari icerir, bkz. Uretim Listesi'ndeki ayni desen).
+        Admin icin oturum bazli 'Sadece Benim Musterilerim' tercihini de
+        uygular (_admin_deals_own_only ile ayni desen)."""
+        invoiced_rows = db.session.query(
+            Invoice.customer_id, db.func.sum(Invoice.total)
+        ).filter(Invoice.type == 'fatura').group_by(Invoice.customer_id).all()
+        invoiced_map = {cid: total or 0 for cid, total in invoiced_rows}
+
+        oldest_invoice_rows = db.session.query(
+            Invoice.customer_id, db.func.min(Invoice.created_at)
+        ).filter(Invoice.type == 'fatura').group_by(Invoice.customer_id).all()
+        oldest_invoice_map = dict(oldest_invoice_rows)
+
+        invoiced_deal_ids_subq = db.session.query(Invoice.deal_id).filter(
+            Invoice.type == 'fatura', Invoice.deal_id.isnot(None)
+        )
+        # Is 5A: Customer.total_uninvoiced_won ile AYNI kural (tek kaynak) -
+        # sadece Production'i 'hazir'/'sevkiyat' asamasina gelmis tekliflerin
+        # degeri "faturalanmamis kazanilan" bakiyesine dahil edilir.
+        uninvoiced_won_rows = db.session.query(
+            Deal.customer_id, db.func.sum(Deal.value)
+        ).join(Production, Production.deal_id == Deal.id).filter(
+            Deal.stage == 'kazanilan', ~Deal.id.in_(invoiced_deal_ids_subq),
+            Production.status.in_(['hazir', 'sevkiyat'])
+        ).group_by(Deal.customer_id).all()
+        uninvoiced_won_map = {cid: total or 0 for cid, total in uninvoiced_won_rows}
+
+        oldest_uninvoiced_deal_rows = db.session.query(
+            Deal.customer_id, db.func.min(Deal.created_at)
+        ).join(Production, Production.deal_id == Deal.id).filter(
+            Deal.stage == 'kazanilan', ~Deal.id.in_(invoiced_deal_ids_subq),
+            Production.status.in_(['hazir', 'sevkiyat'])
+        ).group_by(Deal.customer_id).all()
+        oldest_uninvoiced_deal_map = dict(oldest_uninvoiced_deal_rows)
+
+        collected_rows = db.session.query(
+            Payment.customer_id, db.func.sum(Payment.amount)
+        ).filter(Payment.status == 'odendi').group_by(Payment.customer_id).all()
+        collected_map = {cid: total or 0 for cid, total in collected_rows}
+
+        # Is 7 madde 5: son WhatsApp mesaji tarihi - musteri_whatsapp_send()
+        # her gonderimde 'WhatsApp mesajı gönderildi:' notuyla bir DailyReport
+        # olusturuyor (bkz. customer_whatsapp_send), o yuzden bu kayitlarin
+        # customer_id bazinda EN SON report_date'i yeterli.
+        last_whatsapp_rows = db.session.query(
+            DailyReport.customer_id, db.func.max(DailyReport.report_date)
+        ).filter(
+            DailyReport.customer_id.isnot(None),
+            DailyReport.notes.ilike('WhatsApp mesajı gönderildi:%')
+        ).group_by(DailyReport.customer_id).all()
+        last_whatsapp_map = dict(last_whatsapp_rows)
+
+        today = date.today()
+
+        customers_query = Customer.query.filter(Customer.status != 'musteri_degil')
+        cari_own_only = bool(session.get('cari_hesap_own_only'))
+        if not current_user.is_admin:
+            customers_query = customers_query.filter(Customer.owner_user_id == current_user.id)
+        elif cari_own_only:
+            customers_query = customers_query.filter(Customer.owner_user_id == current_user.id)
+        customers = customers_query.all()
+
+        rows = []
+        cities = set()
+        for c in customers:
+            invoiced = invoiced_map.get(c.id, 0)
+            uninvoiced_won = uninvoiced_won_map.get(c.id, 0)
+            collected = collected_map.get(c.id, 0)
+            balance = invoiced + uninvoiced_won - collected
+
+            oldest_dates = [d for d in [oldest_invoice_map.get(c.id), oldest_uninvoiced_deal_map.get(c.id)] if d]
+            debt_age_days = (today - min(oldest_dates).date()).days if (oldest_dates and balance > 0.01) else None
+
+            last_whatsapp_date = last_whatsapp_map.get(c.id)
+            last_whatsapp_days = (today - last_whatsapp_date).days if last_whatsapp_date else None
+
+            city = extract_customer_city(c)
+            if city:
+                cities.add(city)
+
+            rows.append({
+                'customer': c, 'invoiced': invoiced, 'uninvoiced_won': uninvoiced_won,
+                'collected': collected, 'balance': balance, 'debt_age_days': debt_age_days,
+                'last_whatsapp_days': last_whatsapp_days, 'city': city,
+            })
+        return rows, sorted(cities), cari_own_only
+
+    @app.route('/cari-hesap-ozeti/view-toggle', methods=['POST'])
+    @login_required
+    def cari_hesap_view_toggle():
+        """Is 7: SADECE admin icin - 'Tumu' / 'Benim Musterilerim' gecis
+        anahtari (deals_view_toggle ile AYNI desen), oturum boyunca
+        hatirlanir."""
+        if current_user.is_admin:
+            session['cari_hesap_own_only'] = request.form.get('mode') == 'own'
+        return redirect(url_for('cari_hesap_ozeti'))
+
+    @app.route('/cari-hesap-ozeti/export/excel')
+    @login_required
+    def cari_hesap_export_excel():
+        rows, _, _ = _cari_hesap_rows()
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Cari Hesap Özeti'
+        ws.append(['Müşteri', 'Şehir', 'Faturalanmış', 'Faturalanmamış Kazanılan', 'Tahsil Edilen', 'Toplam Bakiye', 'Borç Yaşı (gün)'])
+        for r in rows:
+            ws.append([
+                r['customer'].display_name, r['city'] or '-', r['invoiced'], r['uninvoiced_won'],
+                r['collected'], r['balance'], r['debt_age_days'] if r['debt_age_days'] is not None else '-',
+            ])
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        return send_file(buffer, as_attachment=True, download_name=f'cari_hesap_ozeti_{datetime.now().strftime("%Y%m%d")}.xlsx',
+                          mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    @app.route('/cari-hesap-ozeti/export/pdf')
+    @login_required
+    def cari_hesap_export_pdf():
+        rows, _, _ = _cari_hesap_rows()
+        pdf = generate_cari_hesap_pdf(rows)
+        return send_file(pdf, as_attachment=True, download_name=f'cari_hesap_ozeti_{datetime.now().strftime("%Y%m%d")}.pdf')
 
     @app.route('/customers/add', methods=['GET', 'POST'])
     @login_required
@@ -889,7 +1136,8 @@ def register_routes(app):
                 contact_phone=request.form.get('contact_phone'),
                 contact_email=request.form.get('contact_email'),
                 address=request.form.get('address'),
-                notes=request.form.get('notes')
+                notes=request.form.get('notes'),
+                owner_user_id=current_user.id
             )
             db.session.add(customer)
             db.session.commit()
@@ -936,7 +1184,8 @@ def register_routes(app):
                             first_name=first_name or None,
                             last_name=last_name or None,
                             phone=phone or None,
-                            email=(row.get('E-posta') or row.get('email') or row.get('Mail') or '').strip() or None
+                            email=(row.get('E-posta') or row.get('email') or row.get('Mail') or '').strip() or None,
+                            owner_user_id=current_user.id
                         )
                         db.session.add(customer)
                         added += 1
@@ -981,7 +1230,8 @@ def register_routes(app):
                             first_name=first_name or None,
                             last_name=last_name or None,
                             phone=phone or None,
-                            email=(row_dict.get('E-posta') or row_dict.get('email') or row_dict.get('Mail') or '').strip() or None
+                            email=(row_dict.get('E-posta') or row_dict.get('email') or row_dict.get('Mail') or '').strip() or None,
+                            owner_user_id=current_user.id
                         )
                         db.session.add(customer)
                         added += 1
@@ -1323,9 +1573,22 @@ def register_routes(app):
         query = query.options(joinedload(Deal.customer), joinedload(Deal.seller))
         pagination = query.order_by(Deal.created_at.desc()).paginate(page=page, per_page=50, error_out=False)
         deals = pagination.items
+
+        # Is 6: Teklifler paneli - suresi dolan uyarisi + bu ay kazanilan toplami.
+        today = datetime.now().date()
+        month_start = today.replace(day=1)
+        expired_deals_count = _apply_deal_visibility(db.session.query(db.func.count(Deal.id)).select_from(Deal)).filter(
+            Deal.valid_until < today, ~Deal.stage.in_(RESOLVED_STAGES)
+        ).scalar()
+        this_month_won_total = _apply_deal_visibility(db.session.query(db.func.sum(Deal.value)).select_from(Deal)).filter(
+            Deal.stage == 'kazanilan', Deal.created_at >= month_start
+        ).scalar() or 0
+
         return render_template('deals.html', deals=deals, search=search, stage_filter=stage_filter,
                                 tab=tab, tab_counts=tab_counts, pagination=pagination,
-                                admin_deals_own_only=_admin_deals_own_only())
+                                admin_deals_own_only=_admin_deals_own_only(),
+                                expired_deals_count=expired_deals_count,
+                                this_month_won_total=this_month_won_total)
 
     @app.route('/deals/view-toggle', methods=['POST'])
     @login_required
@@ -1783,6 +2046,26 @@ def register_routes(app):
         
         return render_template('approve_deal.html', deal=deal, suggested_rate=suggested_rate)
 
+    @app.route('/api/customers/<int:customer_id>/uretim-oneri')
+    @login_required
+    def customer_uretim_oneri(customer_id):
+        """Is 8 madde 1: musterinin AKTIF (henuz teslim edilmemis) Production
+        kayitlarina bagli Gunluk Uretim (DailyProductionOutput) kayitlarinin
+        TOPLAM kg'sini doner - Fatura olusturma formunda kalemin miktar
+        alanina otomatik ONERI olarak doldurulur (elle degistirilebilir).
+        Hic veri yoksa total=0 doner, JS bu durumda hicbir alani doldurmaz."""
+        customer = Customer.query.get_or_404(customer_id)
+        active_production_ids = [
+            p.id for p in Production.query.join(Deal).filter(Deal.customer_id == customer.id).all()
+            if not p.is_delivered
+        ]
+        if not active_production_ids:
+            return jsonify({'total_kg': 0})
+        total_kg = db.session.query(db.func.sum(DailyProductionOutput.toplam_kg)).filter(
+            DailyProductionOutput.production_id.in_(active_production_ids)
+        ).scalar() or 0
+        return jsonify({'total_kg': total_kg})
+
     @app.route('/api/customers/search')
     @login_required
     def search_customers():
@@ -1891,7 +2174,7 @@ def register_routes(app):
             first_name = parts[0]
             last_name = parts[1] if len(parts) > 1 else None
 
-        customer = Customer(musteri_no=_next_musteri_no(), first_name=first_name, last_name=last_name, phone=phone or None, status='aktif')
+        customer = Customer(musteri_no=_next_musteri_no(), first_name=first_name, last_name=last_name, phone=phone or None, status='aktif', owner_user_id=current_user.id)
         db.session.add(customer)
         try:
             db.session.commit()
@@ -2062,7 +2345,18 @@ def register_routes(app):
             tab = 'uretimde'
         productions = _filtered_productions(tab)
         tab_counts = _production_tab_counts()
-        return render_template('production_list.html', productions=productions, tab=tab, tab_counts=tab_counts)
+
+        # Is 6: Uretim paneli - termin asimi uyarisi + bugunku uretim ozeti.
+        today = datetime.now().date()
+        overdue_count = Production.query.filter(
+            Production.due_date < today, Production.status.in_(['uretimde', 'hazir'])
+        ).count()
+        today_output_total_kg = db.session.query(db.func.sum(DailyProductionOutput.toplam_kg)).filter(
+            DailyProductionOutput.tarih == today
+        ).scalar() or 0
+
+        return render_template('production_list.html', productions=productions, tab=tab, tab_counts=tab_counts,
+                                overdue_count=overdue_count, today_output_total_kg=today_output_total_kg)
 
     @app.route('/production/export/excel')
     @login_required
@@ -2261,9 +2555,15 @@ def register_routes(app):
     def production_detail(id):
         production = Production.query.get_or_404(id)
         shipments = Shipment.query.filter_by(production_id=id).order_by(Shipment.created_at.desc()).all()
+        # Is 3: bu uretim isine baglanmis Gunluk Uretim kayitlari (bkz.
+        # DailyProductionOutput.production_id).
+        daily_outputs = DailyProductionOutput.query.filter_by(production_id=id) \
+            .order_by(DailyProductionOutput.tarih.desc(), DailyProductionOutput.created_at.desc()).all()
+        daily_outputs_total_kg = sum(o.toplam_kg for o in daily_outputs)
         return render_template('production_detail.html', production=production, shipments=shipments,
                                 today=datetime.now().date(), stages=PRODUCTION_STAGES,
-                                ticaret_stages=TICARET_STAGES)
+                                ticaret_stages=TICARET_STAGES, daily_outputs=daily_outputs,
+                                daily_outputs_total_kg=daily_outputs_total_kg)
 
     @app.route('/production/<int:id>/update-specs', methods=['POST'])
     @login_required
@@ -2442,9 +2742,13 @@ def register_routes(app):
     def gunluk_uretim():
         """Is 3: atolyenin gun icinde elle doldurdugu uretim takip
         kagidinin dijital karsiligi - tarihe gore gruplanmis, her gunun
-        altinda o gune ait TUM girisler + gun sonu TOPLAM kg."""
-        entries = DailyProductionOutput.query.options(joinedload(DailyProductionOutput.customer)) \
-            .order_by(DailyProductionOutput.tarih.desc(), DailyProductionOutput.created_at.asc()).all()
+        altinda o gune ait TUM girisler + gun sonu TOPLAM kg. Musteri/Firma
+        alani artik aktif (henuz teslim edilmemis) Production kayitlarindan
+        secilen bir arama/dropdown - bkz. active_productions."""
+        entries = DailyProductionOutput.query.options(
+            joinedload(DailyProductionOutput.customer),
+            joinedload(DailyProductionOutput.production).joinedload(Production.deal).joinedload(Deal.customer),
+        ).order_by(DailyProductionOutput.tarih.desc(), DailyProductionOutput.created_at.asc()).all()
         photos = DailyProductionPhoto.query.order_by(
             DailyProductionPhoto.tarih.desc(), DailyProductionPhoto.created_at.asc()
         ).all()
@@ -2467,7 +2771,13 @@ def register_routes(app):
                 'photos': photos_by_date.get(d, []),
             })
 
-        return render_template('gunluk_uretim.html', day_groups=day_groups, today=datetime.now().date())
+        active_productions = [p for p in Production.query.options(
+            joinedload(Production.deal).joinedload(Deal.customer),
+            joinedload(Production.shipments),
+        ).order_by(Production.created_at.desc()).all() if not p.is_delivered]
+
+        return render_template('gunluk_uretim.html', day_groups=day_groups, today=datetime.now().date(),
+                                active_productions=active_productions)
 
     @app.route('/gunluk-uretim/bos-form-pdf')
     @login_required
@@ -2484,10 +2794,13 @@ def register_routes(app):
     def add_daily_production_output():
         """AJAX (JSON) endpoint - sayfa yenilenmeden art arda kalem
         eklenebilsin diye fetch() ile cagrilir (Is 3), olusturulan kaydi
-        JSON olarak doner; JS bunu ilgili gun grubuna ekler."""
+        JSON olarak doner; JS bunu ilgili gun grubuna ekler. Musteri/Firma
+        artik serbest metin DEGIL - zorunlu olarak aktif bir Production
+        kaydi secilir, musteri_adi/customer_id oradan (deal.customer)
+        otomatik turetilir (eski kayitlara dokunulmaz, bu alanlar DB
+        semasinda duruyor - sadece yeni giris akisi degisti)."""
         tarih_raw = request.form.get('tarih', '').strip()
-        musteri_adi = request.form.get('musteri_adi', '').strip()
-        customer_id = request.form.get('customer_id') or None
+        production_id_raw = request.form.get('production_id', '').strip()
         koli_basi_kg_raw = request.form.get('koli_basi_kg', '').strip()
         koli_adedi_raw = request.form.get('koli_adedi', '').strip()
         toplam_kg_raw = request.form.get('toplam_kg', '').strip()
@@ -2495,8 +2808,11 @@ def register_routes(app):
 
         if not tarih_raw:
             return jsonify({'error': 'Tarih girilmelidir.'}), 400
-        if not musteri_adi:
-            return jsonify({'error': 'Müşteri/Firma girilmelidir.'}), 400
+        if not production_id_raw:
+            return jsonify({'error': 'Müşteri/Firma (üretim kaydı) seçilmelidir.'}), 400
+        production = Production.query.get(int(production_id_raw))
+        if not production:
+            return jsonify({'error': 'Seçilen üretim kaydı bulunamadı.'}), 400
         try:
             koli_basi_kg = float(koli_basi_kg_raw)
             koli_adedi = float(koli_adedi_raw)
@@ -2513,13 +2829,14 @@ def register_routes(app):
         else:
             toplam_kg = koli_basi_kg * koli_adedi
 
-        customer = Customer.query.get(int(customer_id)) if customer_id else None
+        customer = production.deal.customer if production.deal else None
 
         try:
             entry = DailyProductionOutput(
                 tarih=datetime.strptime(tarih_raw, '%Y-%m-%d').date(),
-                musteri_adi=customer.display_name if customer else musteri_adi,
+                musteri_adi=customer.display_name if customer else f'Üretim #{production.id}',
                 customer_id=customer.id if customer else None,
+                production_id=production.id,
                 koli_basi_kg=koli_basi_kg,
                 koli_adedi=koli_adedi,
                 toplam_kg=toplam_kg,
@@ -3354,6 +3671,57 @@ def register_routes(app):
 
         return render_template('invoice_detail.html', invoice=invoice, ledger_rows=ledger_rows)
 
+    @app.route('/invoices/<int:id>/edit', methods=['GET', 'POST'])
+    @login_required
+    def edit_invoice(id):
+        """Is 8 madde 2-3-4: faturanin kalemlerini sonradan degistirme.
+        Musteri/teklif baglantisi degistirilemez - SADECE kalemler. Kaydedilince
+        invoice.calculate_totals() ile toplam yeniden hesaplanir; Cari Hesap
+        Ozeti/Musteri Detayi bakiyeleri zaten CANLI (Invoice.total'dan)
+        hesaplandigi icin ayrica bir 'yeniden hesaplama' adimina gerek yok -
+        bir sonraki goruntulemede otomatik guncel gorunur. 'Son duzenleyen'
+        basit logu (updated_by_user_id/updated_at) burada yazilir."""
+        invoice = Invoice.query.get_or_404(id)
+        owner_id = invoice.owner_id
+        if owner_id is not None and not current_user.is_admin and owner_id != current_user.id:
+            flash('Bu faturayı düzenleme yetkiniz yok.', 'danger')
+            return redirect(url_for('invoice_detail', id=id))
+
+        if request.method == 'POST':
+            if 'desc_0' not in request.form:
+                flash('Fatura en az bir kalem içermelidir.', 'danger')
+                return redirect(url_for('edit_invoice', id=id))
+            try:
+                InvoiceItem.query.filter_by(invoice_id=invoice.id).delete()
+                i = 0
+                while f'desc_{i}' in request.form:
+                    qty = float(request.form.get(f'qty_{i}', 0))
+                    price = float(request.form.get(f'price_{i}', 0))
+                    item = InvoiceItem(
+                        invoice_id=invoice.id,
+                        description=request.form[f'desc_{i}'],
+                        quantity=qty,
+                        unit=request.form.get(f'unit_{i}', 'adet'),
+                        unit_price=price,
+                        total_price=qty * price
+                    )
+                    db.session.add(item)
+                    i += 1
+                db.session.flush()
+                invoice.calculate_totals()
+                invoice.updated_by_user_id = current_user.id
+                invoice.updated_at = datetime.utcnow()
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('Fatura düzenlenirken bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+                return redirect(url_for('edit_invoice', id=id))
+
+            flash(f'{invoice.display_no} güncellendi!', 'success')
+            return redirect(url_for('invoice_detail', id=id))
+
+        return render_template('edit_invoice.html', invoice=invoice)
+
     @app.route('/invoices/<int:id>/pdf')
     @login_required
     def invoice_pdf(id):
@@ -3528,7 +3896,13 @@ def register_routes(app):
             flash(f'{invoice.display_no} başarıyla oluşturuldu!', 'success')
             return redirect(url_for('invoice_detail', id=invoice.id))
 
-        return render_template('add_invoice.html', today=datetime.now().date())
+        # Is 4: Cari Hesap Ozeti'ndeki "Fatura Olustur" butonundan geldiyse
+        # musteri onceden secili gelsin diye.
+        prefill_customer = None
+        prefill_customer_id = request.args.get('customer_id')
+        if prefill_customer_id:
+            prefill_customer = Customer.query.get(int(prefill_customer_id))
+        return render_template('add_invoice.html', today=datetime.now().date(), prefill_customer=prefill_customer)
 
     @app.route('/visits')
     @login_required
@@ -3636,7 +4010,8 @@ def register_routes(app):
                                 last_name=last_name,
                                 phone=current_customer.get('phone'),
                                 email=current_customer.get('email'),
-                                company_name=current_customer.get('org')
+                                company_name=current_customer.get('org'),
+                                owner_user_id=current_user.id
                             )
                             db.session.add(customer)
                             added += 1
@@ -4215,6 +4590,7 @@ def register_routes(app):
             address=pc.address,
             notes=f'Potansiyel müşteriden dönüştürüldü. {extra_info}{pc.notes or ""}'.strip(),
             status='aktif',
+            owner_user_id=current_user.id,
         )
         db.session.add(customer)
         db.session.flush()

@@ -5,16 +5,71 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-wallet2"></i> Cari Hesap Özeti <span class="badge bg-secondary">{{ rows|length }}</span></h2>
+    <div class="btn-group">
+        <a href="{{ url_for('cari_hesap_export_excel', filter=filter_type, city=city_filter, owner=owner_filter, sort=sort) }}" class="btn btn-outline-success">
+            <i class="bi bi-file-earmark-excel"></i> Excel
+        </a>
+        <a href="{{ url_for('cari_hesap_export_pdf', filter=filter_type, city=city_filter, owner=owner_filter, sort=sort) }}" class="btn btn-outline-danger">
+            <i class="bi bi-file-earmark-pdf"></i> PDF
+        </a>
+    </div>
 </div>
 
-<div class="card mb-4 shadow-sm">
+<div class="card mb-3 shadow-sm">
     <div class="card-body">
-        <div class="btn-group" role="group">
-            <a href="{{ url_for('cari_hesap_ozeti') }}" class="btn btn-outline-secondary {{ 'active' if not filter_type }}">Tümü</a>
-            <a href="{{ url_for('cari_hesap_ozeti', filter='borclu') }}" class="btn btn-outline-danger {{ 'active' if filter_type == 'borclu' }}">Sadece Borçlular (Alacaklıyız)</a>
-            <a href="{{ url_for('cari_hesap_ozeti', filter='alacakli') }}" class="btn btn-outline-success {{ 'active' if filter_type == 'alacakli' }}">Fazla Ödeyenler</a>
-            <a href="{{ url_for('cari_hesap_ozeti', filter='sifir') }}" class="btn btn-outline-secondary {{ 'active' if filter_type == 'sifir' }}">Bakiyesi Sıfır</a>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <div class="btn-group" role="group">
+                <a href="{{ url_for('cari_hesap_ozeti', city=city_filter, owner=owner_filter, sort=sort) }}" class="btn btn-outline-secondary {{ 'active' if not filter_type }}">Tümü</a>
+                <a href="{{ url_for('cari_hesap_ozeti', filter='borclu', city=city_filter, owner=owner_filter, sort=sort) }}" class="btn btn-outline-danger {{ 'active' if filter_type == 'borclu' }}">Sadece Borçlular (Alacaklıyız)</a>
+                <a href="{{ url_for('cari_hesap_ozeti', filter='alacakli', city=city_filter, owner=owner_filter, sort=sort) }}" class="btn btn-outline-success {{ 'active' if filter_type == 'alacakli' }}">Fazla Ödeyenler</a>
+                <a href="{{ url_for('cari_hesap_ozeti', filter='sifir', city=city_filter, owner=owner_filter, sort=sort) }}" class="btn btn-outline-secondary {{ 'active' if filter_type == 'sifir' }}">Bakiyesi Sıfır</a>
+            </div>
+            {% if current_user.is_admin %}
+            <div class="btn-group ms-auto" role="group">
+                <form method="POST" action="{{ url_for('cari_hesap_view_toggle') }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="mode" value="all">
+                    <button type="submit" class="btn btn-sm {{ 'btn-primary' if not cari_own_only else 'btn-outline-primary' }}">
+                        <i class="bi bi-people"></i> Tümü
+                    </button>
+                </form>
+                <form method="POST" action="{{ url_for('cari_hesap_view_toggle') }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="mode" value="own">
+                    <button type="submit" class="btn btn-sm {{ 'btn-primary' if cari_own_only else 'btn-outline-primary' }}">
+                        <i class="bi bi-person"></i> Benim Müşterilerim
+                    </button>
+                </form>
+            </div>
+            {% endif %}
         </div>
+        <form method="GET" action="{{ url_for('cari_hesap_ozeti') }}" class="row g-2">
+            <input type="hidden" name="filter" value="{{ filter_type }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <div class="col-md-4">
+                <select name="city" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">Tüm Şehirler</option>
+                    {% for c in available_cities %}
+                    <option value="{{ c }}" {{ 'selected' if city_filter == c }}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if current_user.is_admin %}
+            <div class="col-md-4">
+                <select name="owner" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">Tüm Temsilciler</option>
+                    {% for u in all_users %}
+                    <option value="{{ u.id }}" {{ 'selected' if owner_filter == u.id }}>{{ u.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            {% if city_filter or owner_filter %}
+            <div class="col-md-2">
+                <a href="{{ url_for('cari_hesap_ozeti', filter=filter_type, sort=sort) }}" class="btn btn-sm btn-outline-secondary w-100">Filtreyi Temizle</a>
+            </div>
+            {% endif %}
+        </form>
     </div>
 </div>
 
@@ -26,10 +81,17 @@
                 <thead class="table-dark">
                     <tr>
                         <th>Müşteri</th>
+                        <th>Şehir</th>
                         <th class="text-end">Faturalanmış</th>
                         <th class="text-end" title="Kazanılmış ama henüz fatura kesilmemiş tekliflerin toplam değeri">Faturalanmamış Kazanılan</th>
                         <th class="text-end">Tahsil Edilen</th>
-                        <th class="text-end">Toplam Bakiye</th>
+                        <th class="text-end">
+                            <a href="{{ url_for('cari_hesap_ozeti', filter=filter_type, city=city_filter, owner=owner_filter, sort='balance_desc' if sort != 'balance_desc' else 'balance_asc') }}" class="text-white text-decoration-none">
+                                Toplam Bakiye <i class="bi bi-arrow-down-up"></i>
+                            </a>
+                        </th>
+                        <th>Borç Yaşı</th>
+                        <th>Son WhatsApp</th>
                         <th>İşlem</th>
                     </tr>
                 </thead>
@@ -37,6 +99,7 @@
                     {% for r in rows %}
                     <tr>
                         <td><a href="{{ url_for('customer_detail', id=r.customer.id) }}">{{ r.customer.display_name }}</a></td>
+                        <td>{{ r.city or '-' }}</td>
                         <td class="text-end">{{ "{:,.2f}".format(r.invoiced) }} ₺</td>
                         <td class="text-end text-muted">{{ "{:,.2f}".format(r.uninvoiced_won) }} ₺</td>
                         <td class="text-end text-success">{{ "{:,.2f}".format(r.collected) }} ₺</td>
@@ -53,8 +116,30 @@
                             {% endif %}
                         </td>
                         <td>
-                            <a href="{{ url_for('customer_detail', id=r.customer.id) }}" class="btn btn-sm btn-outline-primary">
-                                <i class="bi bi-eye"></i>
+                            {% if r.debt_age_days is not none %}
+                            <span class="badge bg-{{ 'success' if r.debt_age_days <= 30 else 'warning text-dark' if r.debt_age_days <= 60 else 'danger' }}">
+                                {{ r.debt_age_days }} gün
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if r.last_whatsapp_days is not none %}
+                            <small class="text-muted">{{ r.last_whatsapp_days }} gün önce</small>
+                            {% else %}
+                            <small class="text-muted">-</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('customer_detail', id=r.customer.id) }}" class="btn btn-sm btn-outline-primary" title="Detay">
+                                <i class="bi bi-eye"></i> Detay
+                            </a>
+                            <a href="{{ url_for('add_invoice_standalone', customer_id=r.customer.id) }}" class="btn btn-sm btn-outline-success" title="Fatura Oluştur">
+                                <i class="bi bi-receipt"></i> Fatura
+                            </a>
+                            <a href="{{ url_for('add_payment', customer_id=r.customer.id) }}" class="btn btn-sm btn-outline-info" title="Ödeme Ekle">
+                                <i class="bi bi-cash-coin"></i> Ödeme
                             </a>
                         </td>
                     </tr>
@@ -62,7 +147,7 @@
                 </tbody>
             </table>
         </div>
-        <p class="small text-muted mt-2 mb-0">Toplam Bakiye = Faturalanmış + Faturalanmamış Kazanılan Teklif − Tahsil Edilen.</p>
+        <p class="small text-muted mt-2 mb-0">Toplam Bakiye = Faturalanmış + Faturalanmamış Kazanılan Teklif − Tahsil Edilen. Borç Yaşı = en eski açık fatura/kazanılan teklif tarihinden bugüne geçen gün (yalnızca bakiyesi borçlu olan müşterilerde gösterilir).</p>
     </div>
 </div>
 {% else %}

@@ -106,6 +106,50 @@
 </div>
 
 <div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-dark text-white"><i class="bi bi-layout-sidebar-inset"></i> Özet Panel</div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 h-100">
+                            <div class="text-muted small"><i class="bi bi-clock-history"></i> Yaklaşan Etkinlikler</div>
+                            {% if expiring_deals %}
+                            <div class="fw-bold text-warning">{{ expiring_deals|length }} teklifin süresi dolmak üzere</div>
+                            {% else %}
+                            <div class="text-muted small">Yaklaşan etkinlik yok</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 h-100">
+                            <div class="text-muted small"><i class="bi bi-check2-square"></i> Görevler</div>
+                            <div class="fw-bold">{{ today_tasks|length }} bugün <span class="text-muted">/ {{ upcoming_tasks|length }} yaklaşan</span></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 h-100">
+                            <div class="text-muted small"><i class="bi bi-box-seam"></i> Stok</div>
+                            {% if low_stock > 0 %}
+                            <div class="fw-bold text-danger">{{ low_stock }} ürün kritik seviyede</div>
+                            {% else %}
+                            <div class="text-success small">Stoklar normal</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 h-100">
+                            <div class="text-muted small"><i class="bi bi-cash-stack"></i> Prim</div>
+                            <div class="fw-bold">{{ "{:,.0f}".format(pending_commission_total) }} ₺ <span class="text-muted">({{ pending_commission_count }} ödenmemiş)</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
     <div class="col-md-4">
         <div class="card shadow-sm h-100">
             <div class="card-header bg-dark text-white"><i class="bi bi-lightning"></i> Hızlı İşlemler</div>

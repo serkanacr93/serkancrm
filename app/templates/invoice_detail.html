@@ -15,6 +15,9 @@
         <a href="{{ url_for('invoice_pdf', id=invoice.id) }}" class="btn btn-info">
             <i class="bi bi-file-pdf"></i> PDF İndir
         </a>
+        <a href="{{ url_for('edit_invoice', id=invoice.id) }}" class="btn btn-warning">
+            <i class="bi bi-pencil"></i> Düzenle
+        </a>
         {% if invoice.deal %}
         <a href="{{ url_for('deal_detail', id=invoice.deal.id) }}" class="btn btn-outline-info">
             <i class="bi bi-file-earmark-text"></i> Teklif Detayı
@@ -100,6 +103,11 @@
                 <p class="text-muted text-center py-3">Kalem bulunmuyor.</p>
                 {% endif %}
             </div>
+            {% if invoice.updated_at %}
+            <div class="card-footer text-muted small">
+                <i class="bi bi-pencil-square"></i> Son düzenleyen: {{ invoice.updated_by.username if invoice.updated_by else '-' }}, tarih: {{ invoice.updated_at.strftime('%d.%m.%Y %H:%M') }}
+            </div>
+            {% endif %}
         </div>
 
         {% if invoice.notes %}

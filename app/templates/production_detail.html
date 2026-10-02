@@ -336,6 +336,51 @@
                 {% endif %}
             </div>
         </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-journal-check"></i> Günlük Üretim Kayıtları</span>
+                <a href="{{ url_for('gunluk_uretim') }}" class="btn btn-sm btn-outline-light">
+                    <i class="bi bi-plus-lg"></i> Yeni Kayıt Ekle
+                </a>
+            </div>
+            <div class="card-body">
+                {% if daily_outputs %}
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Tarih</th>
+                                <th>Koli Başı Kg</th>
+                                <th>Koli Adedi</th>
+                                <th>Toplam Kg</th>
+                                <th>Açıklama</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for o in daily_outputs %}
+                            <tr>
+                                <td>{{ o.tarih.strftime('%d.%m.%Y') }}</td>
+                                <td>{{ "%.2f"|format(o.koli_basi_kg) }}</td>
+                                <td>{{ "%.2f"|format(o.koli_adedi) }}</td>
+                                <td>{{ "%.2f"|format(o.toplam_kg) }}</td>
+                                <td>{{ o.aciklama or '-' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr class="table-warning">
+                                <td colspan="3" class="text-end"><strong>TOPLAM KİLO:</strong></td>
+                                <td colspan="2"><strong>{{ "%.2f"|format(daily_outputs_total_kg) }}</strong> kg</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">Bu üretim için henüz günlük üretim kaydı girilmemiş.</p>
+                {% endif %}
+            </div>
+        </div>
     </div>
 
     <div class="col-md-4">
