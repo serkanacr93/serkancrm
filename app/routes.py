@@ -12,6 +12,7 @@ from werkzeug.utils import secure_filename
 import openpyxl
 import os
 import re
+import time
 import uuid
 from urllib.parse import quote as _url_quote
 from sqlalchemy.exc import IntegrityError
@@ -402,6 +403,52 @@ def admin_required(f):
     return decorated_function
 
 def register_routes(app):
+
+    # Is 1 (mega menu): sayfa-genelinde (kullaniciya ozel OLMAYAN) navbar
+    # canli sayilari - her istekte DB'ye gitmek yerine 60 saniyelik basit
+    # process-ici onbellek. Tek process'li (Render web servisi) bir kurulum
+    # icin yeterli; birden fazla worker/instance'a olceklenirse paylasimli
+    # bir cache (Redis vb.) gerekir.
+    _navbar_cache = {'data': None, 'ts': 0}
+    NAVBAR_CACHE_TTL = 60
+
+    def _navbar_summary():
+        now = time.time()
+        if _navbar_cache['data'] is not None and (now - _navbar_cache['ts']) < NAVBAR_CACHE_TTL:
+            return _navbar_cache['data']
+        yesterday = date.today() - timedelta(days=1)
+        row = db.session.query(
+            db.session.query(db.func.count(Production.id)).filter_by(status='uretimde').scalar_subquery().label('uretimde_count'),
+            db.session.query(db.func.count(Shipment.id)).filter(Shipment.status.notin_(['teslim_edildi'])).scalar_subquery().label('pending_shipments'),
+            db.session.query(db.func.sum(DailyProductionOutput.toplam_kg)).filter(DailyProductionOutput.tarih == yesterday).scalar_subquery().label('yesterday_kg'),
+            db.session.query(db.func.count(Product.id)).filter(Product.stock_quantity <= Product.min_stock).scalar_subquery().label('low_stock'),
+            db.session.query(db.func.count(Commission.id)).filter_by(status='odenmedi').scalar_subquery().label('pending_commissions'),
+            db.session.query(db.func.count(Reminder.id)).filter_by(is_read=False).scalar_subquery().label('unread_reminders'),
+        ).one()
+        data = {
+            'uretimde_count': row.uretimde_count or 0,
+            'pending_shipments': row.pending_shipments or 0,
+            'yesterday_kg': row.yesterday_kg or 0,
+            'low_stock': row.low_stock or 0,
+            'pending_commissions': row.pending_commissions or 0,
+            'unread_reminders': row.unread_reminders or 0,
+        }
+        _navbar_cache['data'] = data
+        _navbar_cache['ts'] = now
+        return data
+
+    @app.context_processor
+    def _inject_navbar_summary():
+        """Her sablona (base.html mega menude kullanilir) navbar_summary
+        dict'ini + kullaniciya ozel takip_gerekiyor sayisini enjekte eder -
+        her route'un kendi render_template cagrisina ayni degiskeni elle
+        eklemesine gerek kalmaz. Giris yapilmamissa (login sayfasi) bos
+        deger donup DB'ye hic gitmez."""
+        if not current_user.is_authenticated:
+            return {'navbar_summary': {}, 'navbar_takip_gerekiyor_count': 0}
+        summary = dict(_navbar_summary())
+        summary['takip_gerekiyor_count'] = _takip_gerekiyor_query().count()
+        return {'navbar_summary': summary, 'navbar_takip_gerekiyor_count': summary['takip_gerekiyor_count']}
 
     @app.errorhandler(429)
     def _rate_limit_exceeded(e):
@@ -888,6 +935,14 @@ def register_routes(app):
         } for customer, last_contact in pagination.items]
         return render_template('customers_takip_gerekiyor.html', rows=rows, pagination=pagination,
                                 takip_gereken_gun=TAKIP_GEREKEN_GUN)
+
+    @app.route('/customers/mukerrer')
+    @login_required
+    def duplicate_customers():
+        """Is 8 (bu oturumda asagida doldurulacak): telefon numarasi
+        normalize edilerek aynı numaraya sahip musteri gruplarini bulur.
+        Simdilik placeholder - Is 8'de tam doldurulacak."""
+        return render_template('customers_duplicate.html', groups=[])
 
     @app.route('/hizli-iletisim')
     @login_required

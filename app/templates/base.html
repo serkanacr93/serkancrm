@@ -10,68 +10,170 @@
     <link href="{{ asset_url('css/style.css') }}" rel="stylesheet">
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
-        <div class="container-fluid">
-            <a class="navbar-brand fw-bold" href="{{ url_for('index') }}">
-                <i class="bi bi-people-fill text-primary"></i> CRM
+    {% if current_user.is_authenticated %}
+    <header class="crm-topbar">
+        <div class="crm-topbar-inner">
+            <a class="crm-brand" href="{{ url_for('index') }}">
+                <span class="crm-brand-logo">L</span>
+                <span class="crm-brand-text">LEMA CRM</span>
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <div class="crm-global-search">
+                <i class="bi bi-search"></i>
+                <input type="text" id="globalSearchInput" placeholder="Müşteri veya teklif ara..." autocomplete="off">
+                <span class="crm-search-kbd">Ctrl K</span>
+                <div id="globalSearchResults" class="crm-search-results"></div>
+            </div>
+            <div class="crm-topbar-right">
+                <a href="{{ url_for('reminders') }}" class="crm-icon-btn" title="Bildirimler">
+                    <i class="bi bi-bell"></i>
+                    {% if navbar_summary.unread_reminders %}
+                    <span class="crm-badge-dot">{{ navbar_summary.unread_reminders }}</span>
+                    {% endif %}
+                </a>
+                <div class="dropdown">
+                    <a href="#" class="crm-user-avatar dropdown-toggle" role="button" data-bs-toggle="dropdown">
+                        <span class="crm-avatar-circle">{{ (current_user.full_name or current_user.username)[0]|upper }}</span>
+                        <span class="crm-user-name">{{ current_user.full_name or current_user.username }}</span>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><span class="dropdown-item-text text-muted">Rol: {{ current_user.role }}</span></li>
+                        {% if current_user.is_admin %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item {% if 'user' in request.endpoint %}active{% endif %}" href="{{ url_for('users') }}"><i class="bi bi-person-gear"></i> Kullanıcılar</a></li>
+                        <li><a class="dropdown-item {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}"><i class="bi bi-gear"></i> Ayarlar</a></li>
+                        {% endif %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right"></i> Çıkış</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    {% set musteri_active = request.endpoint in ['customers','potential_customers','takip_gerekiyor_customers','duplicate_customers'] or 'customer' in request.endpoint %}
+    {% set uretim_active = 'production' in request.endpoint or 'shipment' in request.endpoint or 'irsaliye' in request.endpoint or 'product' in request.endpoint or 'tedarik' in request.endpoint or 'gunluk_uretim' in request.endpoint or request.endpoint == 'uretim_planlama' %}
+    {% set finans_active = request.endpoint == 'cari_hesap_ozeti' or 'invoice' in request.endpoint or 'payment' in request.endpoint or 'commission' in request.endpoint %}
+    {% set raporlar_active = request.endpoint == 'reports' or 'daily_report' in request.endpoint or 'calendar' in request.endpoint or 'task' in request.endpoint %}
+    <nav class="crm-navbar navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid px-0">
+            <button class="navbar-toggler my-2" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
-                {% set secondary_active = request.endpoint in ['production_list','shipment_list','products','commissions','invoices','reports','daily_reports','payments','users','uretim_planlama','tedarik_takip'] or 'production' in request.endpoint or 'shipment' in request.endpoint or 'irsaliye' in request.endpoint or 'product' in request.endpoint or 'commission' in request.endpoint or 'invoice' in request.endpoint or 'daily_report' in request.endpoint or 'payment' in request.endpoint or 'user' in request.endpoint or 'tedarik' in request.endpoint or 'gunluk_uretim' in request.endpoint %}
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}"><i class="bi bi-house"></i></a></li>
-                    <li class="nav-item"><a class="nav-link {% if 'customer' in request.endpoint and 'potential' not in request.endpoint %}active{% endif %}" href="{{ url_for('customers') }}"><i class="bi bi-people"></i> Müşteriler</a></li>
-                    <li class="nav-item"><a class="nav-link {% if 'potential' in request.endpoint %}active{% endif %}" href="{{ url_for('potential_customers') }}"><i class="bi bi-person-lines-fill"></i> Potansiyel Müşteriler</a></li>
-                    <li class="nav-item"><a class="nav-link {% if 'deal' in request.endpoint %}active{% endif %}" href="{{ url_for('deals') }}"><i class="bi bi-file-earmark-text"></i> Teklifler</a></li>
-                    <li class="nav-item"><a class="nav-link {% if 'task' in request.endpoint %}active{% endif %}" href="{{ url_for('tasks') }}"><i class="bi bi-check2-square"></i> Görevler</a></li>
-                    <li class="nav-item"><a class="nav-link {% if 'calendar' in request.endpoint %}active{% endif %}" href="{{ url_for('calendar') }}"><i class="bi bi-calendar3"></i> Takvim</a></li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle {{ 'active' if secondary_active }}" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-grid-3x3-gap"></i> Diğer
-                        </a>
-                        <ul class="dropdown-menu">
-                            <li><a class="dropdown-item {% if 'production' in request.endpoint %}active{% endif %}" href="{{ url_for('production_list') }}"><i class="bi bi-gear"></i> Üretim</a></li>
-                            <li><a class="dropdown-item {% if request.endpoint == 'uretim_planlama' %}active{% endif %}" href="{{ url_for('uretim_planlama') }}"><i class="bi bi-diagram-3"></i> Üretim Planlama</a></li>
-                            <li><a class="dropdown-item {% if 'tedarik' in request.endpoint %}active{% endif %}" href="{{ url_for('tedarik_takip') }}"><i class="bi bi-truck"></i> Tedarik Takip</a></li>
-                            <li><a class="dropdown-item {% if 'gunluk_uretim' in request.endpoint %}active{% endif %}" href="{{ url_for('gunluk_uretim') }}"><i class="bi bi-journal-check"></i> Günlük Üretim</a></li>
-                            <li><a class="dropdown-item {% if 'shipment' in request.endpoint or 'irsaliye' in request.endpoint %}active{% endif %}" href="{{ url_for('shipment_list') }}"><i class="bi bi-truck"></i> Sevkiyat</a></li>
-                            <li><a class="dropdown-item {% if 'product' in request.endpoint %}active{% endif %}" href="{{ url_for('products') }}"><i class="bi bi-box-seam"></i> Stok</a></li>
-                            <li><a class="dropdown-item {% if 'commission' in request.endpoint %}active{% endif %}" href="{{ url_for('commissions') }}"><i class="bi bi-cash-stack"></i> Prim</a></li>
-                            <li><a class="dropdown-item {% if 'invoice' in request.endpoint %}active{% endif %}" href="{{ url_for('invoices') }}"><i class="bi bi-receipt"></i> Fatura</a></li>
-                            <li><a class="dropdown-item {% if request.endpoint == 'reports' %}active{% endif %}" href="{{ url_for('reports') }}"><i class="bi bi-bar-chart"></i> Raporlar</a></li>
-                            <li><a class="dropdown-item {% if 'daily_report' in request.endpoint %}active{% endif %}" href="{{ url_for('daily_reports') }}"><i class="bi bi-journal-text"></i> Günlük Rapor</a></li>
-                            <li><a class="dropdown-item {% if 'payment' in request.endpoint %}active{% endif %}" href="{{ url_for('payments') }}"><i class="bi bi-cash-stack"></i> Ödemeler</a></li>
-                            <li><a class="dropdown-item {% if request.endpoint == 'cari_hesap_ozeti' %}active{% endif %}" href="{{ url_for('cari_hesap_ozeti') }}"><i class="bi bi-wallet2"></i> Cari Hesap Özeti</a></li>
-                            <li><a class="dropdown-item {% if request.endpoint == 'hizli_iletisim' %}active{% endif %}" href="{{ url_for('hizli_iletisim') }}"><i class="bi bi-lightning-charge"></i> Hızlı İletişim</a></li>
-                            {% if current_user.is_admin %}
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item {% if 'user' in request.endpoint %}active{% endif %}" href="{{ url_for('users') }}"><i class="bi bi-person-gear"></i> Kullanıcılar</a></li>
-                            {% endif %}
-                        </ul>
-                    </li>
-                </ul>
                 <ul class="navbar-nav">
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('reminders') }}"><i class="bi bi-bell"></i></a></li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-person-circle"></i> {{ current_user.full_name or current_user.username }}
+                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}"><i class="bi bi-house"></i> Ana Sayfa</a></li>
+
+                    <li class="nav-item dropdown crm-mega-group">
+                        <a class="nav-link {{ 'active' if musteri_active }}" href="{{ url_for('customers') }}">
+                            <i class="bi bi-people"></i> Müşteriler <i class="bi bi-caret-down-fill small"></i>
                         </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><span class="dropdown-item-text text-muted">Rol: {{ current_user.role }}</span></li>
-                            {% if current_user.is_admin %}
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('settings') }}"><i class="bi bi-gear"></i> Ayarlar</a></li>
-                            {% endif %}
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right"></i> Çıkış</a></li>
-                        </ul>
+                        <div class="crm-mega-panel">
+                            <a class="crm-mega-box" href="{{ url_for('customers') }}">
+                                <i class="bi bi-people"></i>
+                                <div><strong>Müşteri Listesi</strong><small>Tüm müşteriler</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('potential_customers') }}">
+                                <i class="bi bi-person-lines-fill"></i>
+                                <div><strong>Potansiyel Müşteriler</strong><small>Henüz müşteri olmayanlar</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('takip_gerekiyor_customers') }}">
+                                <i class="bi bi-bell"></i>
+                                <div><strong>Takip Gerekiyor</strong><small>{{ navbar_summary.takip_gerekiyor_count }} müşteri 60+ gün sessiz</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('duplicate_customers') }}">
+                                <i class="bi bi-exclamation-diamond"></i>
+                                <div><strong>Mükerrer Kayıtlar</strong><small>Aynı telefon numaralı kayıtlar</small></div>
+                            </a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item"><a class="nav-link {% if 'deal' in request.endpoint %}active{% endif %}" href="{{ url_for('deals') }}"><i class="bi bi-file-earmark-text"></i> Teklifler</a></li>
+
+                    <li class="nav-item dropdown crm-mega-group">
+                        <a class="nav-link {{ 'active' if uretim_active }}" href="{{ url_for('production_list') }}">
+                            <i class="bi bi-gear"></i> Üretim <i class="bi bi-caret-down-fill small"></i>
+                        </a>
+                        <div class="crm-mega-panel">
+                            <a class="crm-mega-box" href="{{ url_for('production_list') }}">
+                                <i class="bi bi-gear"></i>
+                                <div><strong>Üretim Listesi</strong><small>{{ navbar_summary.uretimde_count }} iş üretimde</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('uretim_planlama') }}">
+                                <i class="bi bi-diagram-3"></i>
+                                <div><strong>Üretim Planlama</strong><small>Gramaj/kalıp bazlı gruplama</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('gunluk_uretim') }}">
+                                <i class="bi bi-journal-check"></i>
+                                <div><strong>Günlük Üretim</strong><small>Dün {{ "%.0f"|format(navbar_summary.yesterday_kg) }} kg</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('tedarik_takip') }}">
+                                <i class="bi bi-truck"></i>
+                                <div><strong>Tedarik Takip</strong><small>Ticaret ürünleri</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('shipment_list') }}">
+                                <i class="bi bi-truck"></i>
+                                <div><strong>Sevkiyat</strong><small>{{ navbar_summary.pending_shipments }} bekliyor</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('products') }}">
+                                <i class="bi bi-box-seam"></i>
+                                <div><strong>Stok</strong><small>{{ navbar_summary.low_stock }} kritik seviyede</small></div>
+                            </a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item dropdown crm-mega-group">
+                        <a class="nav-link {{ 'active' if finans_active }}" href="{{ url_for('cari_hesap_ozeti') }}">
+                            <i class="bi bi-wallet2"></i> Finans <i class="bi bi-caret-down-fill small"></i>
+                        </a>
+                        <div class="crm-mega-panel">
+                            <a class="crm-mega-box" href="{{ url_for('cari_hesap_ozeti') }}">
+                                <i class="bi bi-wallet2"></i>
+                                <div><strong>Cari Hesap Özeti</strong><small>Müşteri bazlı bakiye</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('invoices') }}">
+                                <i class="bi bi-receipt"></i>
+                                <div><strong>Faturalar</strong><small>Fatura/irsaliye kayıtları</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('payments') }}">
+                                <i class="bi bi-cash-stack"></i>
+                                <div><strong>Ödemeler</strong><small>Tahsilat kayıtları</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('commissions') }}">
+                                <i class="bi bi-cash-stack"></i>
+                                <div><strong>Prim</strong><small>{{ navbar_summary.pending_commissions }} ödenmemiş</small></div>
+                            </a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item dropdown crm-mega-group">
+                        <a class="nav-link {{ 'active' if raporlar_active }}" href="{{ url_for('reports') }}">
+                            <i class="bi bi-bar-chart"></i> Raporlar <i class="bi bi-caret-down-fill small"></i>
+                        </a>
+                        <div class="crm-mega-panel">
+                            <a class="crm-mega-box" href="{{ url_for('reports') }}">
+                                <i class="bi bi-bar-chart"></i>
+                                <div><strong>Raporlar</strong><small>Genel istatistikler</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('daily_reports') }}">
+                                <i class="bi bi-journal-text"></i>
+                                <div><strong>Günlük Rapor</strong><small>Görüşme kayıtları</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('calendar') }}">
+                                <i class="bi bi-calendar3"></i>
+                                <div><strong>Takvim</strong><small>Görev/teklif tarihleri</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('tasks') }}">
+                                <i class="bi bi-check2-square"></i>
+                                <div><strong>Görevler</strong><small>Açık görevler</small></div>
+                            </a>
+                        </div>
                     </li>
                 </ul>
+                <a href="{{ url_for('hizli_iletisim') }}" class="crm-cta-btn"><i class="bi bi-lightning-charge"></i> Hızlı İletişim</a>
             </div>
         </div>
     </nav>
+    {% endif %}
 
     <div class="container-fluid py-4">
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -172,6 +274,33 @@
                 errorBox.textContent = 'Bağlantı hatası, tekrar deneyin.';
                 errorBox.classList.remove('d-none');
             });
+        });
+    })();
+    </script>
+
+    <!-- Is 1: ust bar genel arama kutusu icin Ctrl+K kisayolu - arama
+         MANTIGI Is 6'da (customer-search.js'in genisletilmis surumu)
+         baglanacak, burada sadece odaklama/kapatma davranisi var. -->
+    <script>
+    (function () {
+        var input = document.getElementById('globalSearchInput');
+        var results = document.getElementById('globalSearchResults');
+        if (!input) return;
+        document.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                input.focus();
+                input.select();
+            }
+            if (e.key === 'Escape' && document.activeElement === input) {
+                input.blur();
+                if (results) results.style.display = 'none';
+            }
+        });
+        document.addEventListener('click', function (e) {
+            if (results && !results.contains(e.target) && e.target !== input) {
+                results.style.display = 'none';
+            }
         });
     })();
     </script>

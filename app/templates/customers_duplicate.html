@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Mükerrer Kayıtlar - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-people-fill"></i> Mükerrer Kayıtlar <span class="badge bg-secondary">{{ groups|length }}</span></h2>
+    <a href="{{ url_for('customers') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Müşterilere Dön</a>
+</div>
+
+{% if groups %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Telefon</th>
+                        <th>Kayıt Sayısı</th>
+                        <th>Müşteriler</th>
+                        <th>İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for g in groups %}
+                    <tr>
+                        <td>{{ g.phone }}</td>
+                        <td><span class="badge bg-warning text-dark">{{ g.customers|length }} kayıt</span></td>
+                        <td>
+                            {% for c in g.customers %}
+                            <a href="{{ url_for('customer_detail', id=c.id) }}">{{ c.display_name }}</a>{{ ', ' if not loop.last }}
+                            {% endfor %}
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-warning merge-btn" data-phone="{{ g.phone }}">
+                                <i class="bi bi-arrow-down-up"></i> Birleştir
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Mükerrer (aynı telefon numarasına sahip) kayıt bulunmuyor.
+</div>
+{% endif %}
+{% endblock %}
