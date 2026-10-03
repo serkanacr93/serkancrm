@@ -62,8 +62,8 @@
         </thead>
         <tbody>
             {% for p in productions %}
-            <tr>
-                <td>{{ p.id }}</td>
+            <tr class="production-row" data-production-id="{{ p.id }}" style="cursor:pointer;" title="Detayları açmak için satıra tıklayın">
+                <td>{{ p.id }} <i class="bi bi-caret-down-fill text-muted small row-caret"></i></td>
                 <td><a href="{{ url_for('deal_detail', id=p.deal.id) }}">{{ p.deal.title }}</a></td>
                 <td>{{ p.deal.customer.first_name }} {{ p.deal.customer.last_name }}</td>
                 <td>
@@ -104,6 +104,15 @@
                     </a>
                 </td>
             </tr>
+            <tr class="production-detail-row d-none" data-production-id="{{ p.id }}">
+                <td colspan="9" class="bg-light">
+                    <div class="detail-content p-2">
+                        <div class="text-center text-muted small py-3 loading-placeholder">
+                            <span class="spinner-border spinner-border-sm"></span> Yükleniyor...
+                        </div>
+                    </div>
+                </td>
+            </tr>
             {% endfor %}
         </tbody>
     </table>
@@ -113,6 +122,86 @@
     <i class="bi bi-info-circle"></i> Bu sekmede üretim bulunmuyor.
 </div>
 {% endif %}
+
+<script>
+(function () {
+    var csrfToken = '{{ csrf_token() }}';
+    var loadedRows = {};
+
+    document.querySelectorAll('.production-row').forEach(function (row) {
+        row.addEventListener('click', function (e) {
+            if (e.target.closest('a, button')) return;
+            var pid = row.dataset.productionId;
+            var detailRow = document.querySelector('.production-detail-row[data-production-id="' + pid + '"]');
+            var caret = row.querySelector('.row-caret');
+            if (!detailRow) return;
+            var isHidden = detailRow.classList.contains('d-none');
+            if (isHidden) {
+                detailRow.classList.remove('d-none');
+                caret.classList.remove('bi-caret-down-fill');
+                caret.classList.add('bi-caret-up-fill');
+                if (!loadedRows[pid]) {
+                    loadRowDetail(pid, detailRow);
+                }
+            } else {
+                detailRow.classList.add('d-none');
+                caret.classList.remove('bi-caret-up-fill');
+                caret.classList.add('bi-caret-down-fill');
+            }
+        });
+    });
+
+    function loadRowDetail(pid, detailRow) {
+        fetch('/production/' + pid + '/row-detail')
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                detailRow.querySelector('.detail-content').innerHTML = html;
+                loadedRows[pid] = true;
+                attachRowDetailEvents(detailRow);
+            })
+            .catch(function () {
+                detailRow.querySelector('.detail-content').innerHTML = '<div class="text-danger small">Yüklenemedi, tekrar deneyin.</div>';
+            });
+    }
+
+    function attachRowDetailEvents(detailRow) {
+        var form = detailRow.querySelector('.row-detail-add-form');
+        if (!form) return;
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var pid = form.dataset.productionId;
+            var tarih = form.querySelector('.rd-tarih').value;
+            var kg = form.querySelector('.rd-kg').value;
+            var adet = form.querySelector('.rd-adet').value;
+            var errorBox = detailRow.querySelector('.rd-add-error');
+            errorBox.textContent = '';
+            if (!tarih || !kg || !adet) {
+                errorBox.textContent = 'Tarih, koli kg ve koli adedi gereklidir.';
+                return;
+            }
+            var fd = new FormData();
+            fd.append('csrf_token', csrfToken);
+            fd.append('tarih', tarih);
+            fd.append('production_id', pid);
+            fd.append('koli_basi_kg', kg);
+            fd.append('koli_adedi', adet);
+            fetch('/gunluk-uretim/add', { method: 'POST', body: fd })
+                .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+                .then(function (result) {
+                    if (!result.ok) {
+                        errorBox.textContent = result.data.error || 'Bir hata oluştu.';
+                        return;
+                    }
+                    loadedRows[pid] = false;
+                    loadRowDetail(pid, detailRow);
+                })
+                .catch(function () {
+                    errorBox.textContent = 'Bağlantı hatası, tekrar deneyin.';
+                });
+        });
+    }
+})();
+</script>
 {% endblock %}
 
 {% block side_panel %}

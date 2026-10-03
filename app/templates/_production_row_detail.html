@@ -1,0 +1,93 @@
+{# Is 4: Uretim Listesi'nde satir altinda AJAX ile acilan bolum.
+   Beklenen degiskenler: production, daily_outputs, daily_outputs_total_kg, today #}
+<div class="row g-3">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header bg-secondary text-white small"><i class="bi bi-info-circle"></i> Sipariş Bilgisi</div>
+            <div class="card-body p-2">
+                <table class="table table-sm table-borderless mb-2">
+                    <tr><th class="small">Teklif No:</th><td class="small">{{ production.deal.display_no }}</td></tr>
+                    <tr><th class="small">Termin:</th><td class="small">{{ production.due_date.strftime('%d.%m.%Y') if production.due_date else '-' }}</td></tr>
+                    <tr><th class="small">Geçen Gün:</th><td class="small">{{ production.gecen_gun }} gün</td></tr>
+                </table>
+                <table class="table table-sm table-bordered mb-0">
+                    <thead class="table-light"><tr><th class="small">Kalem</th><th class="small">Miktar</th></tr></thead>
+                    <tbody>
+                        {% for item in production.deal.items %}
+                        <tr><td class="small">{{ item.description }}</td><td class="small">{{ item.quantity }} {{ item.unit }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header bg-dark text-white small d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-journal-check"></i> Günlük Üretim</span>
+                <span class="badge bg-light text-dark">{{ "%.2f"|format(daily_outputs_total_kg) }} kg</span>
+            </div>
+            <div class="card-body p-2">
+                <div class="table-responsive mb-2" style="max-height:140px; overflow-y:auto;">
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            {% for o in daily_outputs %}
+                            <tr>
+                                <td class="small">{{ o.tarih.strftime('%d.%m.%Y') }}</td>
+                                <td class="small">{{ "%.2f"|format(o.toplam_kg) }} kg</td>
+                            </tr>
+                            {% else %}
+                            <tr><td class="small text-muted">Henüz kayıt yok.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <form class="row-detail-add-form d-flex gap-1" data-production-id="{{ production.id }}">
+                    <input type="date" class="form-control form-control-sm rd-tarih" style="max-width:120px" value="{{ today.strftime('%Y-%m-%d') }}">
+                    <input type="number" step="any" min="0" class="form-control form-control-sm rd-kg" placeholder="Koli kg">
+                    <input type="number" step="any" min="0" class="form-control form-control-sm rd-adet" placeholder="Koli adet">
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-plus-lg"></i></button>
+                </form>
+                <div class="rd-add-error small text-danger mt-1"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header bg-primary text-white small"><i class="bi bi-lightning"></i> Hızlı İşlemler</div>
+            <div class="card-body p-2">
+                {% if production.status == 'uretimde' %}
+                <form method="POST" action="{{ url_for('mark_production_ready', id=production.id) }}" class="mb-2">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {% for item in production.uretim_items %}
+                    <div class="input-group input-group-sm mb-1">
+                        <span class="input-group-text small" style="max-width:140px; overflow:hidden; text-overflow:ellipsis;">{{ item.description }}</span>
+                        <input type="number" step="0.001" min="0" class="form-control" name="produced_{{ item.id }}" value="{{ item.produced_quantity }}">
+                    </div>
+                    {% endfor %}
+                    <button type="submit" class="btn btn-sm btn-success w-100"><i class="bi bi-check-circle"></i> Hazır Olarak İşaretle</button>
+                </form>
+                {% endif %}
+                <a href="{{ url_for('production_is_emri_pdf', id=production.id) }}" class="btn btn-sm btn-outline-dark w-100 mb-2">
+                    <i class="bi bi-printer"></i> İş Emri Yazdır
+                </a>
+                <form method="POST" action="{{ url_for('edit_production', id=production.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="status" value="{{ production.status }}">
+                    <input type="hidden" name="start_date" value="{{ production.start_date.strftime('%Y-%m-%d') if production.start_date else '' }}">
+                    <input type="hidden" name="end_date" value="{{ production.end_date.strftime('%Y-%m-%d') if production.end_date else '' }}">
+                    <input type="hidden" name="due_date" value="{{ production.due_date.strftime('%Y-%m-%d') if production.due_date else '' }}">
+                    <textarea name="notes" class="form-control form-control-sm mb-1" rows="2" placeholder="Üretim notu ekle...">{{ production.notes or '' }}</textarea>
+                    <button type="submit" class="btn btn-sm btn-outline-secondary w-100"><i class="bi bi-save"></i> Notu Kaydet</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="text-end mt-2">
+    <a href="{{ url_for('production_detail', id=production.id) }}" class="small">
+        <i class="bi bi-arrow-up-right-square"></i> Detay sayfasına git
+    </a>
+</div>

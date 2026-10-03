@@ -2719,6 +2719,22 @@ def register_routes(app):
                                 ticaret_stages=TICARET_STAGES, daily_outputs=daily_outputs,
                                 daily_outputs_total_kg=daily_outputs_total_kg)
 
+    @app.route('/production/<int:id>/row-detail')
+    @login_required
+    def production_row_detail(id):
+        """Is 4: Uretim Listesi'nde satira tiklaninca AJAX ile yuklenen
+        acilir bolum - Siparis Bilgisi + Gunluk Uretim (AYNI
+        DailyProductionOutput/add_daily_production_output() - İş 3 ile
+        cakisma yok) + Hizli Islemler (mark_production_ready/edit_production
+        ile AYNI route'lar, kopya mantik yok)."""
+        production = Production.query.get_or_404(id)
+        daily_outputs = DailyProductionOutput.query.filter_by(production_id=id) \
+            .order_by(DailyProductionOutput.tarih.desc()).all()
+        daily_outputs_total_kg = sum(o.toplam_kg for o in daily_outputs)
+        return render_template('_production_row_detail.html', production=production,
+                                daily_outputs=daily_outputs, daily_outputs_total_kg=daily_outputs_total_kg,
+                                today=datetime.now().date())
+
     @app.route('/production/<int:id>/update-specs', methods=['POST'])
     @login_required
     def update_production_item_specs(id):
