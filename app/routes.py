@@ -803,10 +803,15 @@ def register_routes(app):
         duplicate_groups, suspicious_groups = _duplicate_phone_groups()
         duplicate_group_count = len(duplicate_groups)
 
+        # Is 3: 'Secilenleri su kullaniciya ata' dropdown'u SADECE admin
+        # icin - normal kullaniciya ekstra sorgu yapilmaz.
+        all_users = User.query.order_by(User.username).all() if current_user.is_admin else []
+
         return render_template('customers.html', customers=customers, search=search, pagination=pagination,
                                 not_customer_count=not_customer_count, never_transacted_count=never_transacted_count,
                                 dormant_count=dormant_count, takip_gerekiyor_count=takip_gerekiyor_count,
-                                this_week_count=this_week_count, duplicate_group_count=duplicate_group_count)
+                                this_week_count=this_week_count, duplicate_group_count=duplicate_group_count,
+                                all_users=all_users)
 
     def _customers_return_url():
         """Is 6: musteri listesindeki satir-ici islem formlari (sil/musteri
@@ -870,6 +875,40 @@ def register_routes(app):
             db.session.commit()
             flash(f'{count} müşteri "Müşteri Değil" olarak işaretlendi.', 'success')
 
+        return redirect(_customers_return_url())
+
+    @app.route('/customers/bulk/assign-owner', methods=['POST'])
+    @login_required
+    @admin_required
+    def bulk_assign_owner():
+        """Is 3: 'Secilenleri su kullaniciya ata' - bulk_mark_not_customer
+        ile AYNI iki mod (secili ID'ler / filtrelenmis TUMU, tek UPDATE).
+        SADECE admin - route seviyesinde de korunuyor (sadece sablonda
+        butonu gizlemek yetmez)."""
+        owner_id = request.form.get('owner_user_id', type=int)
+        if not owner_id or not User.query.get(owner_id):
+            flash('Geçerli bir kullanıcı seçmelisiniz.', 'danger')
+            return redirect(_customers_return_url())
+
+        select_all_filtered = request.form.get('select_all_filtered') == '1'
+        search = request.form.get('search', '').strip()
+
+        if select_all_filtered:
+            query = _apply_customers_search_filter(
+                Customer.query.filter(Customer.status != 'musteri_degil'), search
+            )
+            count = query.update({'owner_user_id': owner_id}, synchronize_session=False)
+        else:
+            ids = request.form.getlist('customer_ids')
+            if not ids:
+                flash('Hiçbir kayıt seçmediniz.', 'warning')
+                return redirect(_customers_return_url())
+            count = Customer.query.filter(Customer.id.in_(ids)).update(
+                {'owner_user_id': owner_id}, synchronize_session=False
+            )
+        db.session.commit()
+        owner = User.query.get(owner_id)
+        flash(f'{count} müşteri "{owner.username}" kullanıcısına atandı.', 'success')
         return redirect(_customers_return_url())
 
     @app.route('/customers/<int:id>/mark-not-customer', methods=['POST'])

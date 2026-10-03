@@ -45,7 +45,18 @@
     <span id="selectedCountText" class="fw-bold"></span>
     <a href="#" id="selectAllFilteredLink" class="d-none"></a>
     <button type="button" id="clearSelectionBtn" class="btn btn-sm btn-outline-secondary">Seçimi Temizle</button>
-    <button type="button" id="bulkMarkNotCustomerBtn" class="btn btn-sm btn-secondary ms-auto">
+    {% if current_user.is_admin %}
+    <select id="bulkAssignOwnerSelect" class="form-select form-select-sm ms-auto" style="max-width: 220px;">
+        <option value="">Şu kullanıcıya ata...</option>
+        {% for u in all_users %}
+        <option value="{{ u.id }}">{{ u.username }}</option>
+        {% endfor %}
+    </select>
+    <button type="button" id="bulkAssignOwnerBtn" class="btn btn-sm btn-primary">
+        <i class="bi bi-person-check"></i> Ata
+    </button>
+    {% endif %}
+    <button type="button" id="bulkMarkNotCustomerBtn" class="btn btn-sm btn-secondary {{ '' if current_user.is_admin else 'ms-auto' }}">
         <i class="bi bi-person-dash"></i> Seçileni "Müşteri Değil" Yap
     </button>
 </div>
@@ -54,6 +65,7 @@
     <input type="hidden" name="page" value="{{ pagination.page }}">
     <input type="hidden" name="search" value="{{ search }}">
     <input type="hidden" id="selectAllFilteredInput" name="select_all_filtered" value="0">
+    <input type="hidden" id="ownerUserIdInput" name="owner_user_id" value="">
     <div id="bulkIdsContainer"></div>
 </form>
 <div class="card shadow-sm">
@@ -230,15 +242,8 @@
         updateToolbar();
     });
 
-    document.getElementById('bulkMarkNotCustomerBtn').addEventListener('click', function () {
-        var n = selectAllFilteredMode ? totalFiltered : checkedCount();
-        if (n === 0) {
-            alert('Hiçbir kayıt seçmediniz.');
-            return;
-        }
-        if (!confirm(n + ' müşteri "Müşteri Değil" olarak işaretlenecek. Bu işlem listeden gizler, silmez. Emin misiniz?')) {
-            return;
-        }
+    function fillFormAndSubmit(actionUrl) {
+        document.getElementById('bulkActionForm').action = actionUrl;
         document.getElementById('selectAllFilteredInput').value = selectAllFilteredMode ? '1' : '0';
         var container = document.getElementById('bulkIdsContainer');
         container.innerHTML = '';
@@ -252,7 +257,41 @@
             });
         }
         document.getElementById('bulkActionForm').submit();
+    }
+
+    document.getElementById('bulkMarkNotCustomerBtn').addEventListener('click', function () {
+        var n = selectAllFilteredMode ? totalFiltered : checkedCount();
+        if (n === 0) {
+            alert('Hiçbir kayıt seçmediniz.');
+            return;
+        }
+        if (!confirm(n + ' müşteri "Müşteri Değil" olarak işaretlenecek. Bu işlem listeden gizler, silmez. Emin misiniz?')) {
+            return;
+        }
+        fillFormAndSubmit('{{ url_for("bulk_mark_not_customer") }}');
     });
+
+    var assignBtn = document.getElementById('bulkAssignOwnerBtn');
+    if (assignBtn) {
+        assignBtn.addEventListener('click', function () {
+            var n = selectAllFilteredMode ? totalFiltered : checkedCount();
+            if (n === 0) {
+                alert('Hiçbir kayıt seçmediniz.');
+                return;
+            }
+            var select = document.getElementById('bulkAssignOwnerSelect');
+            if (!select.value) {
+                alert('Lütfen bir kullanıcı seçin.');
+                return;
+            }
+            var username = select.options[select.selectedIndex].text;
+            if (!confirm(n + ' müşteri "' + username + '" kullanıcısına atanacak. Emin misiniz?')) {
+                return;
+            }
+            document.getElementById('ownerUserIdInput').value = select.value;
+            fillFormAndSubmit('{{ url_for("bulk_assign_owner") }}');
+        });
+    }
 })();
 </script>
 {% endif %}
