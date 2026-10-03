@@ -6,23 +6,6 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-people"></i> Müşteriler <span class="badge bg-secondary">{{ pagination.total }}</span></h2>
     <div>
-        {% if not_customer_count %}
-        <a href="{{ url_for('not_customer_list') }}" class="btn btn-outline-secondary">
-            <i class="bi bi-person-dash"></i> Müşteri Değil <span class="badge bg-dark">{{ not_customer_count }}</span>
-        </a>
-        {% endif %}
-        <a href="{{ url_for('never_transacted_customers') }}" class="btn btn-outline-warning">
-            <i class="bi bi-person-x"></i> Hiç İşlem Yapılmamış <span class="badge bg-dark">{{ never_transacted_count }}</span>
-        </a>
-        <a href="{{ url_for('dormant_customers') }}" class="btn btn-outline-warning">
-            <i class="bi bi-moon"></i> Uyuyan Müşteriler <span class="badge bg-dark">{{ dormant_count }}</span>
-        </a>
-        <a href="{{ url_for('takip_gerekiyor_customers') }}" class="btn btn-outline-danger">
-            <i class="bi bi-bell"></i> Takip Gerekiyor (60+ gün) <span class="badge bg-dark">{{ takip_gerekiyor_count }}</span>
-        </a>
-        <a href="{{ url_for('hizli_iletisim') }}" class="btn btn-outline-success">
-            <i class="bi bi-lightning-charge"></i> Hızlı İletişim
-        </a>
         <a href="{{ url_for('import_customers_vcf') }}" class="btn btn-info">
             <i class="bi bi-phone"></i> VCF İçe Aktar
         </a>
@@ -273,4 +256,38 @@
 })();
 </script>
 {% endif %}
+{% endblock %}
+
+{% block side_panel %}
+<div class="card shadow-sm">
+    <div class="card-header bg-primary text-white"><i class="bi bi-people"></i> Müşteri Özeti</div>
+    <div class="card-body">
+        <div class="small text-muted">Toplam Müşteri</div>
+        <div class="fw-bold fs-5 mb-2">{{ pagination.total }}</div>
+        <div class="small text-muted">Bu Hafta Eklenen</div>
+        <div class="fw-bold mb-0">{{ this_week_count }}</div>
+    </div>
+</div>
+<div class="card shadow-sm">
+    <div class="card-header bg-dark text-white"><i class="bi bi-link-45deg"></i> Hızlı Erişim</div>
+    <div class="card-body d-grid gap-2">
+        {% if not_customer_count %}
+        <a href="{{ url_for('not_customer_list') }}" class="btn btn-sm btn-outline-secondary d-flex justify-content-between">
+            <span><i class="bi bi-person-dash"></i> Müşteri Değil</span> <span class="badge bg-dark">{{ not_customer_count }}</span>
+        </a>
+        {% endif %}
+        <a href="{{ url_for('never_transacted_customers') }}" class="btn btn-sm btn-outline-warning d-flex justify-content-between">
+            <span><i class="bi bi-person-x"></i> Hiç İşlem Yapılmamış</span> <span class="badge bg-dark">{{ never_transacted_count }}</span>
+        </a>
+        <a href="{{ url_for('dormant_customers') }}" class="btn btn-sm btn-outline-warning d-flex justify-content-between">
+            <span><i class="bi bi-moon"></i> Uyuyan Müşteriler</span> <span class="badge bg-dark">{{ dormant_count }}</span>
+        </a>
+        <a href="{{ url_for('takip_gerekiyor_customers') }}" class="btn btn-sm btn-outline-danger d-flex justify-content-between">
+            <span><i class="bi bi-bell"></i> Takip Gerekiyor (60+ gün)</span> <span class="badge bg-dark">{{ takip_gerekiyor_count }}</span>
+        </a>
+        <a href="{{ url_for('duplicate_customers') }}" class="btn btn-sm btn-outline-info d-flex justify-content-between">
+            <span><i class="bi bi-exclamation-diamond"></i> Mükerrer Kayıtlar</span> <span class="badge bg-dark">{{ duplicate_group_count }}</span>
+        </a>
+    </div>
+</div>
 {% endblock %}

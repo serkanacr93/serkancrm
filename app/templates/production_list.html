@@ -15,30 +15,6 @@
     </div>
 </div>
 
-<div class="row g-3 mb-4">
-    <div class="col-6 col-md-4">
-        <div class="border rounded p-2 h-100">
-            <div class="text-muted small"><i class="bi bi-pie-chart"></i> Durum Dağılımı</div>
-            <div class="fw-bold">{{ tab_counts.uretimde }} Üretimde / {{ tab_counts.hazir }} Hazır / {{ tab_counts.sevkiyatta }} Sevkiyatta</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4">
-        <div class="border rounded p-2 h-100">
-            <div class="text-muted small"><i class="bi bi-exclamation-triangle"></i> Termin Aşımı</div>
-            {% if overdue_count %}
-            <div class="fw-bold text-danger">{{ overdue_count }} iş emrinin termini geçti</div>
-            {% else %}
-            <div class="text-success small">Termin aşımı yok</div>
-            {% endif %}
-        </div>
-    </div>
-    <div class="col-6 col-md-4">
-        <div class="border rounded p-2 h-100">
-            <div class="text-muted small"><i class="bi bi-journal-check"></i> Bugünkü Üretim</div>
-            <div class="fw-bold">{{ "%.2f"|format(today_output_total_kg) }} kg</div>
-        </div>
-    </div>
-</div>
 
 <ul class="nav nav-tabs mb-3">
     <li class="nav-item">
@@ -137,4 +113,8 @@
     <i class="bi bi-info-circle"></i> Bu sekmede üretim bulunmuyor.
 </div>
 {% endif %}
+{% endblock %}
+
+{% block side_panel %}
+{% include '_uretim_rapor_card.html' %}
 {% endblock %}

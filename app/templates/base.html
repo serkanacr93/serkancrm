@@ -175,6 +175,24 @@
     </nav>
     {% endif %}
 
+    {% if current_user.is_authenticated %}
+    <!-- Is 2: sagdan kayan Ozet Panel - her sayfa kendi side_panel blogunu
+         doldurur, set/endset ile TEK seferlik yakalanir (blok iki kez
+         render edilmez), bos ise sekme hic gorunmez. -->
+    {% set side_panel_html %}{% block side_panel %}{% endblock %}{% endset %}
+    {% if side_panel_html | trim %}
+    <div class="crm-side-panel-wrapper" id="sidePanelWrapper">
+        <div class="crm-side-panel-tab" id="sidePanelTab">
+            <i class="bi bi-layout-sidebar-inset-reverse"></i> ÖZET PANEL
+        </div>
+        <div class="crm-side-panel" id="sidePanel">
+            <h6 class="crm-panel-title"><i class="bi bi-layout-sidebar-inset-reverse"></i> Özet Panel</h6>
+            {{ side_panel_html }}
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
     <div class="container-fluid py-4">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -274,6 +292,41 @@
                 errorBox.textContent = 'Bağlantı hatası, tekrar deneyin.';
                 errorBox.classList.remove('d-none');
             });
+        });
+    })();
+    </script>
+
+    <!-- Is 2: sagdan kayan Ozet Panel - hover (masaustu) + tiklama (mobil)
+         ile ac/kapat. Sekme/panel'de pointer-events:auto, sarmalayici
+         (wrapper) pointer-events:none oldugu icin kapaliyken altindaki
+         sayfa icerigine tiklanabilir kalir. -->
+    <script>
+    (function () {
+        var wrapper = document.getElementById('sidePanelWrapper');
+        if (!wrapper) return;
+        var tab = document.getElementById('sidePanelTab');
+        var panel = document.getElementById('sidePanel');
+        var closeTimer = null;
+
+        function openPanel() {
+            clearTimeout(closeTimer);
+            wrapper.classList.add('open');
+        }
+        function scheduleClose() {
+            closeTimer = setTimeout(function () { wrapper.classList.remove('open'); }, 250);
+        }
+        tab.addEventListener('mouseenter', openPanel);
+        tab.addEventListener('mouseleave', scheduleClose);
+        panel.addEventListener('mouseenter', openPanel);
+        panel.addEventListener('mouseleave', scheduleClose);
+        tab.addEventListener('click', function (e) {
+            e.preventDefault();
+            wrapper.classList.toggle('open');
+        });
+        document.addEventListener('click', function (e) {
+            if (wrapper.classList.contains('open') && !panel.contains(e.target) && !tab.contains(e.target)) {
+                wrapper.classList.remove('open');
+            }
         });
     })();
     </script>

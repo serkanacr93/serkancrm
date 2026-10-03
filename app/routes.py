@@ -243,6 +243,38 @@ def _admin_deals_own_only():
     zaman sadece kendi tekliflerini gorur."""
     return bool(session.get('admin_deals_own_only'))
 
+_INVALID_PHONE_RAW = re.compile(r'^0*$|^-+$')
+
+def _duplicate_phone_groups():
+    """Is 8: telefon numarasini normalize ederek (_normalize_phone_for_whatsapp
+    ile AYNI fonksiyon - tek kaynak) ayni numaraya sahip musteri gruplarini
+    bulur. Gecersiz (bos/10 haneden kisa/sadece '0'-'-' gibi) numaralar
+    atlanir; 5'ten fazla musteride gecen numaralar (muhtemelen ortak sabit
+    hat/sahte numara) MUKERRER sayilmaz, ayri 'suspicious' listesinde
+    donulur. Musteriler sag panelindeki sayac VE /customers/mukerrer
+    sayfasi AYNI bu fonksiyonu kullanir (tek kaynak, modul cakismasi yok)."""
+    customers = Customer.query.filter(Customer.phone.isnot(None)).all()
+    groups_map = {}
+    for c in customers:
+        raw = (c.phone or '').strip()
+        if not raw or _INVALID_PHONE_RAW.match(raw):
+            continue
+        digits = re.sub(r'\D', '', raw)
+        if len(digits) < 10:
+            continue
+        norm = _normalize_phone_for_whatsapp(raw)
+        if not norm:
+            continue
+        groups_map.setdefault(norm, []).append(c)
+    duplicate_groups, suspicious_groups = [], []
+    for norm, custs in groups_map.items():
+        if len(custs) <= 1:
+            continue
+        (suspicious_groups if len(custs) > 5 else duplicate_groups).append({'phone': norm, 'customers': custs})
+    duplicate_groups.sort(key=lambda g: -len(g['customers']))
+    suspicious_groups.sort(key=lambda g: -len(g['customers']))
+    return duplicate_groups, suspicious_groups
+
 def _deal_visibility_user_id():
     """Bu istekte teklif gorunurlugunun kime kisitlanacagini dondurur:
     normal kullanici icin HER ZAMAN kendi id'si; admin icin varsayilan
@@ -669,10 +701,17 @@ def register_routes(app):
         pending_commission_total = sum(c.amount for c in pending_commissions)
         pending_commission_count = len(pending_commissions)
 
+        # Is 2 (sag panel): Gorevler (acik sayisi) + Uretim Raporu (Uretim
+        # Listesi'yle AYNI _production_report_data() fonksiyonu - tek kaynak).
+        open_tasks_count = Task.query.filter(Task.status != 'tamamlandi').count()
+        production_report = _production_report_data()
+
         return render_template('index.html',
                              pending_commission_total=pending_commission_total,
                              pending_commission_count=pending_commission_count,
                              takip_gerekiyor_count=takip_gerekiyor_count,
+                             open_tasks_count=open_tasks_count,
+                             production_report=production_report,
                              customers=customers, 
                              deals=deals,
                              total_value=total_value,
@@ -757,9 +796,17 @@ def register_routes(app):
 
         takip_gerekiyor_count = _takip_gerekiyor_query().count()
 
+        # Is 2 (sag panel): bu hafta eklenen + mukerrer kayit sayisi
+        # (/customers/mukerrer ile AYNI _duplicate_phone_groups() - tek kaynak).
+        week_start = (datetime.utcnow() - timedelta(days=datetime.utcnow().weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        this_week_count = Customer.query.filter(Customer.created_at >= week_start).count()
+        duplicate_groups, suspicious_groups = _duplicate_phone_groups()
+        duplicate_group_count = len(duplicate_groups)
+
         return render_template('customers.html', customers=customers, search=search, pagination=pagination,
                                 not_customer_count=not_customer_count, never_transacted_count=never_transacted_count,
-                                dormant_count=dormant_count, takip_gerekiyor_count=takip_gerekiyor_count)
+                                dormant_count=dormant_count, takip_gerekiyor_count=takip_gerekiyor_count,
+                                this_week_count=this_week_count, duplicate_group_count=duplicate_group_count)
 
     def _customers_return_url():
         """Is 6: musteri listesindeki satir-ici islem formlari (sil/musteri
@@ -1638,11 +1685,18 @@ def register_routes(app):
         this_month_won_total = _apply_deal_visibility(db.session.query(db.func.sum(Deal.value)).select_from(Deal)).filter(
             Deal.stage == 'kazanilan', Deal.created_at >= month_start
         ).scalar() or 0
+        # Is 2 (sag panel): "suresi dolacak" - Dashboard'daki expiring_deals
+        # ile AYNI pencere (2 gun).
+        expiring_soon_count = _apply_deal_visibility(db.session.query(db.func.count(Deal.id)).select_from(Deal)).filter(
+            Deal.valid_until <= today + timedelta(days=2), Deal.valid_until >= today,
+            ~Deal.stage.in_(RESOLVED_STAGES)
+        ).scalar()
 
         return render_template('deals.html', deals=deals, search=search, stage_filter=stage_filter,
                                 tab=tab, tab_counts=tab_counts, pagination=pagination,
                                 admin_deals_own_only=_admin_deals_own_only(),
                                 expired_deals_count=expired_deals_count,
+                                expiring_soon_count=expiring_soon_count,
                                 this_month_won_total=this_month_won_total)
 
     @app.route('/deals/view-toggle', methods=['POST'])
@@ -2392,6 +2446,20 @@ def register_routes(app):
         query = _apply_production_tab(query, tab, latest_status_subq, joined=joined)
         return query.order_by(Production.created_at.desc()).all()
 
+    def _production_report_data():
+        """Is 2 (sag panel): 'Uretim Raporu' kartinin verisi - Dashboard
+        VE Uretim Listesi sayfalarinda AYNI kart/partial (_uretim_rapor_card.html)
+        ile gosterilir, mantik burada TEK yerde (modul cakismasi olmasin diye)."""
+        tab_counts = _production_tab_counts()
+        today = datetime.now().date()
+        overdue_count = Production.query.filter(
+            Production.due_date < today, Production.status.in_(['uretimde', 'hazir'])
+        ).count()
+        today_output_total_kg = db.session.query(db.func.sum(DailyProductionOutput.toplam_kg)).filter(
+            DailyProductionOutput.tarih == today
+        ).scalar() or 0
+        return {'tab_counts': tab_counts, 'overdue_count': overdue_count, 'today_output_total_kg': today_output_total_kg}
+
     @app.route('/production')
     @login_required
     def production_list():
@@ -2400,18 +2468,10 @@ def register_routes(app):
             tab = 'uretimde'
         productions = _filtered_productions(tab)
         tab_counts = _production_tab_counts()
-
-        # Is 6: Uretim paneli - termin asimi uyarisi + bugunku uretim ozeti.
-        today = datetime.now().date()
-        overdue_count = Production.query.filter(
-            Production.due_date < today, Production.status.in_(['uretimde', 'hazir'])
-        ).count()
-        today_output_total_kg = db.session.query(db.func.sum(DailyProductionOutput.toplam_kg)).filter(
-            DailyProductionOutput.tarih == today
-        ).scalar() or 0
+        production_report = _production_report_data()
 
         return render_template('production_list.html', productions=productions, tab=tab, tab_counts=tab_counts,
-                                overdue_count=overdue_count, today_output_total_kg=today_output_total_kg)
+                                production_report=production_report)
 
     @app.route('/production/export/excel')
     @login_required
