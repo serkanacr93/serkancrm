@@ -4,9 +4,29 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-people-fill"></i> Mükerrer Kayıtlar <span class="badge bg-secondary">{{ groups|length }}</span></h2>
+    <h2><i class="bi bi-exclamation-diamond"></i> Mükerrer Kayıtlar <span class="badge bg-secondary">{{ groups|length }}</span></h2>
     <a href="{{ url_for('customers') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Müşterilere Dön</a>
 </div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Aynı telefon numarasına sahip müşteri grupları aşağıda listeleniyor. Hiçbir kayıt otomatik birleştirilmez -
+    her grubu "Birleştir" butonuyla kendiniz, kalacak ismi seçerek birleştirirsiniz. Bağlı tüm kayıtlar
+    (teklif, fatura, ödeme, günlük rapor, üretim, ziyaret, görev vb.) kalan müşteriye taşınır; silinen kaydın
+    adı "eski isim" olarak saklanır.
+</div>
+
+{% if suspicious_groups %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    <strong>{{ suspicious_groups|length }} şüpheli grup</strong> (aynı numara 5'ten fazla müşteride geçiyor - muhtemelen ortak sabit hat/sahte numara) mükerrer sayılmadı, listeye dahil edilmedi:
+    <ul class="mb-0 small">
+        {% for g in suspicious_groups %}
+        <li>{{ g.phone }} - {{ g.customers|length }} kayıt ({{ g.customers[:3]|map(attribute='display_name')|join(', ') }}{{ ', ...' if g.customers|length > 3 }})</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
 
 {% if groups %}
 <div class="card shadow-sm">
@@ -25,14 +45,14 @@
                     {% for g in groups %}
                     <tr>
                         <td>{{ g.phone }}</td>
-                        <td><span class="badge bg-warning text-dark">{{ g.customers|length }} kayıt</span></td>
+                        <td><span class="badge bg-warning text-dark">⚠ Aynı numarada {{ g.rows|length }} kayıt</span></td>
                         <td>
-                            {% for c in g.customers %}
-                            <a href="{{ url_for('customer_detail', id=c.id) }}">{{ c.display_name }}</a>{{ ', ' if not loop.last }}
+                            {% for item in g.rows %}
+                            <a href="{{ url_for('customer_detail', id=item.customer.id) }}">{{ item.customer.display_name }}</a>{{ ', ' if not loop.last }}
                             {% endfor %}
                         </td>
                         <td>
-                            <button type="button" class="btn btn-sm btn-warning merge-btn" data-phone="{{ g.phone }}">
+                            <button type="button" class="btn btn-sm btn-warning merge-open-btn" data-bs-toggle="modal" data-bs-target="#mergeModal" data-group-idx="{{ loop.index0 }}">
                                 <i class="bi bi-arrow-down-up"></i> Birleştir
                             </button>
                         </td>
@@ -44,8 +64,106 @@
     </div>
 </div>
 {% else %}
-<div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> Mükerrer (aynı telefon numarasına sahip) kayıt bulunmuyor.
+<div class="alert alert-success">
+    <i class="bi bi-check-circle"></i> Mükerrer (aynı telefon numarasına sahip) kayıt bulunmuyor.
 </div>
 {% endif %}
+
+<!-- Birlestirme modali - icerigi JS ile ilgili grubun verisinden doldurulur -->
+<div class="modal fade" id="mergeModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <form method="POST" action="{{ url_for('merge_duplicate_customers') }}" id="mergeForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-arrow-down-up"></i> Mükerrer Kayıtları Birleştir</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">Kalacak (ana) kaydı seçin. Diğerlerinin tüm bağlı kayıtları buna taşınacak, kendileri silinecek (adları "eski isim" olarak saklanır).</p>
+                    <div id="mergeModalBody" class="row g-3"></div>
+                    <div class="alert alert-danger d-none mt-3" id="mergeModalWarning">
+                        <i class="bi bi-exclamation-triangle"></i> Bu işlem geri alınamaz (eski kayıtlar silinir, bağlı veriler taşınır). Emin misiniz?
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-danger" id="mergeConfirmBtn" disabled>
+                        <i class="bi bi-check-lg"></i> Seçileni Ana Kayıt Yap ve Birleştir
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+var MERGE_GROUPS = [
+    {% for g in groups %}
+    [
+        {% for item in g.rows %}
+        {
+            id: {{ item.customer.id }},
+            name: {{ item.customer.display_name|tojson }},
+            musteri_no: {{ (item.customer.musteri_no or '-')|tojson }},
+            deal_count: {{ item.deal_count }},
+            last_contact: {{ (item.last_contact.strftime('%d.%m.%Y') if item.last_contact else 'Hiç irtibat yok')|tojson }}
+        }{{ ',' if not loop.last }}
+        {% endfor %}
+    ]{{ ',' if not loop.last }}
+    {% endfor %}
+];
+
+document.querySelectorAll('.merge-open-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var idx = parseInt(btn.dataset.groupIdx, 10);
+        var group = MERGE_GROUPS[idx];
+        var body = document.getElementById('mergeModalBody');
+        body.innerHTML = '';
+        group.forEach(function (c, i) {
+            var col = document.createElement('div');
+            col.className = 'col-md-6';
+            col.innerHTML =
+                '<div class="card h-100">' +
+                '<div class="card-body">' +
+                '<div class="form-check mb-2">' +
+                '<input class="form-check-input main-radio" type="radio" name="main_customer_id" value="' + c.id + '" id="mainRadio' + i + '" ' + (i === 0 ? 'checked' : '') + '>' +
+                '<label class="form-check-label fw-bold" for="mainRadio' + i + '">' + c.name + ' <span class="badge bg-success">Kalacak</span></label>' +
+                '</div>' +
+                '<div class="small text-muted">Müşteri No: ' + c.musteri_no + '</div>' +
+                '<div class="small text-muted">Teklif Sayısı: ' + c.deal_count + '</div>' +
+                '<div class="small text-muted">Son İrtibat: ' + c.last_contact + '</div>' +
+                '<input type="hidden" class="dup-id-input" value="' + c.id + '">' +
+                '</div></div>';
+            body.appendChild(col);
+        });
+        document.getElementById('mergeConfirmBtn').disabled = false;
+        updateMergeHiddenInputs();
+        body.querySelectorAll('.main-radio').forEach(function (r) {
+            r.addEventListener('change', updateMergeHiddenInputs);
+        });
+    });
+});
+
+function updateMergeHiddenInputs() {
+    var form = document.getElementById('mergeForm');
+    form.querySelectorAll('.dup-id-hidden').forEach(function (el) { el.remove(); });
+    var mainId = form.querySelector('.main-radio:checked')?.value;
+    document.querySelectorAll('#mergeModalBody .dup-id-input').forEach(function (inp) {
+        if (inp.value === mainId) return;
+        var hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'duplicate_ids';
+        hidden.className = 'dup-id-hidden';
+        hidden.value = inp.value;
+        form.appendChild(hidden);
+    });
+}
+
+document.getElementById('mergeForm').addEventListener('submit', function (e) {
+    if (!confirm('Bu işlem geri alınamaz. Seçili olmayan kayıtlar silinecek, bağlı tüm veriler kalacak kayda taşınacak. Emin misiniz?')) {
+        e.preventDefault();
+    }
+});
+</script>
 {% endblock %}

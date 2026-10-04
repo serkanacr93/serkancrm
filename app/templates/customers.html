@@ -99,6 +99,11 @@
                                 {{ customer.first_name }} {{ customer.last_name }}
                                 {% endif %}
                             </a>
+                            {% if duplicate_count_by_customer.get(customer.id) %}
+                            <a href="{{ url_for('duplicate_customers') }}" class="badge bg-warning text-dark text-decoration-none" title="Aynı telefon numarasıyla kayıtlı başka müşteri(ler) var">
+                                ⚠ Aynı numarada {{ duplicate_count_by_customer[customer.id] }} kayıt
+                            </a>
+                            {% endif %}
                         </td>
                         <td>{{ customer.contact_person or '-' }}</td>
                         <td>

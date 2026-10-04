@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter
@@ -10,10 +10,6 @@ from functools import wraps
 from io import BytesIO
 from werkzeug.utils import secure_filename
 import hashlib
-try:
-    from app.models import CustomerOldName
-except ImportError:
-    CustomerOldName = None
 import openpyxl
 import os
 import re
@@ -286,6 +282,62 @@ def _duplicate_phone_groups():
     duplicate_groups.sort(key=lambda g: -len(g['customers']))
     suspicious_groups.sort(key=lambda g: -len(g['customers']))
     return duplicate_groups, suspicious_groups
+
+# Is 8: customer_id (veya esdegeri) tutan TUM tablolar - musteri birlestirme
+# sirasinda bu tablolardaki satirlar silinen musteriden ana musteriye
+# tasinir. Production/Shipment/ProductionItem/ShipmentItem/DealItem/
+# InvoiceItem dogrudan customer_id TUTMAZ (Deal/Production/Invoice
+# uzerinden dolayli baglanir) - Deal.customer_id tasinca onlar otomatik
+# "takip eder", ayrica islem gerekmez.
+_CUSTOMER_FK_TABLES = [
+    (Deal, 'customer_id'),
+    (ManualPlanningEntry, 'customer_id'),
+    (ManualTedarikEntry, 'customer_id'),
+    (ManualIrsaliye, 'customer_id'),
+    (CustomerStatement, 'customer_id'),
+    (Invoice, 'customer_id'),
+    (Reminder, 'customer_id'),
+    (Task, 'customer_id'),
+    (CustomerVisit, 'customer_id'),
+    (DailyReport, 'customer_id'),
+    (Payment, 'customer_id'),
+    (PotentialCustomer, 'converted_customer_id'),
+    (DailyProductionOutput, 'customer_id'),
+]
+
+def _merge_customers(main_id, duplicate_ids, user):
+    """Is 8: main_id DISINDAKI tum duplicate_ids'leri main_id'ye birlestirir.
+    TEK transaction - herhangi bir adim hata verirse cagiran taraf
+    (route) rollback yapar, HICBIR degisiklik kalici olmaz. Her tasinan
+    musterinin ad/firma bilgisi CustomerOldName'e yazilir (Is 6 aramasinda
+    eski isimle bulunabilme + kim/ne zaman birlestirdi logu - ayni kayit
+    ikisine de hizmet eder). TOPLU OTOMATIK CAGRILMAZ - sadece kullanicinin
+    acikca sectigi tek bir grup icin, kullanicinin sectigi 'kalacak' id ile
+    cagrilir (bkz. merge_duplicate_customers() route'u)."""
+    main = Customer.query.get(main_id)
+    if not main:
+        raise ValueError('Ana müşteri bulunamadı.')
+    merged_names = []
+    for dup_id in duplicate_ids:
+        if dup_id == main_id:
+            continue
+        dup = Customer.query.get(dup_id)
+        if not dup:
+            continue
+        for model, fk_field in _CUSTOMER_FK_TABLES:
+            model.query.filter(getattr(model, fk_field) == dup_id).update(
+                {fk_field: main_id}, synchronize_session=False
+            )
+        db.session.add(CustomerOldName(
+            customer_id=main_id,
+            eski_ad=dup.display_name,
+            eski_musteri_no=dup.musteri_no,
+            merged_from_customer_id=dup.id,
+            merged_by_user_id=user.id,
+        ))
+        merged_names.append(dup.display_name)
+        db.session.delete(dup)
+    return merged_names
 
 def _deal_visibility_user_id():
     """Bu istekte teklif gorunurlugunun kime kisitlanacagini dondurur:
@@ -814,12 +866,20 @@ def register_routes(app):
         this_week_count = Customer.query.filter(Customer.created_at >= week_start).count()
         duplicate_groups, suspicious_groups = _duplicate_phone_groups()
         duplicate_group_count = len(duplicate_groups)
+        # Is 8: ekrandaki her satira "ayni numarada N kayit" rozeti icin -
+        # customer_id -> grup boyutu haritasi (sadece bu sayfadaki musteriler
+        # icin degil, TUM gruplar icin - zaten _duplicate_phone_groups()
+        # tum musterileri tarıyor, ek sorgu gerekmez).
+        duplicate_count_by_customer = {
+            c.id: len(g['customers']) for g in duplicate_groups for c in g['customers']
+        }
 
         # Is 3: 'Secilenleri su kullaniciya ata' dropdown'u SADECE admin
         # icin - normal kullaniciya ekstra sorgu yapilmaz.
         all_users = User.query.order_by(User.username).all() if current_user.is_admin else []
 
         return render_template('customers.html', customers=customers, search=search, pagination=pagination,
+                                duplicate_count_by_customer=duplicate_count_by_customer,
                                 not_customer_count=not_customer_count, never_transacted_count=never_transacted_count,
                                 dormant_count=dormant_count, takip_gerekiyor_count=takip_gerekiyor_count,
                                 this_week_count=this_week_count, duplicate_group_count=duplicate_group_count,
@@ -1037,10 +1097,66 @@ def register_routes(app):
     @app.route('/customers/mukerrer')
     @login_required
     def duplicate_customers():
-        """Is 8 (bu oturumda asagida doldurulacak): telefon numarasi
-        normalize edilerek aynı numaraya sahip musteri gruplarini bulur.
-        Simdilik placeholder - Is 8'de tam doldurulacak."""
-        return render_template('customers_duplicate.html', groups=[])
+        """Is 8: telefon numarasi normalize edilerek ayni numaraya sahip
+        musteri gruplarini listeler - SADECE TESPIT, hicbir otomatik
+        birlestirme yapilmaz (kullanici her grubu kendisi, modal'dan
+        secerek birlestirir - bkz. merge_duplicate_customers()). Her
+        kayit yaninda teklif sayisi + son irtibat tarihi TOPLU sorguyla
+        (N+1 yok) gosterilir."""
+        duplicate_groups, suspicious_groups = _duplicate_phone_groups()
+        all_ids = [c.id for g in duplicate_groups for c in g['customers']]
+
+        deal_counts = dict(db.session.query(
+            Deal.customer_id, db.func.count(Deal.id)
+        ).filter(Deal.customer_id.in_(all_ids)).group_by(Deal.customer_id).all()) if all_ids else {}
+
+        last_contact = _last_contact_subquery()
+        last_contact_rows = db.session.query(
+            Customer.id, last_contact.c.last_contact
+        ).outerjoin(last_contact, Customer.id == last_contact.c.customer_id).filter(
+            Customer.id.in_(all_ids)
+        ).all() if all_ids else []
+        last_contact_map = dict(last_contact_rows)
+
+        groups = []
+        for g in duplicate_groups:
+            items = []
+            for c in g['customers']:
+                items.append({
+                    'customer': c,
+                    'deal_count': deal_counts.get(c.id, 0),
+                    'last_contact': last_contact_map.get(c.id),
+                })
+            groups.append({'phone': g['phone'], 'rows': items})
+
+        return render_template('customers_duplicate.html', groups=groups,
+                                suspicious_groups=suspicious_groups)
+
+    @app.route('/customers/mukerrer/birlestir', methods=['POST'])
+    @login_required
+    def merge_duplicate_customers():
+        """Is 8: kullanicinin MODAL'DAN sectigi TEK bir grubu birlestirir -
+        main_customer_id (kalacak) + duplicate_ids[] (silinecekler, ana
+        kayda tasinacak). TOPLU OTOMATIK BIRLESTIRME YOK - bu route her
+        cagrida SADECE kullanicinin o an sectigi grubu isler. Tek
+        transaction: _merge_customers() icindeki herhangi bir adim hata
+        verirse TUM degisiklikler geri alinir."""
+        main_id = request.form.get('main_customer_id', type=int)
+        duplicate_ids = [int(x) for x in request.form.getlist('duplicate_ids') if x]
+        if not main_id or not duplicate_ids:
+            flash('Birleştirme için ana müşteri ve en az bir tekrar eden kayıt seçilmelidir.', 'danger')
+            return redirect(url_for('duplicate_customers'))
+
+        try:
+            merged_names = _merge_customers(main_id, duplicate_ids, current_user)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            flash('Birleştirme sırasında bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+            return redirect(url_for('duplicate_customers'))
+
+        flash(f'{len(merged_names)} kayıt birleştirildi: {", ".join(merged_names)}', 'success')
+        return redirect(url_for('duplicate_customers'))
 
     @app.route('/hizli-iletisim')
     @login_required
@@ -1070,9 +1186,15 @@ def register_routes(app):
             elif city:
                 other_cities.setdefault(city, []).append(item)
         other_cities_sorted = sorted(other_cities.items(), key=lambda kv: kv[0])
+        # Is 8: "ayni numarada N kayit" rozeti icin.
+        duplicate_groups, _ = _duplicate_phone_groups()
+        duplicate_count_by_customer = {
+            c.id: len(g['customers']) for g in duplicate_groups for c in g['customers']
+        }
         return render_template('hizli_iletisim.html', near_region=near_region,
                                 other_cities=other_cities_sorted,
-                                takip_gereken_gun=TAKIP_GEREKEN_GUN)
+                                takip_gereken_gun=TAKIP_GEREKEN_GUN,
+                                duplicate_count_by_customer=duplicate_count_by_customer)
 
     @app.route('/cari-hesap-ozeti')
     @login_required
@@ -1486,11 +1608,21 @@ def register_routes(app):
         last_contact_date = max(contact_dates) if contact_dates else None
         days_since_contact = (date.today() - last_contact_date).days if last_contact_date else None
 
+        # Is 8: bu musteriyle AYNI telefon numarasina sahip baska musteri(ler)
+        # var mi - "ayni numarada N kayit" rozeti icin.
+        duplicate_siblings = []
+        if customer.phone:
+            norm_phone = _normalize_phone_for_whatsapp(customer.phone)
+            if norm_phone:
+                candidates = Customer.query.filter(Customer.phone.isnot(None), Customer.id != customer.id).all()
+                duplicate_siblings = [c for c in candidates if _normalize_phone_for_whatsapp(c.phone) == norm_phone]
+
         return render_template('customer_detail.html', customer=customer, deals=deals,
                              statements=statements, total_debit=total_debit, total_credit=total_credit,
                              balance_info=balance_info,
                              daily_reports=daily_reports, pending_productions=pending_productions,
-                             last_contact_date=last_contact_date, days_since_contact=days_since_contact)
+                             last_contact_date=last_contact_date, days_since_contact=days_since_contact,
+                             duplicate_siblings=duplicate_siblings)
 
     @app.route('/customers/<int:id>/import-statement-pdf', methods=['POST'])
     @login_required
@@ -2265,9 +2397,8 @@ def register_routes(app):
             max_updated = max((c.updated_at for c in customers), default=None)
             etag = hashlib.md5(f'{len(customers)}-{max_updated}'.encode()).hexdigest()
         old_names_map = {}
-        if CustomerOldName is not None:
-            for cid, name in db.session.query(CustomerOldName.customer_id, CustomerOldName.eski_ad).all():
-                old_names_map.setdefault(cid, []).append(name)
+        for cid, name in db.session.query(CustomerOldName.customer_id, CustomerOldName.eski_ad).all():
+            old_names_map.setdefault(cid, []).append(name)
 
         data = []
         for c in customers:

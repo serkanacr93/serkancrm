@@ -202,6 +202,24 @@ class Customer(db.Model):
     def __repr__(self):
         return f'<Customer {self.display_name}>'
 
+class CustomerOldName(db.Model):
+    """Is 8: musteri birlestirme sirasinda silinen kaydin ad/firma bilgisi
+    - ana (kalan) musteride 'eski isimler' olarak saklanir. Iki amaca
+    hizmet eder: (1) Is 6 aramasinda eski isimle de bulunabilme, (2)
+    kim/ne zaman birlestirdi logu (bu kayit zaten birlestirme aninda
+    olusturuldugu icin created_at + merged_by_user_id bu logu tasir,
+    ayri bir log tablosu gerekmiyor)."""
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
+    eski_ad = db.Column(db.String(300), nullable=False)
+    eski_musteri_no = db.Column(db.String(20), nullable=True)
+    merged_from_customer_id = db.Column(db.Integer, nullable=True)  # silinen kaydin ESKI id'si (referans/iz icin, FK degil - o kayit artik yok)
+    merged_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    customer = db.relationship('Customer', backref='old_names')
+    merged_by = db.relationship('User')
+
 class Deal(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     deal_no = db.Column(db.Integer, unique=True, nullable=True)

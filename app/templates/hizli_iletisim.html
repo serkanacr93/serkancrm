@@ -26,6 +26,9 @@
             {{ item.customer.first_name }} {{ item.customer.last_name }}
             {% endif %}
         </a>
+        {% if duplicate_count_by_customer.get(item.customer.id) %}
+        <a href="{{ url_for('duplicate_customers') }}" class="badge bg-warning text-dark text-decoration-none">⚠ {{ duplicate_count_by_customer[item.customer.id] }} kayıt</a>
+        {% endif %}
     </td>
     <td>
         {{ item.customer.company_phone or item.customer.phone or '-' }}

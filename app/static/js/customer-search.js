@@ -344,8 +344,22 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
             item.dataset.idx = i;
             var companyLine = c.company_name ? (_highlightMatch(c.company_name, query) + ' - ') : '';
             var subBits = [c.musteri_no, c.city, c.phone].filter(Boolean).join(' · ');
+            // Is 8: eslesme ne name'de ne company_name'de bulunamadiysa ama
+            // old_names'den birinde varsa, "eski adi: ..." etiketi goster -
+            // boylece birlestirilmis bir kaydin eski ismiyle bulunabilmesi
+            // kullaniciya acikca gosterilir.
+            var oldNameMatch = null;
+            if ((c.old_names || []).length) {
+                var qFold = CRM_SEARCH.foldTr(query.trim());
+                var nameHasIt = CRM_SEARCH.foldTr(c.name).indexOf(qFold) !== -1 ||
+                    CRM_SEARCH.foldTr(c.company_name || '').indexOf(qFold) !== -1;
+                if (!nameHasIt) {
+                    oldNameMatch = c.old_names.find(function (on) { return CRM_SEARCH.foldTr(on).indexOf(qFold) !== -1; });
+                }
+            }
             item.innerHTML = '<strong>' + companyLine + _highlightMatch(c.name, query) + '</strong>' +
-                (subBits ? '<br><small class="text-muted">' + subBits + '</small>' : '');
+                (subBits ? '<br><small class="text-muted">' + subBits + '</small>' : '') +
+                (oldNameMatch ? '<br><small class="text-muted">eski adı: ' + _highlightMatch(oldNameMatch, query) + '</small>' : '');
             item.addEventListener('mousedown', function (e) {
                 e.preventDefault();
                 selectCustomer(c);
