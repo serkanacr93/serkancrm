@@ -3891,6 +3891,78 @@ def register_routes(app):
         flash('Üretim "Hazır" olarak işaretlendi!', 'success')
         return redirect(url_for('production_detail', id=id))
 
+    @app.route('/production/<int:id>/tamamla-gonder', methods=['POST'])
+    @login_required
+    def production_tamamla_gonder(id):
+        """Is 3: sade uretim akisi - tek butonla 'Uretim tamamlandi ->
+        Gonderildi'. Detayli akistaki (create_shipment_from_production)
+        irsaliye zorunlulugunu kullaniciya HISSETTIRMEZ: irsaliye zaten
+        yoksa bedelsiz (0 TL) bir Invoice(type='irsaliye') arka planda
+        otomatik olusturulur - yasal belge yine var, ama elle doldurma
+        adimi yok. Fatura/odeme/cari HICBIR SEKILDE bu akistan etkilenmez
+        (irsaliyenin cariye etkisi yoktur - bkz. Customer.total_invoiced,
+        sadece type='fatura' sayar); detayli sevkiyat sayfalari/akisi
+        DEGISTIRILMEDI, bu SADECE ek bir hizli yol."""
+        production = Production.query.get_or_404(id)
+        if production.status != 'hazir':
+            flash('Bu işlem için üretim "Hazır" aşamasında olmalı.', 'danger')
+            return redirect(url_for('production_detail', id=id))
+
+        recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
+        recent_duplicate = Shipment.query.filter(
+            Shipment.production_id == id, Shipment.created_at >= recent_cutoff
+        ).first()
+        if recent_duplicate:
+            flash(f'SVN-{recent_duplicate.id:05d} sevkiyatı az önce zaten oluşturuldu.', 'info')
+            return redirect(url_for('shipment_detail', id=recent_duplicate.id))
+
+        deal = production.deal
+        try:
+            irsaliye = Invoice.query.filter_by(deal_id=deal.id, type='irsaliye').first()
+            if not irsaliye:
+                irsaliye = Invoice(
+                    invoice_no=_next_invoice_no(), type='irsaliye', deal_id=deal.id,
+                    customer_id=deal.customer_id, user_id=current_user.id, date=datetime.now().date(),
+                    vat_rate=deal.vat_rate, notes='Sade üretim akışı - otomatik oluşturuldu.'
+                )
+                db.session.add(irsaliye)
+                db.session.flush()
+                for item in production.items:
+                    if item.produced_quantity and item.produced_quantity > 0:
+                        db.session.add(InvoiceItem(
+                            invoice_id=irsaliye.id, description=item.description,
+                            quantity=item.produced_quantity, unit=item.unit,
+                            unit_price=0, total_price=0
+                        ))
+                db.session.flush()
+                irsaliye.calculate_totals()
+
+            has_invoice = Invoice.query.filter_by(deal_id=deal.id, type='fatura').first() is not None
+            today = datetime.now().date()
+            shipment = Shipment(
+                production_id=id, ship_date=today, actual_delivery_date=today,
+                status='teslim_edildi', faturasiz_cikis=not has_invoice,
+                notes='Sade üretim akışı - "Üretim Tamamlandı → Gönderildi" ile oluşturuldu.'
+            )
+            db.session.add(shipment)
+            db.session.flush()
+            for item in production.items:
+                if item.produced_quantity and item.produced_quantity > 0:
+                    db.session.add(ShipmentItem(
+                        shipment_id=shipment.id, production_item_id=item.id,
+                        description=item.description, quantity=item.produced_quantity, unit=item.unit
+                    ))
+
+            production.status = 'sevkiyat'
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            flash('İşlem sırasında bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+            return redirect(url_for('production_detail', id=id))
+
+        flash('Üretim tamamlandı ve gönderildi olarak işaretlendi!', 'success')
+        return redirect(url_for('production_detail', id=id))
+
     @app.route('/production/<int:id>/create-shipment', methods=['GET', 'POST'])
     @login_required
     def create_shipment_from_production(id):

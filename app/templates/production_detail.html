@@ -316,20 +316,32 @@
                     {% if not has_invoice %}
                     <p class="text-warning small"><i class="bi bi-info-circle"></i> Fatura kaydı yok - sevkiyat ekranında "Faturasız Çıkış" seçeneğini işaretlemeniz gerekecek.</p>
                     {% endif %}
-                    <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success">
-                        <i class="bi bi-truck"></i> Sevkiyat Oluştur
-                    </a>
-                    {% else %}
-                    <div class="alert alert-warning mb-2">
-                        <i class="bi bi-exclamation-triangle"></i> Sevkiyat oluşturmadan önce en azından irsaliye oluşturmalısınız.
-                        <ul class="mb-0">
-                            <li>Fatura: {{ 'var' if has_invoice else 'eksik (faturasız çıkış ile devam edilebilir)' }}</li>
-                            <li>İrsaliye: eksik (zorunlu)</li>
-                        </ul>
+                    <div class="d-flex flex-wrap gap-2">
+                        <a href="{{ url_for('create_shipment_from_production', id=production.id) }}" class="btn btn-success">
+                            <i class="bi bi-truck"></i> Sevkiyat Oluştur (Detaylı)
+                        </a>
+                        <form method="POST" action="{{ url_for('production_tamamla_gonder', id=production.id) }}" onsubmit="return confirm('Üretim tamamlandı ve gönderildi olarak işaretlensin mi? Takip no/kargo bilgisi girilmeyecek.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-outline-success">
+                                <i class="bi bi-check2-circle"></i> Üretim Tamamlandı → Gönderildi (Sade)
+                            </button>
+                        </form>
                     </div>
-                    <a href="{{ url_for('create_invoice_from_deal', id=production.deal_id) }}" class="btn btn-warning">
-                        <i class="bi bi-receipt"></i> Fatura / İrsaliye Oluştur
-                    </a>
+                    {% else %}
+                    <div class="alert alert-info mb-2">
+                        <i class="bi bi-info-circle"></i> Bu iş emri için henüz irsaliye yok. "Sade" akışla devam ederseniz bedelsiz bir irsaliye otomatik oluşturulur.
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <form method="POST" action="{{ url_for('production_tamamla_gonder', id=production.id) }}" onsubmit="return confirm('Üretim tamamlandı ve gönderildi olarak işaretlensin mi? Otomatik olarak bedelsiz bir irsaliye oluşturulacak.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-check2-circle"></i> Üretim Tamamlandı → Gönderildi (Sade)
+                            </button>
+                        </form>
+                        <a href="{{ url_for('create_invoice_from_deal', id=production.deal_id) }}" class="btn btn-outline-warning">
+                            <i class="bi bi-receipt"></i> Fatura / İrsaliye Oluştur (Detaylı)
+                        </a>
+                    </div>
                     {% endif %}
                 {% else %}
                 <p class="text-muted mb-0">Üretim "Hazır" aşamasına geldiğinde sevkiyat oluşturulabilir.</p>
