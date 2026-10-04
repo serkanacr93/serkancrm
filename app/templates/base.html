@@ -176,6 +176,15 @@
     {% endif %}
 
     {% if current_user.is_authenticated %}
+    <!-- Is 6: musteri-arama bileseni TEK yerden, icerik bloklarindan ONCE
+         yukleniyor - 9 formun kendi inline script'i (content block icinde)
+         initCustomerSearch()'u cagirdigi icin kutuphane burada, erken
+         yuklenmeli (sayfa sonunda olsaydi ReferenceError olurdu). -->
+    <script>window.CRM_CURRENT_USER_ID = {{ current_user.id }};</script>
+    <script src="{{ asset_url('js/customer-search.js') }}"></script>
+    {% endif %}
+
+    {% if current_user.is_authenticated %}
     <!-- Is 2: sagdan kayan Ozet Panel - her sayfa kendi side_panel blogunu
          doldurur, set/endset ile TEK seferlik yakalanir (blok iki kez
          render edilmez), bos ise sekme hic gorunmez. -->
@@ -331,23 +340,124 @@
     })();
     </script>
 
-    <!-- Is 1: ust bar genel arama kutusu icin Ctrl+K kisayolu - arama
-         MANTIGI Is 6'da (customer-search.js'in genisletilmis surumu)
-         baglanacak, burada sadece odaklama/kapatma davranisi var. -->
+    <!-- Is 6: ust bar genel arama kutusu - CRM_SEARCH (customer-search.js)
+         ile musteri, + hafif /api/deals/summary ile teklif eslesmeleri.
+         Ctrl+K odaklar, Esc kapatir, ok tuslariyla gezinilir. -->
     <script>
     (function () {
         var input = document.getElementById('globalSearchInput');
         var results = document.getElementById('globalSearchResults');
         if (!input) return;
+        var dealsCache = null;
+        var activeIndex = -1;
+        var currentItems = [];
+
+        function loadDeals() {
+            if (dealsCache) return Promise.resolve(dealsCache);
+            var stored = null;
+            try {
+                var raw = localStorage.getItem('crm_deals_v1');
+                if (raw) stored = JSON.parse(raw);
+            } catch (e) {}
+            var headers = {};
+            if (stored && stored.etag) headers['If-None-Match'] = stored.etag;
+            return fetch('/api/deals/summary', { headers: headers, credentials: 'same-origin' })
+                .then(function (res) {
+                    if (res.status === 304 && stored) { dealsCache = stored.data; return dealsCache; }
+                    return res.json().then(function (data) {
+                        dealsCache = data;
+                        try { localStorage.setItem('crm_deals_v1', JSON.stringify({ etag: res.headers.get('ETag'), data: data })); } catch (e) {}
+                        return dealsCache;
+                    });
+                })
+                .catch(function () { return stored ? stored.data : []; });
+        }
+
+        function searchDeals(query) {
+            var qFold = CRM_SEARCH.foldTr(query);
+            return (dealsCache || []).filter(function (d) {
+                return CRM_SEARCH.foldTr(d.title).indexOf(qFold) !== -1 ||
+                    CRM_SEARCH.foldTr(d.customer_name).indexOf(qFold) !== -1 ||
+                    CRM_SEARCH.foldTr(d.display_no).indexOf(qFold) !== -1;
+            }).slice(0, 8);
+        }
+
+        function render(query) {
+            CRM_SEARCH.load().then(function () {
+                var customers = CRM_SEARCH.search(query, { currentUserId: window.CRM_CURRENT_USER_ID, limit: 8 });
+                loadDeals().then(function () {
+                    var deals = searchDeals(query);
+                    results.innerHTML = '';
+                    currentItems = [];
+                    activeIndex = -1;
+                    if (customers.length === 0 && deals.length === 0) {
+                        results.innerHTML = '<div class="list-group-item text-muted small">Eşleşme bulunamadı.</div>';
+                        results.style.display = 'block';
+                        return;
+                    }
+                    if (customers.length) {
+                        results.insertAdjacentHTML('beforeend', '<div class="list-group-item disabled small text-muted py-1"><i class="bi bi-people"></i> Müşteriler</div>');
+                        customers.forEach(function (c) {
+                            var el = document.createElement('a');
+                            el.href = '/customers/' + c.id;
+                            el.className = 'list-group-item list-group-item-action py-1';
+                            var sub = [c.musteri_no, c.city, c.phone].filter(Boolean).join(' · ');
+                            el.innerHTML = '<strong>' + (c.company_name ? c.company_name + ' - ' : '') + c.name + '</strong>' +
+                                (sub ? '<br><small class="text-muted">' + sub + '</small>' : '');
+                            results.appendChild(el);
+                            currentItems.push(el);
+                        });
+                    }
+                    if (deals.length) {
+                        results.insertAdjacentHTML('beforeend', '<div class="list-group-item disabled small text-muted py-1"><i class="bi bi-file-earmark-text"></i> Teklifler</div>');
+                        deals.forEach(function (d) {
+                            var el = document.createElement('a');
+                            el.href = '/deals/' + d.id;
+                            el.className = 'list-group-item list-group-item-action py-1';
+                            el.innerHTML = '<strong>' + d.display_no + '</strong> - ' + d.title +
+                                '<br><small class="text-muted">' + d.customer_name + '</small>';
+                            results.appendChild(el);
+                            currentItems.push(el);
+                        });
+                    }
+                    results.style.display = 'block';
+                });
+            });
+        }
+
+        function setActive(i) {
+            if (!currentItems.length) return;
+            currentItems.forEach(function (el) { el.classList.remove('active'); });
+            if (i < 0) i = currentItems.length - 1;
+            if (i >= currentItems.length) i = 0;
+            activeIndex = i;
+            currentItems[activeIndex].classList.add('active');
+            currentItems[activeIndex].scrollIntoView({ block: 'nearest' });
+        }
+
+        input.addEventListener('input', function () {
+            var q = input.value.trim();
+            if (q.length < 2) {
+                results.style.display = 'none';
+                results.innerHTML = '';
+                return;
+            }
+            render(q);
+        });
+
+        input.addEventListener('keydown', function (e) {
+            if (results.style.display === 'none') return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); setActive(activeIndex + 1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(activeIndex - 1); }
+            else if (e.key === 'Enter' && activeIndex >= 0) { e.preventDefault(); currentItems[activeIndex].click(); }
+            else if (e.key === 'Escape') { results.style.display = 'none'; input.blur(); }
+        });
+
         document.addEventListener('keydown', function (e) {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
                 e.preventDefault();
                 input.focus();
                 input.select();
-            }
-            if (e.key === 'Escape' && document.activeElement === input) {
-                input.blur();
-                if (results) results.style.display = 'none';
             }
         });
         document.addEventListener('click', function (e) {

@@ -431,4 +431,8 @@
         </div>
     </div>
 </div>
+<script>
+// Is 6: "son acilanlar" - arama siralamasinda kullanilir (CRM_SEARCH.trackRecent).
+if (window.CRM_SEARCH) { CRM_SEARCH.trackRecent({{ customer.id }}); }
+</script>
 {% endblock %}

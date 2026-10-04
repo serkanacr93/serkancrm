@@ -9,6 +9,11 @@ from datetime import datetime, timedelta, date
 from functools import wraps
 from io import BytesIO
 from werkzeug.utils import secure_filename
+import hashlib
+try:
+    from app.models import CustomerOldName
+except ImportError:
+    CustomerOldName = None
 import openpyxl
 import os
 import re
@@ -198,10 +203,12 @@ def _tr_normalize(text):
     return text.translate(_TR_NORMALIZE_MAP).lower()
 
 def _build_city_matchers():
-    """(derlenmis regex, il adi) ciftlerini, en uzun/spesifik isim once
-    denensin diye uzunluga gore azalan sirada hazirlar - orn. 'Kahramanmaras'
-    'Mus' ile karismasin, 'Aksaray' ilceleri 'Aksaray' ilinden once denenebilir
-    (ikisi de ayni degeri dondurdugunden sira onemli degil ama tutarlilik icin)."""
+    """TEK bir birlesik regex + (normalize edilmis isim -> il) sozlugu
+    hazirlar. Performans: Is 6'da /api/customers/summary 1582 musteri icin
+    bu fonksiyonu cagirinca, onceki surum (93 AYRI .search() cagrisi/
+    musteri) olculebilir derecede yavasti (~6s); TEK alternation regex'i
+    (tek .search() cagrisi/musteri) bunu onemli olcude hizlandirir. En
+    uzun/spesifik isim once denensin diye uzunluga gore azalan sirada."""
     entries = []
     for ilce in _KONYA_ILCELERI:
         entries.append((ilce, 'Konya'))
@@ -212,9 +219,16 @@ def _build_city_matchers():
     for il in _IL_LISTESI:
         entries.append((il, il))
     entries.sort(key=lambda e: -len(e[0]))
-    return [(re.compile(r'\b' + re.escape(_tr_normalize(name)) + r'\b'), value) for name, value in entries]
+    value_map = {}
+    alternatives = []
+    for name, value in entries:
+        norm_name = _tr_normalize(name)
+        value_map[norm_name] = value
+        alternatives.append(re.escape(norm_name))
+    pattern = re.compile(r'\b(' + '|'.join(alternatives) + r')\b')
+    return pattern, value_map
 
-_CITY_MATCHERS = _build_city_matchers()
+_CITY_PATTERN, _CITY_VALUE_MAP = _build_city_matchers()
 
 def extract_customer_city(customer):
     """Musteri metin alanlarindan (first_name/last_name/company_name/
@@ -232,10 +246,8 @@ def extract_customer_city(customer):
     if not text:
         return None
     normalized = _tr_normalize(text)
-    for pattern, value in _CITY_MATCHERS:
-        if pattern.search(normalized):
-            return value
-    return None
+    m = _CITY_PATTERN.search(normalized)
+    return _CITY_VALUE_MAP[m.group(1)] if m else None
 
 def _admin_deals_own_only():
     """Is 3: admin'in oturum bazli 'Sadece Benim Tekliflerim' tercihi.
@@ -2213,6 +2225,86 @@ def register_routes(app):
             DailyProductionOutput.production_id.in_(active_production_ids)
         ).scalar() or 0
         return jsonify({'total_kg': total_kg})
+
+    @app.route('/api/customers/summary')
+    @login_required
+    def customers_summary():
+        """Is 6: Aninda Musteri Arama - tarayicida TUTULACAK hafif musteri
+        ozeti. Arama artik sunucuya her tus basisinda istek atmiyor, bu
+        endpoint sayfa acilisinda (ve versiyon degisince) BIR KEZ cekilir.
+        ETag = musteri sayisi + en son updated_at hash'i - herhangi bir
+        musteri eklenince/degisince/silinince (Is 8 birlestirme dahil,
+        cunku birlestirme de customer.updated_at'i veya sayisini degistirir)
+        otomatik degisir, tarayici bir sonraki fetch'te yeniden indirir."""
+        # Performans: ilk yuklemede (tarayicida henuz onbellek yok, yani
+        # If-None-Match gelmiyor) versiyon kontrol sorgusu ATLANIR - zaten
+        # karsilastirilacak bir etag olmadigindan bu sorgu bos yere 1 Neon
+        # round-trip'i (olcum: ~1.1s) harcar. Etag, SONRASINDA asil veriden
+        # (ekstra sorgu gerekmeden) hesaplanir. If-None-Match GELDIYSE (ikinci+
+        # yuklemeler) once bu ucuz sorguyla 304 donulebilsin diye kontrol edilir -
+        # boylece veri degismemisse 400KB'lik payload hic cekilmez/aktarilmaz.
+        if_none_match = request.headers.get('If-None-Match')
+        etag = None
+        if if_none_match:
+            version_row = db.session.query(
+                db.func.count(Customer.id), db.func.max(Customer.updated_at)
+            ).filter(Customer.status != 'musteri_degil').one()
+            etag = hashlib.md5(f'{version_row[0]}-{version_row[1]}'.encode()).hexdigest()
+            if if_none_match == etag:
+                return '', 304
+
+        # Performans: sadece gereken sutunlar cekiliyor (notes/created_at
+        # gibi kullanilmayan alanlar yok) - 1582 satirda tam Customer
+        # objesi yerine bu, veri transferini onemli olcude azaltiyor.
+        customers = Customer.query.with_entities(
+            Customer.id, Customer.first_name, Customer.last_name, Customer.company_name,
+            Customer.phone, Customer.email, Customer.tax_id, Customer.musteri_no,
+            Customer.owner_user_id, Customer.address, Customer.company_address, Customer.updated_at
+        ).filter(Customer.status != 'musteri_degil').all()
+        if etag is None:
+            max_updated = max((c.updated_at for c in customers), default=None)
+            etag = hashlib.md5(f'{len(customers)}-{max_updated}'.encode()).hexdigest()
+        old_names_map = {}
+        if CustomerOldName is not None:
+            for cid, name in db.session.query(CustomerOldName.customer_id, CustomerOldName.eski_ad).all():
+                old_names_map.setdefault(cid, []).append(name)
+
+        data = []
+        for c in customers:
+            name_part = ' '.join(filter(None, [c.first_name, c.last_name]))
+            display_name = (f'{c.company_name} - {name_part}' if name_part else c.company_name) if c.company_name else (name_part or 'İsimsiz Müşteri')
+            data.append({
+                'id': c.id, 'name': display_name, 'company_name': c.company_name or '',
+                'phone': c.phone or '', 'email': c.email or '', 'tax_id': c.tax_id or '',
+                'musteri_no': c.musteri_no or '', 'city': extract_customer_city(c) or '',
+                'owner_user_id': c.owner_user_id, 'old_names': old_names_map.get(c.id, []),
+            })
+        resp = jsonify(data)
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'no-cache'
+        return resp
+
+    @app.route('/api/deals/summary')
+    @login_required
+    def deals_summary():
+        """Is 6 madde 3: ust menu genel aramasinda musterilerin altinda
+        teklifler de cikabilsin diye - AYNI ETag onbellekleme deseni."""
+        version_row = db.session.query(
+            db.func.count(Deal.id), db.func.max(Deal.created_at)
+        ).one()
+        etag = hashlib.md5(f'deals-{version_row[0]}-{version_row[1]}'.encode()).hexdigest()
+        if request.headers.get('If-None-Match') == etag:
+            return '', 304
+
+        deals = _apply_deal_visibility(Deal.query).options(joinedload(Deal.customer)).all()
+        data = [{
+            'id': d.id, 'display_no': d.display_no, 'title': d.title,
+            'customer_name': d.customer.display_name if d.customer else '',
+        } for d in deals]
+        resp = jsonify(data)
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'no-cache'
+        return resp
 
     @app.route('/api/customers/search')
     @login_required
