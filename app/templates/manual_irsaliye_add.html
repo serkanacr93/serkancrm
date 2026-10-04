@@ -50,9 +50,18 @@
                         </div>
                     </div>
                     <div class="row">
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label for="tracking_number" class="form-label">Takip No</label>
                             <input type="text" class="form-control" id="tracking_number" name="tracking_number" placeholder="Opsiyonel">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="vat_rate" class="form-label">KDV Oranı (%)</label>
+                            <select class="form-select" id="vat_rate" name="vat_rate">
+                                <option value="0">%0</option>
+                                <option value="1">%1</option>
+                                <option value="10">%10</option>
+                                <option value="20" selected>%20</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -66,20 +75,25 @@
                     </button>
                 </div>
                 <div class="card-body">
+                    <div class="alert alert-light border small py-2 mb-2">
+                        <i class="bi bi-info-circle"></i> Birim Fiyat alanlarını boş bırakırsanız (Is 5), bu irsaliye <strong>fiyatsız</strong> kalır ve otomatik fatura oluşmaz - eski davranış korunur.
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-bordered" id="items-table">
                             <thead class="table-dark">
                                 <tr>
-                                    <th style="width: 55%">Açıklama</th>
-                                    <th style="width: 20%">Miktar</th>
-                                    <th style="width: 20%">Birim</th>
-                                    <th style="width: 5%"></th>
+                                    <th style="width: 32%">Açıklama</th>
+                                    <th style="width: 13%">Miktar</th>
+                                    <th style="width: 13%">Birim</th>
+                                    <th style="width: 17%">Birim Fiyat</th>
+                                    <th style="width: 17%">Toplam</th>
+                                    <th style="width: 8%"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr class="item-row">
                                     <td><input type="text" class="form-control form-control-sm" name="desc_0" required></td>
-                                    <td><input type="number" class="form-control form-control-sm" name="qty_0" min="0" step="0.01" required></td>
+                                    <td><input type="number" class="form-control form-control-sm item-qty" name="qty_0" min="0" step="0.01" required></td>
                                     <td>
                                         <select class="form-select form-select-sm" name="unit_0">
                                             <option value="adet">Adet</option>
@@ -90,9 +104,25 @@
                                             <option value="set">Set</option>
                                         </select>
                                     </td>
+                                    <td><input type="number" class="form-control form-control-sm item-price" name="price_0" min="0" step="any" placeholder="Opsiyonel"></td>
+                                    <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
                                     <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
                                 </tr>
                             </tbody>
+                            <tfoot>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end"><strong>Ara Toplam:</strong></td>
+                                    <td colspan="2"><strong id="subtotal">0,00 ₺</strong></td>
+                                </tr>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end"><strong>KDV (<span id="vat-rate-display">20</span>%):</strong></td>
+                                    <td colspan="2"><strong id="vat-amount">0,00 ₺</strong></td>
+                                </tr>
+                                <tr class="table-success">
+                                    <td colspan="4" class="text-end"><strong>GENEL TOPLAM:</strong></td>
+                                    <td colspan="2"><strong id="grand-total">0,00 ₺</strong></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                 </div>
@@ -148,7 +178,7 @@ document.getElementById('add-item').addEventListener('click', function() {
     row.className = 'item-row';
     row.innerHTML = `
         <td><input type="text" class="form-control form-control-sm" name="desc_${itemCount}" required></td>
-        <td><input type="number" class="form-control form-control-sm" name="qty_${itemCount}" min="0" step="0.01" required></td>
+        <td><input type="number" class="form-control form-control-sm item-qty" name="qty_${itemCount}" min="0" step="0.01" required></td>
         <td>
             <select class="form-select form-select-sm" name="unit_${itemCount}">
                 <option value="adet">Adet</option>
@@ -159,10 +189,14 @@ document.getElementById('add-item').addEventListener('click', function() {
                 <option value="set">Set</option>
             </select>
         </td>
+        <td><input type="number" class="form-control form-control-sm item-price" name="price_${itemCount}" min="0" step="any" placeholder="Opsiyonel"></td>
+        <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
         <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
     `;
     tbody.appendChild(row);
     itemCount++;
+    attachItemEvents();
+    calculateIrsaliyeTotals();
 });
 
 document.addEventListener('click', function(e) {
@@ -170,9 +204,43 @@ document.addEventListener('click', function(e) {
         const row = e.target.closest('.item-row');
         if (document.querySelectorAll('.item-row').length > 1) {
             row.remove();
+            calculateIrsaliyeTotals();
         }
     }
 });
+
+function fmtIrs(n) { return n.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺'; }
+
+function attachItemEvents() {
+    document.querySelectorAll('.item-qty, .item-price').forEach(function (input) {
+        input.removeEventListener('input', calculateIrsaliyeTotals);
+        input.addEventListener('input', calculateIrsaliyeTotals);
+    });
+    document.getElementById('vat_rate').removeEventListener('change', calculateIrsaliyeTotals);
+    document.getElementById('vat_rate').addEventListener('change', calculateIrsaliyeTotals);
+}
+
+function calculateIrsaliyeTotals() {
+    var subtotal = 0;
+    document.querySelectorAll('.item-row').forEach(function (row) {
+        var qty = parseFloat(row.querySelector('.item-qty')?.value) || 0;
+        var price = parseFloat(row.querySelector('.item-price')?.value) || 0;
+        var total = qty * price;
+        var totalInput = row.querySelector('.item-total');
+        if (totalInput) totalInput.value = price ? fmtIrs(total) : '';
+        subtotal += total;
+    });
+    var vatRate = parseFloat(document.getElementById('vat_rate').value) || 0;
+    var vatAmount = subtotal * (vatRate / 100);
+    var grandTotal = subtotal + vatAmount;
+    document.getElementById('subtotal').textContent = fmtIrs(subtotal);
+    document.getElementById('vat-amount').textContent = fmtIrs(vatAmount);
+    document.getElementById('grand-total').textContent = fmtIrs(grandTotal);
+    document.getElementById('vat-rate-display').textContent = vatRate;
+}
+
+attachItemEvents();
+calculateIrsaliyeTotals();
 
 document.querySelector('form').addEventListener('submit', function () {
     var btn = this.querySelector('button[type="submit"]');

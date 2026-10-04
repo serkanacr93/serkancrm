@@ -959,10 +959,12 @@ def generate_irsaliye_pdf(shipment):
     buffer.seek(0)
     return buffer
 
-def generate_manual_irsaliye_pdf(manual_irsaliye):
+def generate_manual_irsaliye_pdf(manual_irsaliye, show_prices=False):
     """generate_irsaliye_pdf ile ayni gorsel format - ama Shipment/Production
     yerine dogrudan ManualIrsaliye+customer'dan besleniyor (teklif/uretim
-    kaydi olmadan olusturulan bagimsiz irsaliyeler icin)."""
+    kaydi olmadan olusturulan bagimsiz irsaliyeler icin). Is 5: show_prices
+    True ise (ve irsaliye fiyatliysa) Birim Fiyat/Toplam sutunlari + KDV/
+    Genel Toplam alt bilgisi eklenir - varsayilan False (fiyatsiz)."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
 
@@ -998,17 +1000,26 @@ def generate_manual_irsaliye_pdf(manual_irsaliye):
 
     elements.append(Paragraph("ÜRÜN / MİKTAR", heading_style))
 
+    priced = show_prices and manual_irsaliye.is_priced
     if manual_irsaliye.items:
         from xml.sax.saxutils import escape
-        data = [['#', 'Açıklama', 'Miktar', 'Birim']]
+        if priced:
+            data = [['#', 'Açıklama', 'Miktar', 'Birim', 'Birim Fiyat', 'Toplam']]
+        else:
+            data = [['#', 'Açıklama', 'Miktar', 'Birim']]
         for i, item in enumerate(manual_irsaliye.items, 1):
-            data.append([
+            row = [
                 str(i),
                 Paragraph(escape(_sanitize_pdf_free_text(item.description) or '-'), turkish_style),
                 f"{item.quantity:.2f}",
                 item.unit
-            ])
-        table = Table(data, colWidths=[1*cm, 9*cm, 3*cm, 3*cm])
+            ]
+            if priced:
+                row.append(format_price_precise(item.unit_price or 0))
+                row.append(format_price_precise(item.total_price))
+            data.append(row)
+        col_widths = [1*cm, 7*cm, 2.2*cm, 2*cm, 2.8*cm, 2.8*cm] if priced else [1*cm, 9*cm, 3*cm, 3*cm]
+        table = Table(data, colWidths=col_widths)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -1019,6 +1030,22 @@ def generate_manual_irsaliye_pdf(manual_irsaliye):
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
         ]))
         elements.append(table)
+        if priced:
+            elements.append(Spacer(1, 3*mm))
+            totals_data = [
+                ['Ara Toplam:', format_price_precise(manual_irsaliye.subtotal)],
+                [f'KDV (%{manual_irsaliye.vat_rate:.0f}):', format_price_precise(manual_irsaliye.vat_amount)],
+                ['GENEL TOPLAM:', format_price_precise(manual_irsaliye.total)],
+            ]
+            totals_table = Table(totals_data, colWidths=[4*cm, 4*cm])
+            totals_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), 'Vera'),
+                ('FONTNAME', (0, 2), (-1, 2), 'Vera-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+                ('LINEABOVE', (0, 2), (-1, 2), 1, colors.black),
+            ]))
+            elements.append(totals_table)
     else:
         elements.append(Paragraph("<i>Ürün kalemi bulunamadı.</i>", turkish_style))
 

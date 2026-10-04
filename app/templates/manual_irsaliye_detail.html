@@ -49,7 +49,10 @@
                 <div class="table-responsive">
                     <table class="table table-bordered">
                         <thead class="table-dark">
-                            <tr><th>Açıklama</th><th>Miktar</th><th>Birim</th></tr>
+                            <tr>
+                                <th>Açıklama</th><th>Miktar</th><th>Birim</th>
+                                {% if manual_irsaliye.is_priced %}<th>Birim Fiyat</th><th>Toplam</th>{% endif %}
+                            </tr>
                         </thead>
                         <tbody>
                             {% for item in manual_irsaliye.items %}
@@ -57,15 +60,41 @@
                                 <td>{{ item.description }}</td>
                                 <td>{{ item.quantity }}</td>
                                 <td>{{ item.unit }}</td>
+                                {% if manual_irsaliye.is_priced %}
+                                <td>{{ "{:,.2f}".format(item.unit_price or 0) }} ₺</td>
+                                <td>{{ "{:,.2f}".format(item.total_price) }} ₺</td>
+                                {% endif %}
                             </tr>
                             {% endfor %}
                         </tbody>
+                        {% if manual_irsaliye.is_priced %}
+                        <tfoot class="table-light">
+                            <tr><td colspan="3"></td><td class="text-end">Ara Toplam:</td><td><strong>{{ "{:,.2f}".format(manual_irsaliye.subtotal) }} ₺</strong></td></tr>
+                            <tr><td colspan="3"></td><td class="text-end">KDV (%{{ manual_irsaliye.vat_rate|int }}):</td><td><strong>{{ "{:,.2f}".format(manual_irsaliye.vat_amount) }} ₺</strong></td></tr>
+                            <tr class="table-success"><td colspan="3"></td><td class="text-end"><strong>TOPLAM:</strong></td><td><strong>{{ "{:,.2f}".format(manual_irsaliye.total) }} ₺</strong></td></tr>
+                        </tfoot>
+                        {% endif %}
                     </table>
                 </div>
                 {% endif %}
+
+                {% if manual_irsaliye.invoice_id %}
+                <div class="alert alert-info d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-receipt"></i> Bu irsaliyeye bağlı dahili takip faturası: <strong>{{ manual_irsaliye.invoice.display_no }}</strong></span>
+                    <a href="{{ url_for('invoice_detail', id=manual_irsaliye.invoice_id) }}" class="btn btn-sm btn-primary">
+                        <i class="bi bi-eye"></i> Faturayı Gör
+                    </a>
+                </div>
+                {% endif %}
+
                 <a href="{{ url_for('manual_irsaliye_pdf', id=manual_irsaliye.id) }}" class="btn btn-outline-secondary">
-                    <i class="bi bi-file-earmark-pdf"></i> İrsaliye İndir
+                    <i class="bi bi-file-earmark-pdf"></i> PDF (Fiyatsız)
                 </a>
+                {% if manual_irsaliye.is_priced %}
+                <a href="{{ url_for('manual_irsaliye_pdf', id=manual_irsaliye.id, priced=1) }}" class="btn btn-outline-primary">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF (Fiyatlı)
+                </a>
+                {% endif %}
                 {% if manual_irsaliye.status != 'teslim_edildi' %}
                 <form method="POST" action="{{ url_for('mark_manual_irsaliye_delivered', id=manual_irsaliye.id) }}" class="d-inline">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

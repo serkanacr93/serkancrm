@@ -633,10 +633,36 @@ class ManualIrsaliye(db.Model):
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    # Is 5: fiyatli irsaliye icin KDV orani - kalemlerin hicbirinde fiyat
+    # girilmediyse (eski davranis) None/0 kalir, otomatik fatura olusmaz.
+    vat_rate = db.Column(db.Float, nullable=True, default=20)
+    # Is 5: otomatik olusturulan dahili takip faturasiyla iliski - GENEL
+    # KURAL: bir irsaliyeye fatura baglandiysa ikinci fatura olusturulamaz,
+    # bu alan o kontrolun kaynagi.
+    invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=True)
 
     customer = db.relationship('Customer', backref='manual_irsaliyeler')
     user = db.relationship('User')
     items = db.relationship('ManualIrsaliyeItem', backref='manual_irsaliye', lazy=True, cascade='all, delete-orphan')
+    invoice = db.relationship('Invoice')
+
+    @property
+    def is_priced(self):
+        """En az bir kalemde fiyat girilmis mi - fatura otomasyonu ve
+        PDF'in 'fiyatli' secenegi bu bayrağa bakar."""
+        return any((item.unit_price or 0) > 0 for item in self.items)
+
+    @property
+    def subtotal(self):
+        return sum((item.unit_price or 0) * item.quantity for item in self.items)
+
+    @property
+    def vat_amount(self):
+        return self.subtotal * ((self.vat_rate or 0) / 100)
+
+    @property
+    def total(self):
+        return self.subtotal + self.vat_amount
 
     @property
     def display_no(self):
@@ -662,6 +688,12 @@ class ManualIrsaliyeItem(db.Model):
     description = db.Column(db.String(200), nullable=False)
     quantity = db.Column(db.Float, nullable=False)
     unit = db.Column(db.String(20), default='adet')
+    # Is 5: opsiyonel birim fiyat - NULL/0 ise bu kalem "fiyatsiz" sayilir.
+    unit_price = db.Column(db.Float, nullable=True, default=0)
+
+    @property
+    def total_price(self):
+        return (self.unit_price or 0) * self.quantity
 
 class CustomerStatement(db.Model):
     id = db.Column(db.Integer, primary_key=True)

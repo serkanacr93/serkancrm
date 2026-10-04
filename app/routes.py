@@ -3342,7 +3342,8 @@ def register_routes(app):
                     carrier=request.form.get('carrier') or None,
                     tracking_number=request.form.get('tracking_number') or None,
                     notes=request.form.get('notes', ''),
-                    user_id=current_user.id
+                    user_id=current_user.id,
+                    vat_rate=float(request.form.get('vat_rate', 20))
                 )
                 db.session.add(manual_irsaliye)
                 db.session.flush()
@@ -3351,14 +3352,50 @@ def register_routes(app):
                 while f'desc_{i}' in request.form:
                     desc = request.form.get(f'desc_{i}', '').strip()
                     qty = request.form.get(f'qty_{i}', '').strip()
+                    price_raw = request.form.get(f'price_{i}', '').strip()
                     if desc and qty:
                         db.session.add(ManualIrsaliyeItem(
                             manual_irsaliye_id=manual_irsaliye.id,
                             description=desc,
                             quantity=float(qty),
-                            unit=request.form.get(f'unit_{i}', 'adet')
+                            unit=request.form.get(f'unit_{i}', 'adet'),
+                            unit_price=float(price_raw) if price_raw else 0
                         ))
                     i += 1
+
+                db.session.flush()
+
+                # Is 5 madde 2+4: fiyat GIRILMIS kalem varsa (en az biri)
+                # otomatik dahili takip faturasi olustur, irsaliyeye bagla
+                # (invoice_id) - borc bu sayede Cari Hesap'a (Invoice.
+                # customer_id uzerinden, mevcut tek merkezi hesaplama)
+                # otomatik duser. Hic fiyat girilmediyse (eski davranis)
+                # hicbir fatura olusmaz.
+                if manual_irsaliye.is_priced:
+                    auto_invoice = Invoice(
+                        invoice_no=_next_invoice_no(),
+                        type='fatura',
+                        deal_id=None,
+                        customer_id=manual_irsaliye.customer_id,
+                        user_id=current_user.id,
+                        date=manual_irsaliye.ship_date or datetime.now().date(),
+                        vat_rate=manual_irsaliye.vat_rate,
+                        notes=f'{manual_irsaliye.display_no} irsaliyesinden otomatik oluşturuldu.'
+                    )
+                    db.session.add(auto_invoice)
+                    db.session.flush()
+                    for item in manual_irsaliye.items:
+                        db.session.add(InvoiceItem(
+                            invoice_id=auto_invoice.id,
+                            description=item.description,
+                            quantity=item.quantity,
+                            unit=item.unit,
+                            unit_price=item.unit_price or 0,
+                            total_price=item.total_price
+                        ))
+                    db.session.flush()
+                    auto_invoice.calculate_totals()
+                    manual_irsaliye.invoice_id = auto_invoice.id
 
                 db.session.commit()
             except Exception:
@@ -3366,7 +3403,10 @@ def register_routes(app):
                 flash('İrsaliye oluşturulurken bir hata oluştu, hiçbir değişiklik kaydedilmedi. Girdiğiniz bilgileri kontrol edip tekrar deneyin.', 'danger')
                 return redirect(url_for('manual_irsaliye_add'))
 
-            flash(f'{manual_irsaliye.display_no} manuel irsaliyesi oluşturuldu!', 'success')
+            if manual_irsaliye.invoice_id:
+                flash(f'{manual_irsaliye.display_no} manuel irsaliyesi oluşturuldu ve {auto_invoice.display_no} dahili fatura otomatik oluşturuldu!', 'success')
+            else:
+                flash(f'{manual_irsaliye.display_no} manuel irsaliyesi oluşturuldu!', 'success')
             return redirect(url_for('manual_irsaliye_detail', id=manual_irsaliye.id))
 
         return render_template('manual_irsaliye_add.html', carriers=CARRIER_OPTIONS, today=datetime.now().date())
@@ -3380,9 +3420,14 @@ def register_routes(app):
     @app.route('/irsaliye/manuel/<int:id>/pdf')
     @login_required
     def manual_irsaliye_pdf(id):
+        """Is 5 madde 3: ?priced=1 ile fiyatli PDF (yalnizca irsaliye
+        fiyatliysa anlamli - generate_manual_irsaliye_pdf fiyatsizsa zaten
+        sessizce fiyatsiz tabloya duser), varsayilan fiyatsiz."""
         manual_irsaliye = ManualIrsaliye.query.get_or_404(id)
-        pdf = generate_manual_irsaliye_pdf(manual_irsaliye)
-        return send_file(pdf, as_attachment=True, download_name=f'irsaliye_{manual_irsaliye.display_no}.pdf')
+        show_prices = request.args.get('priced') == '1'
+        pdf = generate_manual_irsaliye_pdf(manual_irsaliye, show_prices=show_prices)
+        suffix = '_fiyatli' if show_prices and manual_irsaliye.is_priced else ''
+        return send_file(pdf, as_attachment=True, download_name=f'irsaliye_{manual_irsaliye.display_no}{suffix}.pdf')
 
     @app.route('/irsaliye/manuel/<int:id>/mark-delivered', methods=['POST'])
     @login_required
