@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}Geçmiş Kayıt Düzeltme - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h2><i class="bi bi-clock-history"></i> Geçmiş Kayıt Düzeltme</h2>
+    <span class="badge bg-secondary">{{ cards|length }} kayıt</span>
+</div>
+
+<div class="alert alert-info small">
+    Program tam kullanılmadan önce açık kalmış eski teklif/üretim kayıtları aşağıda listelenir (en eskiden yeniye).
+    Her kayıt için ne olduğunu seçin - gerçek kayıtlar silinmez, sadece durumu güncellenir ve işlem loglanır (24 saat içinde geri alınabilir).
+</div>
+
+<div class="small text-muted mb-2" id="queueInfo"></div>
+
+{% if cards %}
+<div id="cardsContainer">
+    {% for item in cards %}
+    <div class="duzeltme-card {{ 'd-none' if not loop.first }}" data-idx="{{ loop.index0 }}">
+        <div class="card shadow-sm mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center bg-secondary text-white">
+                <span>
+                    {% if item.deal.customer.company_name %}<strong>{{ item.deal.customer.company_name }}</strong> - {% endif %}
+                    {{ item.deal.customer.first_name }} {{ item.deal.customer.last_name }}
+                </span>
+                <span class="badge bg-light text-dark">{{ item.gun }} gün önce</span>
+            </div>
+            <div class="card-body">
+                <div class="row small text-muted mb-2">
+                    <div class="col-6">Teklif: {{ item.deal.title }}</div>
+                    <div class="col-6">Tutar: {{ "{:,.2f}".format(item.deal.value) }} ₺</div>
+                    <div class="col-6">Durum: {{ item.durum_label }}</div>
+                    <div class="col-6">Oluşturma: {{ item.deal.created_at.strftime('%d.%m.%Y') }}</div>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-6 col-md-3">
+                        <button type="button" class="btn btn-sm btn-success w-100 tamamlandi-btn" data-deal-id="{{ item.deal.id }}" data-amount="{{ item.deal.value }}">
+                            Üretildi, gönderildi
+                        </button>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <form method="POST" action="{{ url_for('gecmis_kayit_kontrol_edildi', deal_id=item.deal.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-primary w-100">Üretimde, devam ediyor</button>
+                        </form>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button type="button" class="btn btn-sm btn-outline-danger w-100 iptal-btn" data-deal-id="{{ item.deal.id }}">
+                            Reddedildi / iptal
+                        </button>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button type="button" class="btn btn-sm btn-outline-dark w-100 skip-btn">Bilmiyorum / Atla</button>
+                    </div>
+                </div>
+                <a href="{{ url_for('customer_detail', id=item.deal.customer.id) }}" class="small d-block mt-2 text-muted">Müşteri detayına git →</a>
+                <a href="{{ url_for('deal_detail', id=item.deal.id) }}" class="small d-block mt-1 text-muted">Teklif detayına git →</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-success"><i class="bi bi-check-circle"></i> Düzeltilecek eski kayıt yok - hepsi güncel!</div>
+{% endif %}
+
+{% set recent_logs = [] %}
+<!-- Tamamlandi modali -->
+<div class="modal fade" id="tamamlandiModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" id="tamamlandiForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Üretildi, Gönderildi</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <label class="form-label">Ödeme Durumu</label>
+                    <select class="form-select mb-2" name="odeme_durumu" id="tamamlandiOdemeDurumu" required>
+                        <option value="tam">Tam ödendi</option>
+                        <option value="kismi">Kısmi ödendi (kalan borç var)</option>
+                        <option value="hic">Hiç ödenmedi (tüm bakiye borç)</option>
+                    </select>
+                    <div id="kalanBorcWrapper">
+                        <label class="form-label">Kalan Borç</label>
+                        <input type="number" step="any" class="form-control" name="kalan_borc" id="tamamlandiKalanBorc">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Iptal modali -->
+<div class="modal fade" id="iptalModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" id="iptalForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Reddedildi / İptal</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <label class="form-label">Neden (opsiyonel)</label>
+                    <textarea class="form-control" name="neden" rows="2"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-danger">Kaydet</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function () {
+    var cards = document.querySelectorAll('.duzeltme-card');
+    var currentIdx = 0;
+    var total = cards.length;
+
+    function updateQueueInfo() {
+        var remaining = total - currentIdx - 1;
+        document.getElementById('queueInfo').textContent = total ? ('Sırada ' + (currentIdx + 1) + ' / ' + total + (remaining > 0 ? ' (' + remaining + ' kayıt daha var)' : '')) : '';
+    }
+    updateQueueInfo();
+
+    function showNext() {
+        if (currentIdx < cards.length) cards[currentIdx].classList.add('d-none');
+        currentIdx++;
+        if (currentIdx < cards.length) {
+            cards[currentIdx].classList.remove('d-none');
+        }
+        updateQueueInfo();
+    }
+
+    document.addEventListener('click', function (e) {
+        if (e.target.closest('.skip-btn')) {
+            showNext();
+        }
+    });
+
+    var tamamlandiModal = new bootstrap.Modal(document.getElementById('tamamlandiModal'));
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.tamamlandi-btn');
+        if (!btn) return;
+        document.getElementById('tamamlandiForm').action = '/gecmis-kayit-duzeltme/' + btn.dataset.dealId + '/tamamlandi';
+        document.getElementById('tamamlandiKalanBorc').value = btn.dataset.amount;
+        tamamlandiModal.show();
+    });
+
+    document.getElementById('tamamlandiOdemeDurumu').addEventListener('change', function () {
+        document.getElementById('kalanBorcWrapper').style.display = (this.value === 'kismi') ? 'block' : 'none';
+    });
+
+    var iptalModal = new bootstrap.Modal(document.getElementById('iptalModal'));
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.iptal-btn');
+        if (!btn) return;
+        document.getElementById('iptalForm').action = '/gecmis-kayit-duzeltme/' + btn.dataset.dealId + '/iptal';
+        iptalModal.show();
+    });
+})();
+</script>
+{% endblock %}

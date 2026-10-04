@@ -220,6 +220,28 @@ class CustomerOldName(db.Model):
     customer = db.relationship('Customer', backref='old_names')
     merged_by = db.relationship('User')
 
+class HistoricalClosureLog(db.Model):
+    """Is 2 - Gecmis Kayit Duzeltme: program tam kullanilmadan once acik
+    kalmis eski teklif/uretimler icin alinan karari + GERI ALMAK icin
+    eski durumu saklar. 'kontrol_edildi' (Uretimde devam ediyor secenegi)
+    de dahil - o secenekte hicbir Deal/Production alani degismez, sadece
+    bu log 'bir daha listede cikma' isareti gorevi gorur."""
+    id = db.Column(db.Integer, primary_key=True)
+    deal_id = db.Column(db.Integer, db.ForeignKey('deal.id'), nullable=False, index=True)
+    action = db.Column(db.String(20), nullable=False)  # 'tamamlandi' / 'kontrol_edildi' / 'iptal'
+    eski_deal_stage = db.Column(db.String(20), nullable=True)
+    eski_production_status = db.Column(db.String(20), nullable=True)
+    created_invoice_id = db.Column(db.Integer, nullable=True)  # geri alinirsa silinir
+    created_payment_id = db.Column(db.Integer, nullable=True)  # geri alinirsa silinir
+    kalan_borc = db.Column(db.Float, nullable=True)
+    neden = db.Column(db.Text, nullable=True)  # 'iptal' secenegi icin opsiyonel not
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    reverted_at = db.Column(db.DateTime, nullable=True)
+
+    deal = db.relationship('Deal')
+    user = db.relationship('User')
+
 class Deal(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     deal_no = db.Column(db.Integer, unique=True, nullable=True)

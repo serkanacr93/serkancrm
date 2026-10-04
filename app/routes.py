@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter
@@ -1481,6 +1481,195 @@ def register_routes(app):
         db.session.commit()
         flash('Ödeme sözü kaydedildi.', 'success')
         return redirect(url_for('takip_modu'))
+
+    @app.route('/gecmis-kayit-duzeltme')
+    @login_required
+    def gecmis_kayit_duzeltme():
+        """Is 2: program tam kullanilmadan once acik kalmis eski teklif
+        (stage='teklif') ve eski uretimler (status in uretimde/hazir,
+        her biri zaten stage='kazanilan' bir Deal'e bagli - 'teklif'
+        kumesiyle CAKISMAZ) kart olarak, EN ESKIDEN YENIYE listelenir.
+        Zaten bir karar verilmis (HistoricalClosureLog, GERI ALINMAMIS)
+        olanlar listeye hic girmez."""
+        closed_deal_ids = db.session.query(HistoricalClosureLog.deal_id).filter(
+            HistoricalClosureLog.reverted_at.is_(None)
+        )
+        today = datetime.now().date()
+
+        old_deals = Deal.query.options(joinedload(Deal.customer)).filter(
+            Deal.stage == 'teklif', ~Deal.id.in_(closed_deal_ids)
+        ).order_by(Deal.created_at.asc()).all()
+        old_productions = Production.query.options(
+            joinedload(Production.deal).joinedload(Deal.customer)
+        ).filter(
+            Production.status.in_(['uretimde', 'hazir']), ~Production.deal_id.in_(closed_deal_ids)
+        ).order_by(Production.created_at.asc()).all()
+
+        cards = []
+        for d in old_deals:
+            cards.append({
+                'deal': d, 'production': None, 'durum_label': 'Teklif',
+                'gun': (today - d.created_at.date()).days
+            })
+        for p in old_productions:
+            cards.append({
+                'deal': p.deal, 'production': p, 'durum_label': p.stage_label,
+                'gun': (today - p.created_at.date()).days
+            })
+        cards.sort(key=lambda x: x['gun'], reverse=True)
+
+        return render_template('gecmis_kayit_duzeltme.html', cards=cards)
+
+    @app.route('/gecmis-kayit-duzeltme/<int:deal_id>/tamamlandi', methods=['POST'])
+    @login_required
+    def gecmis_kayit_tamamlandi(deal_id):
+        """Is 2 secenek 1 - 'Uretildi, gonderildi': sevkiyat/irsaliye/kargo
+        kaydi OLUSTURMAZ (kullanici talebi). Odeme tam degilse girilen
+        KALAN BORC tutari kadar, mevcut bakiye mantigina (Invoice.total -
+        Payment toplami - calculate_customer_balance ile AYNI tek kaynak)
+        uygun sekilde bir 'gecmis kapanis' dahili fatura+odeme ciftiyle
+        kurulur - ayri bir bakiye hesaplama yolu ACILMAZ."""
+        deal = Deal.query.get_or_404(deal_id)
+        production = Production.query.filter_by(deal_id=deal.id).first()
+        odeme_durumu = request.form.get('odeme_durumu')  # 'tam' / 'kismi' / 'hic'
+        kalan_borc_raw = request.form.get('kalan_borc', '').strip()
+        kalan_borc = float(kalan_borc_raw) if kalan_borc_raw else 0.0
+
+        try:
+            eski_deal_stage = deal.stage
+            eski_production_status = production.status if production else None
+
+            deal.stage = 'kazanilan'
+            if production:
+                production.status = 'sevkiyat'
+
+            invoice = Invoice(
+                invoice_no=_next_invoice_no(), type='fatura', deal_id=deal.id,
+                customer_id=deal.customer_id, user_id=current_user.id, date=datetime.now().date(),
+                vat_rate=20, notes='Geçmiş kapanış - program tam kullanılmadan önce açık kalmış kayıt.'
+            )
+            db.session.add(invoice)
+            db.session.flush()
+            db.session.add(InvoiceItem(
+                invoice_id=invoice.id, description=f'{deal.title} (geçmiş kapanış)',
+                quantity=1, unit='adet', unit_price=deal.value, total_price=deal.value
+            ))
+            db.session.flush()
+            invoice.calculate_totals()
+
+            created_payment_id = None
+            if odeme_durumu == 'tam':
+                payment = Payment(customer_id=deal.customer_id, invoice_id=invoice.id, amount=invoice.total,
+                                   payment_date=datetime.now().date(), status='odendi', user_id=current_user.id,
+                                   notes='Geçmiş kapanış - tam ödeme')
+                db.session.add(payment)
+                db.session.flush()
+                created_payment_id = payment.id
+            elif odeme_durumu == 'kismi' and kalan_borc > 0:
+                odenen = max(invoice.total - kalan_borc, 0)
+                if odenen > 0.01:
+                    payment = Payment(customer_id=deal.customer_id, invoice_id=invoice.id, amount=odenen,
+                                       payment_date=datetime.now().date(), status='odendi', user_id=current_user.id,
+                                       notes='Geçmiş kapanış - kısmi ödeme')
+                    db.session.add(payment)
+                    db.session.flush()
+                    created_payment_id = payment.id
+            # 'hic' ise hicbir Payment olusturulmaz - tam borc gorunur.
+
+            db.session.add(HistoricalClosureLog(
+                deal_id=deal.id, action='tamamlandi', eski_deal_stage=eski_deal_stage,
+                eski_production_status=eski_production_status, created_invoice_id=invoice.id,
+                created_payment_id=created_payment_id, kalan_borc=kalan_borc if odeme_durumu != 'tam' else 0,
+                user_id=current_user.id
+            ))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            flash('İşlem sırasında bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+            return redirect(url_for('gecmis_kayit_duzeltme'))
+
+        flash(f'{deal.title} tamamlandı/gönderildi olarak kapatıldı.', 'success')
+        return redirect(url_for('gecmis_kayit_duzeltme'))
+
+    @app.route('/gecmis-kayit-duzeltme/<int:deal_id>/kontrol-edildi', methods=['POST'])
+    @login_required
+    def gecmis_kayit_kontrol_edildi(deal_id):
+        """Is 2 secenek 2 - 'Uretimde, devam ediyor': HICBIR Deal/Production
+        alani degismez, sadece loglanip listeden dusurulur."""
+        deal = Deal.query.get_or_404(deal_id)
+        production = Production.query.filter_by(deal_id=deal.id).first()
+        db.session.add(HistoricalClosureLog(
+            deal_id=deal.id, action='kontrol_edildi', eski_deal_stage=deal.stage,
+            eski_production_status=production.status if production else None, user_id=current_user.id
+        ))
+        db.session.commit()
+        flash(f'{deal.title} kontrol edildi olarak işaretlendi.', 'success')
+        return redirect(url_for('gecmis_kayit_duzeltme'))
+
+    @app.route('/gecmis-kayit-duzeltme/<int:deal_id>/iptal', methods=['POST'])
+    @login_required
+    def gecmis_kayit_iptal(deal_id):
+        """Is 2 secenek 3 - 'Reddedildi/iptal': cariye borc YAZILMAZ (zaten
+        kaybedilen Deal'ler 'faturalanmamis kazanilan' hesaplamasina
+        girmiyor - Customer.total_uninvoiced_won sadece stage='kazanilan'
+        bakar)."""
+        deal = Deal.query.get_or_404(deal_id)
+        production = Production.query.filter_by(deal_id=deal.id).first()
+        eski_deal_stage = deal.stage
+        eski_production_status = production.status if production else None
+        deal.stage = 'kaybedilen'
+        if production:
+            production.status = 'iptal'
+        db.session.add(HistoricalClosureLog(
+            deal_id=deal.id, action='iptal', eski_deal_stage=eski_deal_stage,
+            eski_production_status=eski_production_status,
+            neden=request.form.get('neden', '').strip() or None, user_id=current_user.id
+        ))
+        db.session.commit()
+        flash(f'{deal.title} reddedildi/iptal olarak işaretlendi.', 'success')
+        return redirect(url_for('gecmis_kayit_duzeltme'))
+
+    @app.route('/gecmis-kayit-duzeltme/geri-al/<int:log_id>', methods=['POST'])
+    @login_required
+    def gecmis_kayit_geri_al(log_id):
+        """Is 2 - 'Geri al': SADECE son 24 saat icinde alinan kararlar
+        icin. Deal/Production eski durumuna donuyor, olusturulan Invoice/
+        Payment (varsa) SILINIYOR - cari bakiye otomatik (tek merkezi
+        hesaplamadan) eski haline doner."""
+        log = HistoricalClosureLog.query.get_or_404(log_id)
+        if log.reverted_at is not None:
+            flash('Bu işlem zaten geri alınmış.', 'warning')
+            return redirect(url_for('gecmis_kayit_duzeltme'))
+        if datetime.utcnow() - log.created_at > timedelta(hours=24):
+            flash('Bu işlem 24 saatten eski olduğu için geri alınamaz.', 'danger')
+            return redirect(url_for('gecmis_kayit_duzeltme'))
+
+        try:
+            deal = Deal.query.get(log.deal_id)
+            production = Production.query.filter_by(deal_id=deal.id).first()
+            deal.stage = log.eski_deal_stage
+            if production and log.eski_production_status:
+                production.status = log.eski_production_status
+
+            if log.created_payment_id:
+                payment = Payment.query.get(log.created_payment_id)
+                if payment:
+                    CustomerStatement.query.filter_by(payment_id=payment.id).delete()
+                    db.session.delete(payment)
+            if log.created_invoice_id:
+                invoice = Invoice.query.get(log.created_invoice_id)
+                if invoice:
+                    db.session.delete(invoice)
+
+            log.reverted_at = datetime.utcnow()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            flash('Geri alma sırasında bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+            return redirect(url_for('gecmis_kayit_duzeltme'))
+
+        flash('İşlem geri alındı.', 'success')
+        return redirect(url_for('gecmis_kayit_duzeltme'))
 
     @app.route('/cari-hesap-ozeti')
     @login_required
