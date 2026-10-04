@@ -170,6 +170,7 @@
                     </li>
                 </ul>
                 <a href="{{ url_for('hizli_iletisim') }}" class="crm-cta-btn"><i class="bi bi-lightning-charge"></i> Hızlı İletişim</a>
+                <a href="{{ url_for('takip_modu') }}" class="crm-cta-btn" style="background:#1565c0;"><i class="bi bi-list-check"></i> Takip Modu</a>
             </div>
         </div>
     </nav>
@@ -259,12 +260,23 @@
         if (!modalEl) return;
         var modal = new bootstrap.Modal(modalEl);
         var currentCustomerId = null;
+        var currentFromTakipModu = null;
+        var currentPaymentReminderId = null;
 
         document.addEventListener('click', function (e) {
             var btn = e.target.closest('.whatsapp-btn');
             if (!btn) return;
             e.preventDefault();
             currentCustomerId = btn.dataset.customerId;
+            // Is 1 (Takip Modu): butonda data-from-takip-modu="1" varsa
+            // gunluk sayaç bu gonderimde artirilir (bkz. whatsapp-send
+            // route'u) - diger sayfalardaki normal WhatsApp butonlari bu
+            // data-* ozelligini HIC tasimadigi icin etkilenmez.
+            currentFromTakipModu = btn.dataset.fromTakipModu || null;
+            currentPaymentReminderId = btn.dataset.paymentReminderId || null;
+            if (btn.dataset.message) {
+                document.getElementById('waMessageText').value = btn.dataset.message;
+            }
             document.getElementById('waCustomerName').textContent = btn.dataset.customerName || '';
             document.getElementById('waCustomerPhone').textContent = btn.dataset.customerPhone || '-';
             document.getElementById('waErrorBox').classList.add('d-none');
@@ -284,6 +296,8 @@
             var formData = new FormData();
             formData.append('csrf_token', '{{ csrf_token() }}');
             formData.append('message', message);
+            if (currentFromTakipModu) formData.append('from_takip_modu', currentFromTakipModu);
+            if (currentPaymentReminderId) formData.append('payment_reminder_id', currentPaymentReminderId);
             fetch('/customers/' + currentCustomerId + '/whatsapp-send', {
                 method: 'POST',
                 body: formData
@@ -297,6 +311,9 @@
                 }
                 window.open(result.data.wa_url, '_blank');
                 modal.hide();
+                if (currentFromTakipModu) {
+                    setTimeout(function () { window.location.reload(); }, 400);
+                }
             }).catch(function () {
                 errorBox.textContent = 'Bağlantı hatası, tekrar deneyin.';
                 errorBox.classList.remove('d-none');

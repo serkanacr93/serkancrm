@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}Takip Modu - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h2><i class="bi bi-list-check"></i> Takip Modu</h2>
+    {% if current_user.is_admin %}
+    <div class="btn-group">
+        <a href="{{ url_for('takip_modu') }}" class="btn btn-sm {{ 'btn-primary' if not show_all else 'btn-outline-primary' }}">Benim Müşterilerim</a>
+        <a href="{{ url_for('takip_modu', tumu=1) }}" class="btn btn-sm {{ 'btn-primary' if show_all else 'btn-outline-primary' }}">Tümü</a>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+            <strong>Bugün {{ outreach_count }} / {{ outreach_goal }} iletişim</strong>
+            {% if outreach_count >= outreach_goal %}
+            <span class="badge bg-success">🎉 Hedefe ulaştınız!</span>
+            {% endif %}
+        </div>
+        <div class="progress" style="height: 10px;">
+            <div class="progress-bar {{ 'bg-success' if outreach_count >= outreach_goal else 'bg-primary' }}" style="width: {{ (outreach_count / outreach_goal * 100) if outreach_goal else 0 }}%;"></div>
+        </div>
+    </div>
+</div>
+
+{% if today_payments %}
+<div class="card shadow-sm mb-3 border-danger">
+    <div class="card-header bg-danger text-white">
+        <i class="bi bi-cash-coin"></i> Bugünkü Ödemeler
+        <strong class="ms-2">Bugün beklenen tahsilat: {{ "{:,.0f}".format(today_payment_total) }} ₺ · {{ today_payments|length }} müşteri</strong>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm mb-0" id="todayPaymentsTable">
+                <thead class="table-light"><tr><th>Müşteri</th><th>Tutar</th><th>Kaynak</th><th>Durum</th></tr></thead>
+                <tbody>
+                    {% for cid, r in today_payments %}
+                    <tr class="today-payment-row" data-customer-id="{{ cid }}" data-reminder-id="{{ r.id }}" style="cursor:pointer;">
+                        <td>{{ customers_by_id[cid].display_name }}</td>
+                        <td>{{ "{:,.2f}".format(r.amount) }} ₺</td>
+                        <td>{{ {'deal_pesinat':'Peşinat','deal_bakiye':'Bakiye','manuel':'Manuel'}.get(r.source_type, r.source_type) }}</td>
+                        <td><span class="badge bg-{{ 'secondary' if r.status=='bekliyor' else 'info' if r.status=='hatirlatildi' else 'warning text-dark' }}">{{ {'bekliyor':'Bekliyor','hatirlatildi':'Hatırlatıldı','soz_verildi':'Söz Verdi'}.get(r.status, r.status) }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="small text-muted mb-2" id="queueInfo"></div>
+
+{% if cards %}
+<div id="cardsContainer">
+    {% for item in cards %}
+    <div class="takip-card {{ 'd-none' if not loop.first }}" data-idx="{{ loop.index0 }}">
+        <div class="card shadow-sm mb-3 {{ 'border-danger' if item.payment_reminders else '' }}">
+            <div class="card-header d-flex justify-content-between align-items-center {{ 'bg-danger text-white' if item.payment_reminders else 'bg-secondary text-white' }}">
+                <span>
+                    {% if item.customer.company_name %}<strong>{{ item.customer.company_name }}</strong> - {% endif %}
+                    {{ item.customer.first_name }} {{ item.customer.last_name }}
+                </span>
+                <span class="badge bg-light text-dark">{{ item.priority_label }}</span>
+            </div>
+            <div class="card-body">
+                <div class="row small text-muted mb-2">
+                    <div class="col-6">Müşteri No: {{ item.customer.musteri_no or '-' }}</div>
+                    <div class="col-6">Şehir: {{ item.city or '-' }}</div>
+                    <div class="col-6">Telefon: {{ item.customer.phone or '-' }}</div>
+                    <div class="col-6">Son Sipariş: {{ item.last_order_date.strftime('%d.%m.%Y') if item.last_order_date else '-' }}</div>
+                </div>
+
+                {% if item.payment_reminders %}
+                {% set r = item.payment_reminders[0] %}
+                <div class="alert alert-danger py-2 mb-3">
+                    <strong>{{ "{:,.2f}".format(r.amount) }} ₺</strong> —
+                    {% if r.due_date < today %}{{ (today - r.due_date).days }} gün gecikti{% else %}Ödeme günü{% endif %}
+                    {% if r.notes %}<div class="small">{{ r.notes }}</div>{% endif %}
+                </div>
+                <div class="d-grid gap-2 mb-3">
+                    <a href="#" class="btn btn-success whatsapp-btn" data-customer-id="{{ item.customer.id }}" data-customer-name="{{ item.customer.display_name }}" data-customer-phone="{{ item.customer.phone }}" data-from-takip-modu="1" data-payment-reminder-id="{{ r.id }}" data-message="Merhaba, {{ "{:,.2f}".format(r.amount) }} ₺ tutarındaki ödemenizi hatırlatmak isteriz. İyi günler dileriz.">
+                        <i class="bi bi-whatsapp"></i> WhatsApp ile Hatırlat
+                    </a>
+                    <button type="button" class="btn btn-outline-primary note-btn" data-customer-id="{{ item.customer.id }}" data-reminder-id="{{ r.id }}">
+                        <i class="bi bi-telephone"></i> Arandı + Not
+                    </button>
+                    <button type="button" class="btn btn-primary payment-received-btn" data-customer-id="{{ item.customer.id }}" data-reminder-id="{{ r.id }}" data-amount="{{ r.amount }}">
+                        <i class="bi bi-cash"></i> Ödeme Alındı
+                    </button>
+                    <button type="button" class="btn btn-outline-warning promise-btn" data-reminder-id="{{ r.id }}">
+                        <i class="bi bi-calendar-plus"></i> Ödeme Sözü Verdi
+                    </button>
+                </div>
+                <hr>
+                {% endif %}
+
+                <div class="d-grid gap-2">
+                    <a href="#" class="btn btn-success whatsapp-btn" data-customer-id="{{ item.customer.id }}" data-customer-name="{{ item.customer.display_name }}" data-customer-phone="{{ item.customer.phone }}" data-from-takip-modu="1">
+                        <i class="bi bi-whatsapp"></i> WhatsApp Gönder
+                    </a>
+                    <button type="button" class="btn btn-outline-primary note-btn" data-customer-id="{{ item.customer.id }}">
+                        <i class="bi bi-telephone"></i> Arandı + Not
+                    </button>
+                </div>
+                <div class="row g-2 mt-2">
+                    <div class="col-6 col-md-3">
+                        <form method="POST" action="{{ url_for('takip_modu_sonra_ara') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="customer_id" value="{{ item.customer.id }}">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary w-100">Sonra Ara</button>
+                        </form>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <form method="POST" action="{{ url_for('mark_not_customer', id=item.customer.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary w-100">Müşteri Değil</button>
+                        </form>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary w-100 devret-btn" data-customer-id="{{ item.customer.id }}">Devret</button>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button type="button" class="btn btn-sm btn-outline-dark w-100 skip-btn">Atla</button>
+                    </div>
+                </div>
+                <a href="{{ url_for('duplicate_customers') }}" class="small d-block mt-2 text-muted">Mükerrer kayıt mı? Birleştir →</a>
+                <a href="{{ url_for('customer_detail', id=item.customer.id) }}" class="small d-block mt-1 text-muted">Müşteri detayına git →</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-success"><i class="bi bi-check-circle"></i> Takip edilecek müşteri yok - hepsi güncel!</div>
+{% endif %}
+
+<!-- Not modali -->
+<div class="modal fade" id="noteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" action="{{ url_for('takip_modu_not_ekle') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="customer_id" id="noteCustomerId">
+            <input type="hidden" name="payment_reminder_id" id="notePaymentReminderId">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Arandı + Not</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        {% for opt in ['Fiyat istedi', 'Sipariş verecek', 'Stoğu var sonra', 'Numune istedi', 'İlgilenmiyor', 'Ulaşılamadı'] %}
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="hizli_secenek" value="{{ opt }}" id="opt_{{ loop.index }}">
+                            <label class="form-check-label" for="opt_{{ loop.index }}">{{ opt }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <textarea class="form-control mb-2" name="not_metni" rows="2" placeholder="Serbest not (opsiyonel)"></textarea>
+                    <label class="form-label small">Tekrar Ara</label>
+                    <select class="form-select" name="tekrar_ara">
+                        <option value="">Yok</option>
+                        <option value="3gun">3 gün sonra</option>
+                        <option value="1hafta">1 hafta sonra</option>
+                        <option value="1ay">1 ay sonra</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Devret modali -->
+<div class="modal fade" id="devretModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" action="{{ url_for('takip_modu_devret') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="customer_id" id="devretCustomerId">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Müşteriyi Devret</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <select class="form-select" name="owner_user_id" required>
+                        <option value="">Kullanıcı seçin...</option>
+                        {% for u in all_users %}
+                        <option value="{{ u.id }}">{{ u.username }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary">Devret</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Odeme Alindi modali -->
+<div class="modal fade" id="paymentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" action="{{ url_for('add_payment') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="customer_id" id="paymentCustomerId">
+            <input type="hidden" name="payment_reminder_id" id="paymentReminderId">
+            <input type="hidden" name="payment_date" value="{{ today.strftime('%Y-%m-%d') }}">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Ödeme Alındı</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <label class="form-label">Tutar</label>
+                    <input type="number" step="any" class="form-control" name="amount" id="paymentAmount" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Odeme Sozu modali -->
+<div class="modal fade" id="promiseModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" action="{{ url_for('takip_modu_soz_verdi') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="payment_reminder_id" id="promiseReminderId">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Ödeme Sözü Verdi</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <label class="form-label">Yeni Tarih</label>
+                    <input type="date" class="form-control" name="promised_date" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function () {
+    var cards = document.querySelectorAll('.takip-card');
+    var currentIdx = 0;
+    var total = cards.length;
+
+    function updateQueueInfo() {
+        var remaining = total - currentIdx - 1;
+        document.getElementById('queueInfo').textContent = total ? ('Sırada ' + (currentIdx + 1) + ' / ' + total + (remaining > 0 ? ' (' + remaining + ' kişi daha var)' : '')) : '';
+    }
+    updateQueueInfo();
+
+    function showNext() {
+        if (currentIdx < cards.length) cards[currentIdx].classList.add('d-none');
+        currentIdx++;
+        if (currentIdx < cards.length) {
+            cards[currentIdx].classList.remove('d-none');
+        }
+        updateQueueInfo();
+    }
+
+    // Is 1 madde 3: "Atla" TAMAMEN client-side - backend'e HICBIR kayit
+    // gitmez (sayaç/60-gunluk sayaç etkilenmez), sadece sirada bir
+    // sonraki musteri gosterilir.
+    document.addEventListener('click', function (e) {
+        if (e.target.closest('.skip-btn')) {
+            showNext();
+        }
+    });
+
+    var noteModal = new bootstrap.Modal(document.getElementById('noteModal'));
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.note-btn');
+        if (!btn) return;
+        document.getElementById('noteCustomerId').value = btn.dataset.customerId;
+        document.getElementById('notePaymentReminderId').value = btn.dataset.reminderId || '';
+        noteModal.show();
+    });
+
+    var devretModal = new bootstrap.Modal(document.getElementById('devretModal'));
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.devret-btn');
+        if (!btn) return;
+        document.getElementById('devretCustomerId').value = btn.dataset.customerId;
+        devretModal.show();
+    });
+
+    var paymentModal = new bootstrap.Modal(document.getElementById('paymentModal'));
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.payment-received-btn');
+        if (!btn) return;
+        document.getElementById('paymentCustomerId').value = btn.dataset.customerId;
+        document.getElementById('paymentReminderId').value = btn.dataset.reminderId;
+        document.getElementById('paymentAmount').value = btn.dataset.amount;
+        paymentModal.show();
+    });
+
+    var promiseModal = new bootstrap.Modal(document.getElementById('promiseModal'));
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.promise-btn');
+        if (!btn) return;
+        document.getElementById('promiseReminderId').value = btn.dataset.reminderId;
+        promiseModal.show();
+    });
+
+    document.querySelectorAll('.today-payment-row').forEach(function (row) {
+        row.addEventListener('click', function () {
+            var cid = row.dataset.customerId;
+            for (var i = 0; i < cards.length; i++) {
+                if (cards[i].querySelector('[data-customer-id="' + cid + '"]')) {
+                    cards[currentIdx].classList.add('d-none');
+                    currentIdx = i;
+                    cards[currentIdx].classList.remove('d-none');
+                    updateQueueInfo();
+                    cards[currentIdx].scrollIntoView({ behavior: 'smooth' });
+                    break;
+                }
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

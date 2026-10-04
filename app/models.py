@@ -882,16 +882,64 @@ class DailyReport(db.Model):
     customer_name = db.Column(db.String(100), nullable=False)
     phone = db.Column(db.String(50))
     notes = db.Column(db.Text)
-    status = db.Column(db.String(20), default='takip_edilecek')  # tamamlandi, fiyat_verilecek, takip_edilecek
+    # tamamlandi, fiyat_verilecek, takip_edilecek, 'ulasilamadi' (Is 1 -
+    # Takip Modu: bu durum KASITLI olarak _last_contact_subquery()'den
+    # HARIC tutulur - "Ulasilamadi" gercek bir irtibat sayilmaz, 60 gunluk
+    # sayac sifirlanmamali).
+    status = db.Column(db.String(20), default='takip_edilecek')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=True, index=True)
-    
+    # Is 1 (Takip Modu) - "Tekrar ara" secenegi: bu tarihte musteri
+    # otomatik olarak sirada en yukarilara gelir. NULL = tekrar arama
+    # planlanmamis.
+    tekrar_ara_tarihi = db.Column(db.Date, nullable=True, index=True)
+
     user = db.relationship('User', backref='daily_reports')
     customer = db.relationship('Customer', backref='daily_reports')
 
     def __repr__(self):
         return f'<DailyReport {self.customer_name} - {self.report_date}>'
+
+class DailyOutreachCount(db.Model):
+    """Is 1 - Takip Modu: kullanici bazli GUNLUK gercek-iletisim sayaci
+    (WhatsApp gonder / Arandı+not SADECE - devret/musteri-degil/birlestir/
+    atla/sonra-ara SAYILMAZ). Gun + kullanici basina TEK satir, her
+    iletisimde +1 artirilir. Geçmis gunler SAKLANIR (silinmez) - Raporlar'da
+    goruntulenebilsin diye."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    report_date = db.Column(db.Date, nullable=False, index=True)
+    count = db.Column(db.Integer, default=0, nullable=False)
+
+    user = db.relationship('User')
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'report_date', name='uq_outreach_user_date'),)
+
+class PaymentReminder(db.Model):
+    """Is 1.6 - Takip Modu odeme hatirlatma: OTOMATIK (Deal.pesinat_tarihi/
+    bakiye_tarihi gelince, ayni gun icin eklenir - tekrar eklenmesin diye
+    source_type+source_id+due_date benzersiz tutuluyor) veya ELLE
+    (musteri detayi/fatura detayi/Takip Modu'ndaki 'Odeme Iste' butonu)
+    olusturulur. Odenene kadar kapanmaz (status='odendi' olana kadar
+    Takip Modu'nda gosterilmeye devam eder)."""
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
+    source_type = db.Column(db.String(20), nullable=False)  # 'deal_pesinat' / 'deal_bakiye' / 'invoice' / 'manuel'
+    source_id = db.Column(db.Integer, nullable=True)  # deal_id veya invoice_id (turune gore) - FK degil, kaynak tipi degisken
+    amount = db.Column(db.Float, nullable=False)
+    due_date = db.Column(db.Date, nullable=False, index=True)
+    # bekliyor -> hatirlatildi -> soz_verildi -> odendi (odendi'ye sadece
+    # gercek bir Payment kaydi olusunca gecilir - bkz. routes.py)
+    status = db.Column(db.String(20), default='bekliyor', nullable=False)
+    promised_date = db.Column(db.Date, nullable=True)  # 'Odeme sozu verdi' ile girilen yeni tarih
+    notes = db.Column(db.Text, nullable=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+
+    customer = db.relationship('Customer', backref='payment_reminders')
+    created_by = db.relationship('User')
 
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)

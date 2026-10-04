@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter
@@ -49,6 +49,20 @@ def _customers_with_activity_subquery():
     )
 
 TAKIP_GEREKEN_GUN = 60
+GUNLUK_HEDEF_ILETISIM = 40
+
+def _increment_daily_outreach(user_id, amount=1):
+    """Is 1 - Takip Modu: kullanici+bugun icin DailyOutreachCount satirini
+    (yoksa olusturup) +amount artirir. SADECE gercek iletisim (WhatsApp
+    gonder, Arandi+not - 'Ulasilamadi' HARIC) bu fonksiyonu cagirir -
+    devret/musteri-degil/birlestir/atla/sonra-ara hic cagirmaz."""
+    today = date.today()
+    row = DailyOutreachCount.query.filter_by(user_id=user_id, report_date=today).first()
+    if not row:
+        row = DailyOutreachCount(user_id=user_id, report_date=today, count=0)
+        db.session.add(row)
+    row.count += amount
+    return row.count
 
 def _last_contact_subquery():
     """Musteri basina 'son irtibat tarihi' - Gunluk Rapor/Teklif/Odeme
@@ -63,7 +77,13 @@ def _last_contact_subquery():
     report_sub = db.session.query(
         DailyReport.customer_id.label('customer_id'),
         db.func.max(DailyReport.report_date).label('last_contact')
-    ).filter(DailyReport.customer_id.isnot(None)).group_by(DailyReport.customer_id)
+    ).filter(
+        DailyReport.customer_id.isnot(None),
+        # Is 1 (Takip Modu): 'Ulasilamadi'/'Sonra Ara' GERCEK bir irtibat
+        # sayilmaz - 60 gunluk sayaci sifirlamamali (musteri hala "sessiz"
+        # kalmali, sadece sirada gecici olarak atlanmis olur).
+        ~DailyReport.status.in_(['ulasilamadi', 'sonra_ara'])
+    ).group_by(DailyReport.customer_id)
     payment_sub = db.session.query(
         Payment.customer_id.label('customer_id'),
         db.func.max(Payment.payment_date).label('last_contact')
@@ -1202,6 +1222,266 @@ def register_routes(app):
                                 takip_gereken_gun=TAKIP_GEREKEN_GUN,
                                 duplicate_count_by_customer=duplicate_count_by_customer)
 
+    def _sync_payment_reminders_for_today():
+        """Is 1.6 OTOMATIK odeme hatirlatma: Deal.pesinat_tarihi/bakiye_tarihi
+        BUGUN olan ve ilgili tutar henuz tamamen odenmemis teklifler icin
+        PaymentReminder olusturur (yoksa). source_type+source_id+due_date
+        kombinasyonu zaten varsa TEKRAR OLUSTURMAZ. Sayfa her acildiginda
+        cagrilir (ayri bir scheduler job'u gerekmez - lazy senkronizasyon)."""
+        today = date.today()
+        existing = set(db.session.query(PaymentReminder.source_type, PaymentReminder.source_id).filter(
+            PaymentReminder.due_date == today, PaymentReminder.source_type.in_(['deal_pesinat', 'deal_bakiye'])
+        ).all())
+        candidates = Deal.query.filter(
+            db.or_(Deal.pesinat_tarihi == today, Deal.bakiye_tarihi == today)
+        ).all()
+        created = 0
+        for d in candidates:
+            if d.pesinat_tarihi == today and ('deal_pesinat', d.id) not in existing and d.pesinat_tutari > 0.01:
+                db.session.add(PaymentReminder(
+                    customer_id=d.customer_id, source_type='deal_pesinat', source_id=d.id,
+                    amount=d.pesinat_tutari, due_date=today
+                ))
+                created += 1
+            if d.bakiye_tarihi == today and ('deal_bakiye', d.id) not in existing and not d.payment_complete and d.bakiye_tutari > 0.01:
+                db.session.add(PaymentReminder(
+                    customer_id=d.customer_id, source_type='deal_bakiye', source_id=d.id,
+                    amount=d.outstanding_amount, due_date=today
+                ))
+                created += 1
+        if created:
+            db.session.commit()
+
+    @app.route('/takip-modu')
+    @login_required
+    def takip_modu():
+        """Is 1: gunluk 40 iletisim hedefli musteri takip sayfasi. Siralama
+        (a->e): odeme gunu gelmis/gecmis > tekrar-ara bugun > 60+ gun
+        sessiz (siparisi olan) > teklif almis-siparis vermemis > hic
+        islemi olmayan. Sadece current_user'in musterileri (owner_user_id) -
+        admin icin ?tumu=1 ile tum musteriler."""
+        _sync_payment_reminders_for_today()
+        today = date.today()
+        show_all = current_user.is_admin and request.args.get('tumu') == '1'
+
+        base_q = Customer.query.filter(Customer.status != 'musteri_degil')
+        if not show_all:
+            base_q = base_q.filter(Customer.owner_user_id == current_user.id)
+        customers = base_q.all()
+        customer_ids = [c.id for c in customers]
+
+        if not customer_ids:
+            outreach_count = DailyOutreachCount.query.filter_by(user_id=current_user.id, report_date=today).first()
+            return render_template('takip_modu.html', cards=[], today_payments=[], today_payment_total=0,
+                                    outreach_count=outreach_count.count if outreach_count else 0,
+                                    outreach_goal=GUNLUK_HEDEF_ILETISIM, show_all=show_all)
+
+        # TOPLU sorgular (N+1 yok) - Deal varligi/kazanilan var mi/son siparis.
+        deal_rows = db.session.query(
+            Deal.customer_id, Deal.stage, Deal.deal_date, Deal.created_at
+        ).filter(Deal.customer_id.in_(customer_ids)).all()
+        has_deal = set()
+        has_won = set()
+        last_order_date = {}
+        for cid, stage, deal_date, created_at in deal_rows:
+            has_deal.add(cid)
+            if stage == 'kazanilan':
+                has_won.add(cid)
+                d = deal_date or (created_at.date() if created_at else None)
+                if d and (cid not in last_order_date or d > last_order_date[cid]):
+                    last_order_date[cid] = d
+
+        last_contact_sub = _last_contact_subquery()
+        last_contact_map = dict(db.session.query(Customer.id, last_contact_sub.c.last_contact).outerjoin(
+            last_contact_sub, Customer.id == last_contact_sub.c.customer_id
+        ).filter(Customer.id.in_(customer_ids)).all())
+
+        tekrar_ara_rows = db.session.query(DailyReport.customer_id, db.func.max(DailyReport.tekrar_ara_tarihi)).filter(
+            DailyReport.customer_id.in_(customer_ids), DailyReport.tekrar_ara_tarihi.isnot(None)
+        ).group_by(DailyReport.customer_id).all()
+        tekrar_ara_map = dict(tekrar_ara_rows)
+
+        reminders = PaymentReminder.query.filter(
+            PaymentReminder.customer_id.in_(customer_ids), PaymentReminder.status != 'odendi'
+        ).all()
+        reminder_by_customer = {}
+        for r in reminders:
+            is_due = (r.status == 'soz_verildi' and r.promised_date and r.promised_date <= today) or \
+                     (r.status != 'soz_verildi' and r.due_date <= today)
+            if is_due:
+                reminder_by_customer.setdefault(r.customer_id, []).append(r)
+
+        cards = []
+        for c in customers:
+            days_silent = (today - last_contact_map[c.id]).days if last_contact_map.get(c.id) else None
+            tekrar_ara = tekrar_ara_map.get(c.id)
+            payment_due = reminder_by_customer.get(c.id)
+
+            if payment_due:
+                priority, priority_label = 0, 'Ödeme Günü'
+            elif tekrar_ara and tekrar_ara <= today:
+                priority, priority_label = 1, 'Tekrar Ara'
+            elif c.id in has_won and (days_silent is None or days_silent >= TAKIP_GEREKEN_GUN):
+                priority, priority_label = 2, f'{days_silent} gün sessiz' if days_silent is not None else 'Sessiz'
+            elif c.id in has_deal and c.id not in has_won:
+                priority, priority_label = 3, 'Teklif aldı, sipariş yok'
+            elif c.id not in has_deal:
+                priority, priority_label = 4, 'Hiç işlem yok'
+            else:
+                continue  # siparisi var ama henuz 60 gun dolmamis - takip modunda gosterilmez
+
+            city = extract_customer_city(c)
+            cards.append({
+                'customer': c, 'priority': priority, 'priority_label': priority_label,
+                'days_silent': days_silent, 'last_order_date': last_order_date.get(c.id),
+                'city': city, 'payment_reminders': payment_due or [],
+                'sort_key': (priority, -(payment_due[0].amount if payment_due else 0), days_silent or 0),
+            })
+
+        cards.sort(key=lambda x: x['sort_key'])
+
+        today_payments = [r for cid_list in reminder_by_customer.values() for r in cid_list]
+        today_payment_total = sum(r.amount for r in today_payments)
+
+        outreach_count = DailyOutreachCount.query.filter_by(user_id=current_user.id, report_date=today).first()
+        all_users = User.query.order_by(User.username).all()
+
+        return render_template('takip_modu.html', cards=cards,
+                                today_payments=[(r.customer_id, r) for r in today_payments],
+                                today_payment_total=today_payment_total,
+                                outreach_count=outreach_count.count if outreach_count else 0,
+                                outreach_goal=GUNLUK_HEDEF_ILETISIM, show_all=show_all,
+                                customers_by_id={c.id: c for c in customers}, all_users=all_users,
+                                today=today)
+
+    _TEKRAR_ARA_GUN = {'3gun': 3, '1hafta': 7, '1ay': 30}
+
+    @app.route('/takip-modu/not-ekle', methods=['POST'])
+    @login_required
+    def takip_modu_not_ekle():
+        """Is 1 - 'Arandi + not': MEVCUT DailyReport tablosuna yazar (kopya
+        mantik yok). Hizli secenekler + serbest metin birlesik notes'a
+        yazilir. 'Ulasilamadi' secilirse status='ulasilamadi' - sayaç
+        ARTMAZ, 60 gunluk sayaç sifirlanmaz (_last_contact_subquery zaten
+        bu status'u haric tutuyor), ama 3 gun sonra tekrar siraya gelsin
+        diye tekrar_ara_tarihi=bugun+3 otomatik set edilir."""
+        customer_id = request.form.get('customer_id', type=int)
+        customer = Customer.query.get_or_404(customer_id)
+        hizli_secenekler = request.form.getlist('hizli_secenek')
+        serbest_not = request.form.get('not_metni', '').strip()
+        tekrar_ara = request.form.get('tekrar_ara', '')
+
+        if not hizli_secenekler and not serbest_not:
+            flash('Not seçilmeden veya yazılmadan kaydedilemez.', 'danger')
+            return redirect(url_for('takip_modu'))
+
+        is_ulasilamadi = 'Ulaşılamadı' in hizli_secenekler
+        notes_parts = hizli_secenekler + ([serbest_not] if serbest_not else [])
+        notes = ' | '.join(notes_parts)
+
+        if is_ulasilamadi:
+            tekrar_ara_tarihi = date.today() + timedelta(days=3)
+            status = 'ulasilamadi'
+        else:
+            tekrar_ara_tarihi = date.today() + timedelta(days=_TEKRAR_ARA_GUN[tekrar_ara]) if tekrar_ara in _TEKRAR_ARA_GUN else None
+            status = 'tamamlandi'
+
+        report = DailyReport(
+            report_date=date.today(), customer_name=customer.display_name, phone=customer.phone,
+            notes=notes, status=status, user_id=current_user.id, customer_id=customer.id,
+            tekrar_ara_tarihi=tekrar_ara_tarihi
+        )
+        db.session.add(report)
+
+        if not is_ulasilamadi:
+            _increment_daily_outreach(current_user.id)
+
+        reminder_id = request.form.get('payment_reminder_id', type=int)
+        if reminder_id and not is_ulasilamadi:
+            reminder = PaymentReminder.query.get(reminder_id)
+            if reminder and reminder.customer_id == customer.id and reminder.status != 'odendi':
+                reminder.status = 'hatirlatildi'
+
+        db.session.commit()
+        flash(f'{customer.display_name} için not kaydedildi.', 'success')
+        return redirect(url_for('takip_modu'))
+
+    @app.route('/takip-modu/sonra-ara', methods=['POST'])
+    @login_required
+    def takip_modu_sonra_ara():
+        """Is 1 - 'Sonra ara': SAYACA ISLEMEZ (gunluk 40 VE 60 gunluk
+        sayaç ikisi de etkilenmez) - DailyReport.status='sonra_ara' ile
+        (_last_contact_subquery tarafindan HARIC tutulur) sadece
+        tekrar_ara_tarihi=bugun+30 kaydedilir, musteri o tarihte tekrar
+        normal siraya girer."""
+        customer_id = request.form.get('customer_id', type=int)
+        customer = Customer.query.get_or_404(customer_id)
+        report = DailyReport(
+            report_date=date.today(), customer_name=customer.display_name, phone=customer.phone,
+            notes='Sonra ara (30 gün)', status='sonra_ara', user_id=current_user.id,
+            customer_id=customer.id, tekrar_ara_tarihi=date.today() + timedelta(days=30)
+        )
+        db.session.add(report)
+        db.session.commit()
+        return redirect(url_for('takip_modu'))
+
+    @app.route('/takip-modu/devret', methods=['POST'])
+    @login_required
+    def takip_modu_devret():
+        """Is 1 - 'Devret': tek musteri icin MEVCUT bulk_assign_owner ile
+        AYNI mantik (owner_user_id degistirme) - kopya yazmamak icin
+        dogrudan customer.owner_user_id atanir (bulk route select_all/
+        customer_ids[] formu bekledigi icin burada tek-satir esdegeri)."""
+        customer_id = request.form.get('customer_id', type=int)
+        new_owner_id = request.form.get('owner_user_id', type=int)
+        customer = Customer.query.get_or_404(customer_id)
+        owner = User.query.get(new_owner_id) if new_owner_id else None
+        if not owner:
+            flash('Geçerli bir kullanıcı seçmelisiniz.', 'danger')
+            return redirect(url_for('takip_modu'))
+        customer.owner_user_id = owner.id
+        db.session.commit()
+        flash(f'{customer.display_name}, {owner.username} kullanıcısına devredildi.', 'success')
+        return redirect(url_for('takip_modu'))
+
+    @app.route('/takip-modu/odeme-iste', methods=['POST'])
+    @login_required
+    def takip_modu_odeme_iste():
+        """Is 1.6 ELLE odeme hatirlatma - musteri detayi/fatura detayi/
+        Takip Modu'nun hepsi BU route'u kullanir (tek kaynak)."""
+        customer_id = request.form.get('customer_id', type=int)
+        customer = Customer.query.get_or_404(customer_id)
+        amount = request.form.get('amount', type=float)
+        due_date_raw = request.form.get('due_date', '')
+        if not amount or amount <= 0 or not due_date_raw:
+            flash('Tutar ve tarih gereklidir.', 'danger')
+            return redirect(request.referrer or url_for('takip_modu'))
+        db.session.add(PaymentReminder(
+            customer_id=customer.id, source_type='manuel', source_id=None,
+            amount=amount, due_date=datetime.strptime(due_date_raw, '%Y-%m-%d').date(),
+            notes=request.form.get('notes', '').strip() or None, created_by_user_id=current_user.id
+        ))
+        db.session.commit()
+        flash(f'{customer.display_name} için ödeme hatırlatması oluşturuldu.', 'success')
+        return redirect(request.referrer or url_for('takip_modu'))
+
+    @app.route('/takip-modu/soz-verdi', methods=['POST'])
+    @login_required
+    def takip_modu_soz_verdi():
+        """Is 1.6 - 'Odeme sozu verdi': hatirlatma KAPANMAZ, sadece yeni
+        tarihe (promised_date) tasinir, o gun tekrar en uste gelir."""
+        reminder_id = request.form.get('payment_reminder_id', type=int)
+        new_date_raw = request.form.get('promised_date', '')
+        reminder = PaymentReminder.query.get_or_404(reminder_id)
+        if not new_date_raw:
+            flash('Yeni tarih gereklidir.', 'danger')
+            return redirect(url_for('takip_modu'))
+        reminder.status = 'soz_verildi'
+        reminder.promised_date = datetime.strptime(new_date_raw, '%Y-%m-%d').date()
+        db.session.commit()
+        flash('Ödeme sözü kaydedildi.', 'success')
+        return redirect(url_for('takip_modu'))
+
     @app.route('/cari-hesap-ozeti')
     @login_required
     def cari_hesap_ozeti():
@@ -1546,7 +1826,12 @@ def register_routes(app):
         gonderildi: ...' notuyla), boylece 60 gunluk takip sayaci
         (_last_contact_subquery DailyReport.report_date'i de kaynak olarak
         kullanir) sifirlanmis olur - ayri bir 'son irtibat' alani/mantigi
-        ACILMAZ, mevcut takip mekanizmasi otomatik faydalanir."""
+        ACILMAZ, mevcut takip mekanizmasi otomatik faydalanir.
+        Is 1 (Takip Modu): form'da from_takip_modu=1 geldiyse GUNLUK
+        gercek-iletisim sayacini (+1) artirir - sadece Takip Modu'ndan
+        gelen cagrilarda, diger sayfalardaki (Hizli Iletisim vb.) normal
+        WhatsApp gonderimleri sayaci ETKILEMEZ. payment_reminder_id
+        geldiyse ilgili odeme hatirlatmasini 'hatirlatildi' yapar."""
         customer = Customer.query.get_or_404(id)
         message = request.form.get('message', '').strip()
         if not message:
@@ -1565,6 +1850,16 @@ def register_routes(app):
             customer_id=customer.id,
         )
         db.session.add(report)
+
+        if request.form.get('from_takip_modu') == '1':
+            _increment_daily_outreach(current_user.id)
+
+        reminder_id = request.form.get('payment_reminder_id', type=int)
+        if reminder_id:
+            reminder = PaymentReminder.query.get(reminder_id)
+            if reminder and reminder.customer_id == customer.id and reminder.status != 'odendi':
+                reminder.status = 'hatirlatildi'
+
         db.session.commit()
 
         wa_url = f'https://wa.me/{normalized}?text={_url_quote(message)}'
@@ -4795,8 +5090,22 @@ def register_routes(app):
                 )
                 db.session.add(statement)
 
+            # Is 1.6 (Takip Modu - Odeme Alindi): bu odeme belirli bir
+            # PaymentReminder'i kapatmak icin girildiyse, AYNI odeme kaydi
+            # (yukarida zaten olusturuldu) uzerinden hatirlatmayi da kapatir -
+            # ayri bir odeme/bakiye hesaplama mantigi YOK, sadece durumu
+            # 'odendi' yapar.
+            reminder_id = request.form.get('payment_reminder_id', type=int)
+            if reminder_id:
+                reminder = PaymentReminder.query.get(reminder_id)
+                if reminder and reminder.customer_id == customer_id:
+                    reminder.status = 'odendi'
+                    reminder.resolved_at = datetime.utcnow()
+
             db.session.commit()
             flash('Ödeme kaydedildi!', 'success')
+            if reminder_id:
+                return redirect(url_for('takip_modu'))
             return redirect(url_for('payments'))
 
         prefill_invoice_id = request.args.get('invoice_id', type=int)
