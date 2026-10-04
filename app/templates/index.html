@@ -389,7 +389,14 @@ fetch('/api/chart-data')
     <div class="card-header bg-warning text-dark"><i class="bi bi-clock-history"></i> Yaklaşan Etkinlikler</div>
     <div class="card-body">
         {% if expiring_deals %}
-        <div class="fw-bold text-warning">{{ expiring_deals|length }} teklifin süresi dolmak üzere</div>
+        <a href="{{ url_for('deals', tab='aktif', expiring_soon=1) }}" class="crm-panel-link fw-bold text-warning">
+            {{ expiring_deals|length }} teklifin süresi dolmak üzere
+        </a>
+        <div class="crm-panel-sublist small mt-1">
+            {% for d in expiring_deals[:5] %}
+            <a href="{{ url_for('deal_detail', id=d.id) }}">{{ d.title }} - {{ d.valid_until.strftime('%d.%m.%Y') if d.valid_until else '' }}</a>
+            {% endfor %}
+        </div>
         {% else %}
         <div class="text-muted small">Yaklaşan etkinlik yok</div>
         {% endif %}
@@ -398,8 +405,18 @@ fetch('/api/chart-data')
 <div class="card shadow-sm">
     <div class="card-header bg-secondary text-white"><i class="bi bi-check2-square"></i> Görevler</div>
     <div class="card-body">
-        <div class="fw-bold">{{ open_tasks_count }} açık görev</div>
-        <div class="small text-muted">{{ today_tasks|length }} bugün / {{ upcoming_tasks|length }} yaklaşan</div>
+        <a href="{{ url_for('tasks', status='acik') }}" class="crm-panel-link fw-bold">{{ open_tasks_count }} açık görev</a>
+        <div class="small text-muted mb-1">
+            <a href="{{ url_for('tasks', status='acik') }}" class="crm-panel-link d-inline">{{ today_tasks|length }} bugün</a> /
+            <a href="{{ url_for('tasks', status='acik') }}" class="crm-panel-link d-inline">{{ upcoming_tasks|length }} yaklaşan</a>
+        </div>
+        {% if today_tasks %}
+        <div class="crm-panel-sublist small">
+            {% for t in today_tasks[:5] %}
+            <a href="{{ url_for('tasks', status='acik') }}">{{ t.title }}</a>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
 </div>
 {% include '_uretim_rapor_card.html' %}
@@ -407,12 +424,19 @@ fetch('/api/chart-data')
     <div class="card-header bg-info text-white"><i class="bi bi-box-seam"></i> Stok &amp; Prim</div>
     <div class="card-body">
         {% if low_stock > 0 %}
-        <div class="fw-bold text-danger">{{ low_stock }} ürün kritik seviyede</div>
+        <a href="{{ url_for('products', low_stock=1) }}" class="crm-panel-link fw-bold text-danger">{{ low_stock }} ürün kritik seviyede</a>
+        <div class="crm-panel-sublist small mt-1">
+            {% for p in low_stock_products[:5] %}
+            <a href="{{ url_for('product_detail', id=p.id) }}">{{ p.name }} ({{ p.stock_quantity }} {{ p.unit }})</a>
+            {% endfor %}
+        </div>
         {% else %}
         <div class="text-success small">Stoklar normal</div>
         {% endif %}
         <hr class="my-2">
-        <div class="fw-bold">{{ "{:,.0f}".format(pending_commission_total) }} ₺ <span class="text-muted small">({{ pending_commission_count }} ödenmemiş prim)</span></div>
+        <a href="{{ url_for('commissions') }}" class="crm-panel-link fw-bold">
+            {{ "{:,.0f}".format(pending_commission_total) }} ₺ <span class="text-muted small">({{ pending_commission_count }} ödenmemiş prim)</span>
+        </a>
     </div>
 </div>
 {% endblock %}

@@ -309,7 +309,7 @@
         <div class="small text-muted">Toplam Müşteri</div>
         <div class="fw-bold fs-5 mb-2">{{ pagination.total }}</div>
         <div class="small text-muted">Bu Hafta Eklenen</div>
-        <div class="fw-bold mb-0">{{ this_week_count }}</div>
+        <a href="{{ url_for('customers', created_this_week=1) }}" class="crm-panel-link fw-bold mb-0">{{ this_week_count }}</a>
     </div>
 </div>
 <div class="card shadow-sm">

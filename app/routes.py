@@ -824,9 +824,15 @@ def register_routes(app):
     def customers():
         search = request.args.get('search', '')
         page = request.args.get('page', 1, type=int)
+        created_this_week_filter = request.args.get('created_this_week') == '1'
         query = _apply_customers_search_filter(
             Customer.query.filter(Customer.status != 'musteri_degil'), search
         )
+        if created_this_week_filter:
+            # Is B (sag panel linki): "Bu Hafta Eklenen" sayisiyla AYNI
+            # pencere (bkz. asagidaki this_week_count hesaplamasi).
+            week_start_for_filter = (datetime.utcnow() - timedelta(days=datetime.utcnow().weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.filter(Customer.created_at >= week_start_for_filter)
         pagination = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=200, error_out=False)
         customers = pagination.items
 
@@ -1853,6 +1859,26 @@ def register_routes(app):
             )).join(Customer)
         if stage_filter:
             query = query.filter(Deal.stage == stage_filter)
+
+        # Is B (sag panel linkleri): Ozet Panel'deki "Suresi Dolan"/
+        # "Suresi Dolmak Uzere"/"Bu Ay Kazanilan" sayilarina tiklayinca
+        # BURAYA ayni filtrelerle gelinir - panel VE bu route AYNI tarih
+        # pencerelerini kullanir (tek kaynak, panelde gosterilen sayiyla
+        # listedeki kayit sayisi HER ZAMAN tutar).
+        today_for_filter = datetime.now().date()
+        expired_filter = request.args.get('expired') == '1'
+        expiring_soon_filter = request.args.get('expiring_soon') == '1'
+        this_month_filter = request.args.get('this_month') == '1'
+        if expired_filter:
+            query = query.filter(Deal.valid_until < today_for_filter)
+        if expiring_soon_filter:
+            query = query.filter(
+                Deal.valid_until <= today_for_filter + timedelta(days=2),
+                Deal.valid_until >= today_for_filter
+            )
+        if this_month_filter:
+            query = query.filter(Deal.created_at >= today_for_filter.replace(day=1))
+
         # Is 2: sablon her satirda deal.seller (olusturan kullanici)
         # gosteriyor - joinedload olmadan N+1'e mal olurdu.
         query = query.options(joinedload(Deal.customer), joinedload(Deal.seller))
@@ -1880,7 +1906,9 @@ def register_routes(app):
                                 admin_deals_own_only=_admin_deals_own_only(),
                                 expired_deals_count=expired_deals_count,
                                 expiring_soon_count=expiring_soon_count,
-                                this_month_won_total=this_month_won_total)
+                                this_month_won_total=this_month_won_total,
+                                expired_filter=expired_filter, expiring_soon_filter=expiring_soon_filter,
+                                this_month_filter=this_month_filter)
 
     @app.route('/deals/view-toggle', methods=['POST'])
     @login_required
@@ -2687,10 +2715,14 @@ def register_routes(app):
         return {'uretimde': row.uretimde, 'hazir': row.hazir, 'sevkiyatta': row.sevkiyatta,
                 'tamamlandi': row.tamamlandi, 'tumu': row.tumu}
 
-    def _filtered_productions(tab):
+    def _filtered_productions(tab, overdue_only=False):
         """Uretim Listesi + Excel/PDF disa aktarma routelarinin UCU: ayni
         sekme filtresini paylasirlar, boylece ekranda gorunen ile
-        aktarilan HER ZAMAN birebir ayni satirlari icerir (Is 2)."""
+        aktarilan HER ZAMAN birebir ayni satirlari icerir (Is 2).
+        Is B (sag panel linki): overdue_only=True ise tab yok sayilir,
+        _production_report_data() ile AYNI 'termin asmis' tanimi
+        (due_date < bugun, status uretimde/hazir) uygulanir - panelde
+        gosterilen sayiyla listedeki kayit sayisi HER ZAMAN tutar."""
         latest_status_subq = _latest_shipment_status_subq()
         # Performans: production.items (specs_missing/uretim_items/gecen_gun
         # gibi sablon icinde HER satirda okunan property'ler icin) burada
@@ -2700,6 +2732,11 @@ def register_routes(app):
             joinedload(Production.deal).joinedload(Deal.customer),
             joinedload(Production.items),
         )
+        if overdue_only:
+            today = datetime.now().date()
+            return query.filter(
+                Production.due_date < today, Production.status.in_(['uretimde', 'hazir'])
+            ).order_by(Production.due_date.asc()).all()
         if tab in ('sevkiyatta', 'tamamlandi'):
             query = query.outerjoin(latest_status_subq, Production.id == latest_status_subq.c.production_id)
             joined = True
@@ -2728,12 +2765,13 @@ def register_routes(app):
         tab = request.args.get('tab', 'uretimde')
         if tab not in ('uretimde', 'hazir', 'sevkiyatta', 'tamamlandi', 'tumu'):
             tab = 'uretimde'
-        productions = _filtered_productions(tab)
+        overdue_filter = request.args.get('overdue') == '1'
+        productions = _filtered_productions(tab, overdue_only=overdue_filter)
         tab_counts = _production_tab_counts()
         production_report = _production_report_data()
 
         return render_template('production_list.html', productions=productions, tab=tab, tab_counts=tab_counts,
-                                production_report=production_report)
+                                production_report=production_report, overdue_filter=overdue_filter)
 
     @app.route('/production/export/excel')
     @login_required
@@ -3684,14 +3722,19 @@ def register_routes(app):
     @login_required
     def products():
         search = request.args.get('search', '')
+        low_stock_filter = request.args.get('low_stock') == '1'
+        query = Product.query
         if search:
-            products = Product.query.filter(db.or_(
+            query = query.filter(db.or_(
                 Product.name.ilike(f'%{search}%'), Product.sku.ilike(f'%{search}%'),
                 Product.category.ilike(f'%{search}%')
-            )).order_by(Product.name).all()
-        else:
-            products = Product.query.order_by(Product.name).all()
-        return render_template('products.html', products=products, search=search)
+            ))
+        if low_stock_filter:
+            # Is B (sag panel linki): Dashboard'daki "N urun kritik seviyede"
+            # ile AYNI tanim (bkz. index() route'u).
+            query = query.filter(Product.stock_quantity <= Product.min_stock)
+        products = query.order_by(Product.name).all()
+        return render_template('products.html', products=products, search=search, low_stock_filter=low_stock_filter)
 
     @app.route('/products/add', methods=['GET', 'POST'])
     @login_required
@@ -3769,7 +3812,12 @@ def register_routes(app):
     def tasks():
         status_filter = request.args.get('status', '')
         query = Task.query
-        if status_filter:
+        # Is B (sag panel linki): 'acik' ozel degeri - Ozet Panel'deki
+        # "N acik gorev" sayisiyla AYNI tanim (tamamlanmamis TUM gorevler,
+        # tek bir status degerine indirgenemeyen bir kume).
+        if status_filter == 'acik':
+            query = query.filter(Task.status != 'tamamlandi')
+        elif status_filter:
             query = query.filter(Task.status == status_filter)
         tasks = query.order_by(Task.due_date).all()
         return render_template('tasks.html', tasks=tasks, status_filter=status_filter)

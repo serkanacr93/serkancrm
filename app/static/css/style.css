@@ -299,6 +299,32 @@ a:hover {
     border-bottom: 2px solid #ffc107;
 }
 .crm-side-panel .card { margin-bottom: 12px; }
+/* Is B: Ozet Panel'deki tiklanabilir satirlar - fare uzerine gelince
+   acikca "tiklanabilir" oldugu anlasilsin (imlec + hafif vurgu). */
+.crm-panel-link {
+    display: block;
+    color: inherit !important;
+    text-decoration: none !important;
+    border-radius: 6px;
+    padding: 4px 6px;
+    margin: -4px -6px;
+    transition: background-color 0.15s;
+}
+.crm-panel-link:hover {
+    background-color: rgba(0,0,0,0.06);
+    cursor: pointer;
+}
+.crm-panel-sublist a {
+    display: block;
+    padding: 2px 4px;
+    border-radius: 4px;
+    color: inherit;
+    text-decoration: none;
+}
+.crm-panel-sublist a:hover {
+    background-color: rgba(0,0,0,0.06);
+    text-decoration: none;
+}
 @media (max-width: 767.98px) {
     .crm-side-panel { width: 85vw; }
     .crm-side-panel-tab { padding: 14px 7px; font-size: 0.76rem; }

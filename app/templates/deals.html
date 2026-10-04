@@ -196,23 +196,27 @@
 {% block side_panel %}
 <div class="card shadow-sm">
     <div class="card-header bg-primary text-white"><i class="bi bi-clock-history"></i> Aktif Teklifler</div>
-    <div class="card-body"><div class="fw-bold fs-4">{{ tab_counts.aktif }}</div></div>
+    <div class="card-body">
+        <a href="{{ url_for('deals', tab='aktif') }}" class="crm-panel-link fw-bold fs-4">{{ tab_counts.aktif }}</a>
+    </div>
 </div>
 <div class="card shadow-sm">
     <div class="card-header bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> Süresi Dolan / Dolacak</div>
     <div class="card-body">
         {% if expired_deals_count %}
-        <div class="fw-bold text-danger">{{ expired_deals_count }} teklifin süresi dolmuş</div>
+        <a href="{{ url_for('deals', tab='aktif', expired=1) }}" class="crm-panel-link fw-bold text-danger">{{ expired_deals_count }} teklifin süresi dolmuş</a>
         {% else %}
         <div class="text-success small">Süresi dolan teklif yok</div>
         {% endif %}
         {% if expiring_soon_count %}
-        <div class="fw-bold text-warning mt-1">{{ expiring_soon_count }} teklifin süresi dolmak üzere</div>
+        <a href="{{ url_for('deals', tab='aktif', expiring_soon=1) }}" class="crm-panel-link fw-bold text-warning mt-1">{{ expiring_soon_count }} teklifin süresi dolmak üzere</a>
         {% endif %}
     </div>
 </div>
 <div class="card shadow-sm">
     <div class="card-header bg-success text-white"><i class="bi bi-calendar-check"></i> Bu Ay Kazanılan</div>
-    <div class="card-body"><div class="fw-bold text-success fs-5">{{ "{:,.0f}".format(this_month_won_total) }} ₺</div></div>
+    <div class="card-body">
+        <a href="{{ url_for('deals', tab='kazanilan', this_month=1) }}" class="crm-panel-link fw-bold text-success fs-5">{{ "{:,.0f}".format(this_month_won_total) }} ₺</a>
+    </div>
 </div>
 {% endblock %}

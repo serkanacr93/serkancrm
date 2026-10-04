@@ -1,18 +1,23 @@
 {# Is 2: Dashboard VE Uretim Listesi sag panelinde AYNI kart - tek
    kaynak (routes.py _production_report_data()). Beklenen degisken:
-   production_report (tab_counts, overdue_count, today_output_total_kg). #}
+   production_report (tab_counts, overdue_count, today_output_total_kg).
+   Is B: her satir ilgili Uretim Listesi sekmesine/filtresine linkli. #}
 <div class="card shadow-sm">
     <div class="card-header bg-dark text-white"><i class="bi bi-gear"></i> Üretim Raporu</div>
     <div class="card-body">
         <div class="small text-muted mb-1"><i class="bi bi-pie-chart"></i> Durum Dağılımı</div>
-        <div class="fw-bold mb-2">{{ production_report.tab_counts.uretimde }} Üretimde / {{ production_report.tab_counts.hazir }} Hazır / {{ production_report.tab_counts.sevkiyatta }} Sevkiyatta</div>
+        <div class="fw-bold mb-2">
+            <a href="{{ url_for('production_list', tab='uretimde') }}" class="crm-panel-link d-inline">{{ production_report.tab_counts.uretimde }} Üretimde</a> /
+            <a href="{{ url_for('production_list', tab='hazir') }}" class="crm-panel-link d-inline">{{ production_report.tab_counts.hazir }} Hazır</a> /
+            <a href="{{ url_for('production_list', tab='sevkiyatta') }}" class="crm-panel-link d-inline">{{ production_report.tab_counts.sevkiyatta }} Sevkiyatta</a>
+        </div>
         <div class="small text-muted mb-1"><i class="bi bi-exclamation-triangle"></i> Termin Aşımı</div>
         {% if production_report.overdue_count %}
-        <div class="fw-bold text-danger mb-2">{{ production_report.overdue_count }} iş emrinin termini geçti</div>
+        <a href="{{ url_for('production_list', overdue=1) }}" class="crm-panel-link fw-bold text-danger mb-2">{{ production_report.overdue_count }} iş emrinin termini geçti</a>
         {% else %}
         <div class="text-success small mb-2">Termin aşımı yok</div>
         {% endif %}
         <div class="small text-muted mb-1"><i class="bi bi-journal-check"></i> Bugünkü Üretim</div>
-        <div class="fw-bold mb-0">{{ "%.2f"|format(production_report.today_output_total_kg) }} kg</div>
+        <a href="{{ url_for('gunluk_uretim') }}" class="crm-panel-link fw-bold mb-0">{{ "%.2f"|format(production_report.today_output_total_kg) }} kg</a>
     </div>
 </div>
