@@ -829,7 +829,12 @@ def register_routes(app):
     @app.route('/reminders')
     @login_required
     def reminders():
-        reminders = Reminder.query.order_by(Reminder.remind_date.desc()).all()
+        """Performans (2026-10-05 denetimi): joinedload olmadan 109 satirda
+        her birinin sablondaki reminder.customer erisimi kendi SELECT'ini
+        tetikliyordu - Neon RTT'siyle sayfa 74 saniyede aciliyordu."""
+        reminders = Reminder.query.options(
+            joinedload(Reminder.customer), joinedload(Reminder.deal)
+        ).order_by(Reminder.remind_date.desc()).all()
         return render_template('reminders.html', reminders=reminders)
 
     @app.route('/reminders/<int:id>/read', methods=['POST'])
@@ -4547,10 +4552,14 @@ def register_routes(app):
     @app.route('/commissions')
     @login_required
     def commissions():
+        """Performans (2026-10-05 denetimi): joinedload olmadan 36 satirda
+        sablondaki c.deal.customer erisimi (2 ayri lazy-load) 27 saniyeye
+        mal oluyordu."""
+        base_q = Commission.query.options(joinedload(Commission.deal).joinedload(Deal.customer))
         if current_user.is_admin:
-            commissions = Commission.query.order_by(Commission.created_at.desc()).all()
+            commissions = base_q.order_by(Commission.created_at.desc()).all()
         else:
-            commissions = Commission.query.filter_by(user_id=current_user.id).order_by(Commission.created_at.desc()).all()
+            commissions = base_q.filter_by(user_id=current_user.id).order_by(Commission.created_at.desc()).all()
         
         total_pending = sum(c.amount for c in commissions if c.status == 'odenmedi')
         total_paid = sum(c.amount for c in commissions if c.status == 'odendi')
@@ -5213,39 +5222,67 @@ def register_routes(app):
     @app.route('/daily-reports')
     @login_required
     def daily_reports():
-        reports = DailyReport.query.order_by(DailyReport.report_date.desc(), DailyReport.created_at.desc()).all()
+        """Performans (2026-10-05 denetimi): bu route oncesi HER GUN icin
+        5 ayri sorgu (deal_count/avg_deal_value/shipment_count/payments_day/
+        top_customer_row) calistiriyordu - D farkli gun x 5 sorgu + rapor
+        basina report.user lazy-load (sablonda) = sayfa 44 saniyede
+        aciliyordu (Neon RTT'siyle). Artik Deal/Shipment/Payment TOPLU
+        (tumu icin TEK sorgu) cekilip Python'da gune gore gruplaniyor -
+        gun sayisi ne olursa olsun sabit sayida sorgu."""
+        reports = DailyReport.query.options(joinedload(DailyReport.user)).order_by(
+            DailyReport.report_date.desc(), DailyReport.created_at.desc()
+        ).all()
 
         dates = sorted({r.report_date for r in reports}, reverse=True)
+        if not dates:
+            return render_template('daily_reports.html', day_cards=[])
+        min_date, max_date = min(dates), max(dates)
+
+        deals_by_date = {}
+        top_customer_counts = {}  # date -> {customer_display_name: count}
+        for deal_date, value, cust_first, cust_last, cust_company in db.session.query(
+            Deal.deal_date, Deal.value, Customer.first_name, Customer.last_name, Customer.company_name
+        ).join(Customer, Deal.customer_id == Customer.id).filter(
+            Deal.deal_date.between(min_date, max_date)
+        ).all():
+            bucket = deals_by_date.setdefault(deal_date, {'count': 0, 'total_value': 0.0})
+            bucket['count'] += 1
+            bucket['total_value'] += value or 0
+            display = cust_company or f'{cust_first} {cust_last}'
+            day_counts = top_customer_counts.setdefault(deal_date, {})
+            day_counts[display] = day_counts.get(display, 0) + 1
+
+        shipment_counts = dict(
+            db.session.query(Shipment.ship_date, db.func.count(Shipment.id))
+            .filter(Shipment.ship_date.between(min_date, max_date))
+            .group_by(Shipment.ship_date).all()
+        )
+
+        payments_by_date = {}
+        for pd, cnt, total in db.session.query(
+            Payment.payment_date, db.func.count(Payment.id), db.func.sum(Payment.amount)
+        ).filter(Payment.payment_date.between(min_date, max_date)).group_by(Payment.payment_date).all():
+            payments_by_date[pd] = (cnt, total or 0)
+
         day_cards = []
         for d in dates:
             day_reports = [r for r in reports if r.report_date == d]
-
-            deal_count = Deal.query.filter(Deal.deal_date == d).count()
-            avg_deal_value = db.session.query(db.func.avg(Deal.value)).filter(Deal.deal_date == d).scalar() or 0
-            shipment_count = Shipment.query.filter(Shipment.ship_date == d).count()
-
-            payments_day = Payment.query.filter(Payment.payment_date == d).all()
-            payment_count = len(payments_day)
-            payment_total = sum(p.amount for p in payments_day)
+            deal_bucket = deals_by_date.get(d, {'count': 0, 'total_value': 0.0})
+            deal_count = deal_bucket['count']
+            avg_deal_value = (deal_bucket['total_value'] / deal_count) if deal_count else 0
+            payment_count, payment_total = payments_by_date.get(d, (0, 0))
 
             pending_price_count = sum(1 for r in day_reports if r.status == 'fiyat_verilecek')
 
-            top_customer_row = db.session.query(
-                Customer.first_name, Customer.last_name, Customer.company_name,
-                db.func.count(Deal.id).label('cnt')
-            ).join(Deal, Deal.customer_id == Customer.id).filter(Deal.deal_date == d) \
-             .group_by(Customer.id, Customer.first_name, Customer.last_name, Customer.company_name) \
-             .order_by(db.text('cnt DESC')).first()
-            top_customer = None
-            if top_customer_row:
-                top_customer = top_customer_row.company_name or f"{top_customer_row.first_name} {top_customer_row.last_name}"
+            day_counts = top_customer_counts.get(d, {})
+            top_customer = max(day_counts, key=day_counts.get) if day_counts else None
 
             day_cards.append({
                 'date': d,
                 'reports': day_reports,
                 'deal_count': deal_count,
                 'avg_deal_value': avg_deal_value,
-                'shipment_count': shipment_count,
+                'shipment_count': shipment_counts.get(d, 0),
                 'payment_count': payment_count,
                 'payment_total': payment_total,
                 'pending_price_count': pending_price_count,
