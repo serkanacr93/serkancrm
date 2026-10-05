@@ -23,10 +23,17 @@
                 <input type="date" class="form-control" id="entry_tarih" value="{{ today.strftime('%Y-%m-%d') }}" required>
             </div>
             <div class="col-md-3 position-relative">
-                <label class="form-label">Müşteri / Firma <small class="text-muted">(aktif üretim kaydı)</small></label>
-                <input type="text" class="form-control" id="production_search" placeholder="Aktif üretimlerde ara..." autocomplete="off" required>
+                <label class="form-label">Müşteri / Firma</label>
+                <input type="text" class="form-control" id="customer_search" name="musteri_adi" placeholder="Müşteri adı yazın veya sistemden arayın..." autocomplete="off" required>
+                <input type="hidden" id="customer_id" value="">
                 <input type="hidden" id="production_id" value="">
-                <div id="production_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 220px; overflow-y: auto; display: none;"></div>
+                <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
+                <div id="productionPicker" class="mt-1 d-none">
+                    <select class="form-select form-select-sm" id="production_picker_select">
+                        <option value="">Bağlantısız (sadece kayıt)</option>
+                    </select>
+                </div>
+                <small class="text-muted">Mevcut bir müşteri seçebilir ya da serbest metin olarak yazabilirsiniz.</small>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Koli Başı Kg</label>
@@ -148,72 +155,57 @@
         </form>
     </div>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
-// Is 3: aktif Production kayitlari sayfaya gomulu - sayisi az (dusunulen
-// olcekte) oldugu icin ayri bir arama API'sine gerek yok, JS ile serbest
-// metin filtrelenir (customer-search.js'teki desenle ayni UX).
-var ACTIVE_PRODUCTIONS = [
-    {% for p in active_productions %}
-    {
-        id: {{ p.id }},
-        label: {{ ((p.deal.customer.display_name if p.deal and p.deal.customer else ('Üretim #' ~ p.id|string)) ~ ' - ' ~ p.stage_label)|tojson }}
-    }{{ ',' if not loop.last }}
-    {% endfor %}
-];
+// Musteri secilince (ya da serbest metin degisince) o musterinin aktif
+// (teslim edilmemis) uretimlerini kontrol eder - 0 ise is emri secici
+// gizli kalir (kayit production_id'siz eklenir), 1 ise otomatik secilir,
+// 1'den fazlaysa kullaniciya hangisine baglanacagini sectirir.
+var productionPicker = document.getElementById('productionPicker');
+var productionPickerSelect = document.getElementById('production_picker_select');
+var productionIdHidden = document.getElementById('production_id');
 
-(function () {
-    var input = document.getElementById('production_search');
-    var hidden = document.getElementById('production_id');
-    var results = document.getElementById('production_results');
+function resetProductionPicker() {
+    productionPicker.classList.add('d-none');
+    productionPickerSelect.innerHTML = '<option value="">Bağlantısız (sadece kayıt)</option>';
+    productionIdHidden.value = '';
+}
 
-    function renderResults(list) {
-        results.innerHTML = '';
-        if (list.length === 0) {
-            results.style.display = 'none';
-            return;
-        }
-        list.forEach(function (p) {
-            var item = document.createElement('a');
-            item.href = '#';
-            item.className = 'list-group-item list-group-item-action';
-            item.textContent = p.label;
-            item.addEventListener('click', function (e) {
-                e.preventDefault();
-                input.value = p.label;
-                hidden.value = p.id;
-                results.style.display = 'none';
+function loadActiveProductionsForCustomer(customerId) {
+    resetProductionPicker();
+    if (!customerId) return;
+    fetch('/api/customers/' + customerId + '/active-productions', { credentials: 'same-origin' })
+        .then(function (res) { return res.ok ? res.json() : []; })
+        .then(function (list) {
+            if (!list.length) return;
+            list.forEach(function (p) {
+                var opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = 'Üretimde · ' + p.label;
+                productionPickerSelect.appendChild(opt);
             });
-            results.appendChild(item);
-        });
-        results.style.display = 'block';
-    }
+            if (list.length === 1) {
+                productionPickerSelect.value = list[0].id;
+                productionIdHidden.value = list[0].id;
+            }
+            productionPicker.classList.remove('d-none');
+        })
+        .catch(function () { /* sessizce yok say - baglanti olmadan da kayit eklenebilir */ });
+}
 
-    input.addEventListener('input', function () {
-        hidden.value = '';
-        var q = input.value.trim().toLowerCase();
-        if (!q) {
-            results.style.display = 'none';
-            return;
-        }
-        var filtered = ACTIVE_PRODUCTIONS.filter(function (p) {
-            return p.label.toLowerCase().indexOf(q) !== -1;
-        });
-        renderResults(filtered);
-    });
-    input.addEventListener('focus', function () {
-        if (input.value.trim()) {
-            input.dispatchEvent(new Event('input'));
-        } else {
-            renderResults(ACTIVE_PRODUCTIONS);
-        }
-    });
-    document.addEventListener('click', function (e) {
-        if (!results.contains(e.target) && e.target !== input) {
-            results.style.display = 'none';
-        }
-    });
-})();
+productionPickerSelect.addEventListener('change', function () {
+    productionIdHidden.value = this.value;
+});
+
+initCustomerSearch({
+    inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results',
+    allowQuickAdd: true,
+    onSelect: function (c) { loadActiveProductionsForCustomer(c.id); },
+    onClear: function () { resetProductionPicker(); },
+    onQuickAdd: function (c) { loadActiveProductionsForCustomer(c.id); }
+});
 
 // Toplam Kg otomatik hesaplama - kullanici elle de degistirebilir, o
 // yuzden sadece kullanici Toplam Kg'a HENUZ dokunmadiysa otomatik guncellenir.
@@ -274,6 +266,8 @@ document.getElementById('entryForm').addEventListener('submit', function (e) {
     formData.append('csrf_token', document.getElementById('csrf_token_value').value);
     formData.append('tarih', document.getElementById('entry_tarih').value);
     formData.append('production_id', document.getElementById('production_id').value);
+    formData.append('customer_id', document.getElementById('customer_id').value);
+    formData.append('musteri_adi', document.getElementById('customer_search').value.trim());
     formData.append('koli_basi_kg', document.getElementById('entry_koli_basi_kg').value);
     formData.append('koli_adedi', document.getElementById('entry_koli_adedi').value);
     formData.append('toplam_kg', document.getElementById('entry_toplam_kg').value);
@@ -311,14 +305,15 @@ document.getElementById('entryForm').addEventListener('submit', function (e) {
             }
 
             // Formu temizle (Tarih haric - ayni gun icin hizli art arda giris)
-            document.getElementById('production_search').value = '';
-            document.getElementById('production_id').value = '';
+            document.getElementById('customer_search').value = '';
+            document.getElementById('customer_id').value = '';
+            resetProductionPicker();
             document.getElementById('entry_koli_basi_kg').value = '';
             document.getElementById('entry_koli_adedi').value = '';
             document.getElementById('entry_toplam_kg').value = '';
             document.getElementById('entry_aciklama').value = '';
             toplamManuelDegistirildi = false;
-            document.getElementById('production_search').focus();
+            document.getElementById('customer_search').focus();
         })
         .catch(function () {
             submitBtn.disabled = false;

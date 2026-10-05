@@ -3658,8 +3658,10 @@ def register_routes(app):
         """Is 3: atolyenin gun icinde elle doldurdugu uretim takip
         kagidinin dijital karsiligi - tarihe gore gruplanmis, her gunun
         altinda o gune ait TUM girisler + gun sonu TOPLAM kg. Musteri/Firma
-        alani artik aktif (henuz teslim edilmemis) Production kayitlarindan
-        secilen bir arama/dropdown - bkz. active_productions."""
+        alani MERKEZI musteri arama bilesenini kullanir (customer-search.js) -
+        TUM musterilerde arar, sistemde olmayan bir firma serbest metin
+        olarak da girilebilir; production_id tamamen opsiyonel baglantidir
+        (bkz. customer_active_productions()/add_daily_production_output())."""
         entries = DailyProductionOutput.query.options(
             joinedload(DailyProductionOutput.customer),
             joinedload(DailyProductionOutput.production).joinedload(Production.deal).joinedload(Deal.customer),
@@ -3686,13 +3688,7 @@ def register_routes(app):
                 'photos': photos_by_date.get(d, []),
             })
 
-        active_productions = [p for p in Production.query.options(
-            joinedload(Production.deal).joinedload(Deal.customer),
-            joinedload(Production.shipments),
-        ).order_by(Production.created_at.desc()).all() if not p.is_delivered]
-
-        return render_template('gunluk_uretim.html', day_groups=day_groups, today=datetime.now().date(),
-                                active_productions=active_productions)
+        return render_template('gunluk_uretim.html', day_groups=day_groups, today=datetime.now().date())
 
     @app.route('/gunluk-uretim/bos-form-pdf')
     @login_required
@@ -3704,18 +3700,42 @@ def register_routes(app):
         return send_file(pdf, as_attachment=True,
                           download_name=f'gunluk_uretim_takip_formu_{datetime.now().strftime("%Y%m%d")}.pdf')
 
+    @app.route('/api/customers/<int:id>/active-productions')
+    @login_required
+    def customer_active_productions(id):
+        """Gunluk Uretim formu - bir musteri secildiginde, o musterinin
+        AKTIF (henuz teslim edilmemis) Production kayitlarini doner; form
+        birden fazlaysa kullaniciya hangisine baglanacagini sectirir, hic
+        yoksa (ya da kullanici baglamak istemezse) kayit production_id'siz
+        (sadece musteri adi/customer_id ile) de eklenebilir - bkz.
+        add_daily_production_output()."""
+        customer = Customer.query.get_or_404(id)
+        productions = [p for p in Production.query.filter(
+            Production.deal_id.in_(db.session.query(Deal.id).filter(Deal.customer_id == customer.id))
+        ).all() if not p.is_delivered]
+        return jsonify([
+            {'id': p.id, 'label': f'{p.deal.title} - {p.stage_label}'} for p in productions
+        ])
+
     @app.route('/gunluk-uretim/add', methods=['POST'])
     @login_required
     def add_daily_production_output():
         """AJAX (JSON) endpoint - sayfa yenilenmeden art arda kalem
-        eklenebilsin diye fetch() ile cagrilir (Is 3), olusturulan kaydi
-        JSON olarak doner; JS bunu ilgili gun grubuna ekler. Musteri/Firma
-        artik serbest metin DEGIL - zorunlu olarak aktif bir Production
-        kaydi secilir, musteri_adi/customer_id oradan (deal.customer)
-        otomatik turetilir (eski kayitlara dokunulmaz, bu alanlar DB
-        semasinda duruyor - sadece yeni giris akisi degisti)."""
+        eklenebilsin diye fetch() ile cagrilir (Is 3). Musteri/Firma:
+        MERKEZI musteri arama bileseni (customer-search.js) ile sistemdeki
+        HERHANGI bir musteri secilebilir (sadece aktif uretimi olanlarla
+        sinirli DEGIL - onceki surumun gercek bug'i buydu, bir musterinin
+        tek aktif uretimi teslim edilince o musteri bir daha hic
+        secilemiyordu), ya da sistemde olmayan bir firma serbest metin
+        olarak girilebilir. production_id TAMAMEN OPSIYONEL - sadece
+        musterinin birden fazla aktif uretimi varsa ayrim icin kullanilir,
+        hicbiri secilmeden de kayit eklenebilir (customer_id/production_id
+        zorunlu degil, DailyProductionOutput.musteri_adi disindaki tum
+        baglantilar nullable)."""
         tarih_raw = request.form.get('tarih', '').strip()
         production_id_raw = request.form.get('production_id', '').strip()
+        customer_id_raw = request.form.get('customer_id', '').strip()
+        musteri_adi_raw = request.form.get('musteri_adi', '').strip()
         koli_basi_kg_raw = request.form.get('koli_basi_kg', '').strip()
         koli_adedi_raw = request.form.get('koli_adedi', '').strip()
         toplam_kg_raw = request.form.get('toplam_kg', '').strip()
@@ -3723,11 +3743,24 @@ def register_routes(app):
 
         if not tarih_raw:
             return jsonify({'error': 'Tarih girilmelidir.'}), 400
-        if not production_id_raw:
-            return jsonify({'error': 'Müşteri/Firma (üretim kaydı) seçilmelidir.'}), 400
-        production = Production.query.get(int(production_id_raw))
-        if not production:
-            return jsonify({'error': 'Seçilen üretim kaydı bulunamadı.'}), 400
+
+        production = None
+        if production_id_raw:
+            production = Production.query.get(int(production_id_raw))
+            if not production:
+                return jsonify({'error': 'Seçilen üretim kaydı bulunamadı.'}), 400
+
+        customer = None
+        if customer_id_raw:
+            customer = Customer.query.get(int(customer_id_raw))
+            if not customer:
+                return jsonify({'error': 'Seçilen müşteri bulunamadı.'}), 400
+        elif production and production.deal:
+            customer = production.deal.customer
+
+        if not customer and not musteri_adi_raw:
+            return jsonify({'error': 'Müşteri/Firma girilmelidir.'}), 400
+
         try:
             koli_basi_kg = float(koli_basi_kg_raw)
             koli_adedi = float(koli_adedi_raw)
@@ -3744,14 +3777,14 @@ def register_routes(app):
         else:
             toplam_kg = koli_basi_kg * koli_adedi
 
-        customer = production.deal.customer if production.deal else None
+        musteri_adi = customer.display_name if customer else musteri_adi_raw
 
         try:
             entry = DailyProductionOutput(
                 tarih=datetime.strptime(tarih_raw, '%Y-%m-%d').date(),
-                musteri_adi=customer.display_name if customer else f'Üretim #{production.id}',
+                musteri_adi=musteri_adi,
                 customer_id=customer.id if customer else None,
-                production_id=production.id,
+                production_id=production.id if production else None,
                 koli_basi_kg=koli_basi_kg,
                 koli_adedi=koli_adedi,
                 toplam_kg=toplam_kg,
