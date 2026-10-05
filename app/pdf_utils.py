@@ -236,6 +236,12 @@ def generate_deal_pdf(deal):
         Spacer(1, 2*mm),
         _payment_method_checkboxes(normal),
     ]
+    # B7 (2026-10-06): isteğe bağlı Peşinat/Bakiye tarihi - sadece doluysa
+    # PDF'e eklenir (boşsa eski görünüm hiç değişmez).
+    if deal.pesinat_tarihi:
+        payment_box.append(Paragraph(f"<b>Peşinat Tarihi:</b> {deal.pesinat_tarihi.strftime('%d.%m.%Y')}", normal))
+    if deal.bakiye_tarihi:
+        payment_box.append(Paragraph(f"<b>Bakiye Tarihi:</b> {deal.bakiye_tarihi.strftime('%d.%m.%Y')}", normal))
 
     info_table = Table([[customer_box, payment_box]], colWidths=[8.6*cm, 8.6*cm])
     info_table.setStyle(TableStyle([

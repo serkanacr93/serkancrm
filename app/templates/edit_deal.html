@@ -47,12 +47,21 @@
                 </div>
             </div>
             <div class="row">
-                <div class="col-md-3 mb-3">
+                <div class="col-md-2 mb-3">
                     <label for="para_birimi" class="form-label">Para Birimi</label>
                     <select class="form-select" id="para_birimi" name="para_birimi">
                         <option value="TRY" {{ 'selected' if deal.para_birimi == 'TRY' }}>₺ TRY</option>
                         <option value="EUR" {{ 'selected' if deal.para_birimi == 'EUR' }}>€ EUR</option>
                         <option value="USD" {{ 'selected' if deal.para_birimi == 'USD' }}>$ USD</option>
+                    </select>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label for="vat_rate" class="form-label">KDV Oranı (%)</label>
+                    <select class="form-select" id="vat_rate" name="vat_rate">
+                        <option value="0" {{ 'selected' if deal.vat_rate == 0 }}>%0</option>
+                        <option value="1" {{ 'selected' if deal.vat_rate == 1 }}>%1</option>
+                        <option value="10" {{ 'selected' if deal.vat_rate == 10 }}>%10</option>
+                        <option value="20" {{ 'selected' if deal.vat_rate == 20 }}>%20</option>
                     </select>
                 </div>
                 <div class="col-md-5 mb-3" id="kullanilan_kur_box" style="{{ '' if deal.para_birimi != 'TRY' else 'display:none;' }}">
@@ -80,6 +89,17 @@
                 <div class="col-md-4 mb-3">
                     <label for="bakiye_odemesi" class="form-label">Bakiye Ödemesi</label>
                     <input type="text" class="form-control" id="bakiye_odemesi" name="bakiye_odemesi" value="{{ deal.bakiye_odemesi or '' }}" placeholder="Örn: Teslimde nakit">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label for="pesinat_tarihi" class="form-label">Peşinat Tarihi <small class="text-muted">(isteğe bağlı)</small></label>
+                    <input type="date" class="form-control" id="pesinat_tarihi" name="pesinat_tarihi" value="{{ deal.pesinat_tarihi.strftime('%Y-%m-%d') if deal.pesinat_tarihi else '' }}">
+                    <small class="text-muted">Takip Modu'ndaki otomatik ödeme hatırlatmasında kullanılır.</small>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label for="bakiye_tarihi" class="form-label">Bakiye Tarihi <small class="text-muted">(isteğe bağlı)</small></label>
+                    <input type="date" class="form-control" id="bakiye_tarihi" name="bakiye_tarihi" value="{{ deal.bakiye_tarihi.strftime('%Y-%m-%d') if deal.bakiye_tarihi else '' }}">
                 </div>
             </div>
 

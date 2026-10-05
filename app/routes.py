@@ -1244,13 +1244,21 @@ def register_routes(app):
         ).all()
         created = 0
         for d in candidates:
-            if d.pesinat_tarihi == today and ('deal_pesinat', d.id) not in existing and d.pesinat_tutari > 0.01:
+            # B7 (2026-10-06): pesinat_tarihi/bakiye_tarihi artik teklif
+            # asamasinda da (approve_deal'dan ONCE) doldurulabiliyor - o an
+            # pesinat_orani henuz girilmemis (None) olabilir, bu durumda
+            # pesinat_tutari/bakiye_tutari de None doner. Asagidaki kontroller
+            # bu yuzden None-guvenli yazildi (eskiden `d.pesinat_tutari > 0.01`
+            # gibi dogrudan karsilastirma, orani olmayan bir teklifte
+            # TypeError ile /takip-modu'nun tamamen cokmesine yol acardi).
+            pesinat_tutari = d.pesinat_tutari if d.pesinat_orani is not None else d.outstanding_amount
+            if d.pesinat_tarihi == today and ('deal_pesinat', d.id) not in existing and pesinat_tutari and pesinat_tutari > 0.01:
                 db.session.add(PaymentReminder(
                     customer_id=d.customer_id, source_type='deal_pesinat', source_id=d.id,
-                    amount=d.pesinat_tutari, due_date=today
+                    amount=pesinat_tutari, due_date=today
                 ))
                 created += 1
-            if d.bakiye_tarihi == today and ('deal_bakiye', d.id) not in existing and not d.payment_complete and d.bakiye_tutari > 0.01:
+            if d.bakiye_tarihi == today and ('deal_bakiye', d.id) not in existing and not d.payment_complete and d.outstanding_amount > 0.01:
                 db.session.add(PaymentReminder(
                     customer_id=d.customer_id, source_type='deal_bakiye', source_id=d.id,
                     amount=d.outstanding_amount, due_date=today
@@ -2461,6 +2469,8 @@ def register_routes(app):
                     vade_gun=request.form.get('vade_gun', '').strip() or None,
                     pesinat=request.form.get('pesinat', '').strip() or None,
                     bakiye_odemesi=request.form.get('bakiye_odemesi', '').strip() or None,
+                    pesinat_tarihi=datetime.strptime(request.form['pesinat_tarihi'], '%Y-%m-%d').date() if request.form.get('pesinat_tarihi') else None,
+                    bakiye_tarihi=datetime.strptime(request.form['bakiye_tarihi'], '%Y-%m-%d').date() if request.form.get('bakiye_tarihi') else None,
                     para_birimi=para_birimi,
                     kullanilan_kur=kullanilan_kur,
                     customer_id=customer.id,
@@ -2565,6 +2575,16 @@ def register_routes(app):
             deal.vade_gun = request.form.get('vade_gun', '').strip() or None
             deal.pesinat = request.form.get('pesinat', '').strip() or None
             deal.bakiye_odemesi = request.form.get('bakiye_odemesi', '').strip() or None
+            # B7: isteğe bağlı Peşinat/Bakiye tarihi - mevcut pesinat_tarihi/
+            # bakiye_tarihi kolonlari (İş D'de eklenmişti) teklif asamasinda
+            # da doldurulabilsin diye - approve_deal() zaten zorunlu kiliyor,
+            # burada SADECE erken/istege bagli giris icin.
+            pesinat_tarihi_raw = request.form.get('pesinat_tarihi', '').strip()
+            bakiye_tarihi_raw = request.form.get('bakiye_tarihi', '').strip()
+            if pesinat_tarihi_raw:
+                deal.pesinat_tarihi = datetime.strptime(pesinat_tarihi_raw, '%Y-%m-%d').date()
+            if bakiye_tarihi_raw:
+                deal.bakiye_tarihi = datetime.strptime(bakiye_tarihi_raw, '%Y-%m-%d').date()
 
             para_birimi = request.form.get('para_birimi', 'TRY').strip().upper()
             if para_birimi not in ('TRY', 'EUR', 'USD'):
