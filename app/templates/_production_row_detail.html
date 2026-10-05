@@ -67,8 +67,14 @@
                         <input type="number" step="0.001" min="0" class="form-control" name="produced_{{ item.id }}" value="{{ item.produced_quantity }}">
                     </div>
                     {% endfor %}
-                    <button type="submit" class="btn btn-sm btn-success w-100"><i class="bi bi-check-circle"></i> Hazır Olarak İşaretle</button>
+                    <button type="submit" class="btn btn-sm btn-success w-100"><i class="bi bi-check-circle"></i> Üretim Tamamlandı</button>
                 </form>
+                {% elif production.status == 'hazir' %}
+                <form method="POST" action="{{ url_for('production_gonderildi_isaretle', id=production.id) }}" class="mb-2">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-success w-100"><i class="bi bi-check2-circle"></i> Gönderildi</button>
+                </form>
+                <a href="{{ url_for('production_detail', id=production.id) }}" class="small d-block mb-2">Kargo/irsaliye bilgisi eklemek için detay sayfasına git →</a>
                 {% endif %}
                 <a href="{{ url_for('production_is_emri_pdf', id=production.id) }}" class="btn btn-sm btn-outline-dark w-100 mb-2">
                     <i class="bi bi-printer"></i> İş Emri Yazdır

@@ -3138,73 +3138,41 @@ def register_routes(app):
         buffer.seek(0)
         return send_file(buffer, as_attachment=True, download_name=f'teklifler_{datetime.now().strftime("%Y%m%d")}.xlsx')
 
-    def _latest_shipment_status_subq():
-        """Her production_id icin EN SON Shipment'in status'unu dondurur -
-        Uretim Listesi'ndeki 'Sevkiyatta' (henuz teslim edilmemis) ile
-        'Tamamlandi' (teslim edilmis) sekmelerini ayirt etmek icin (Is 3)."""
-        latest_at = db.session.query(
-            Shipment.production_id,
-            db.func.max(Shipment.created_at).label('latest_at')
-        ).group_by(Shipment.production_id).subquery()
-        return db.session.query(
-            Shipment.production_id,
-            Shipment.status.label('latest_status')
-        ).join(
-            latest_at,
-            db.and_(
-                Shipment.production_id == latest_at.c.production_id,
-                Shipment.created_at == latest_at.c.latest_at
-            )
-        ).subquery()
-
-    def _apply_production_tab(query, tab, latest_status_subq, joined=False):
-        """query uzerinde verilen sekme filtresini uygular. joined=True ise
-        query zaten latest_status_subq'ya outerjoin edilmis demektir (liste
-        sorgusunda oldugu gibi - tek join, tab_counts'ta ise her sekme kendi
-        bagimsiz alt sorgusunda ayri join kurar)."""
-        if not joined and tab in ('sevkiyatta', 'tamamlandi'):
-            query = query.outerjoin(latest_status_subq, Production.id == latest_status_subq.c.production_id)
+    def _apply_production_tab(query, tab, latest_status_subq=None, joined=False):
+        """query uzerinde verilen sekme filtresini uygular. Is 17 (2026-10-05
+        denetimi) - sekmeler 4'e sadelestirildi: Uretimde / Tamamlandi
+        (eski 'hazir' - gonderilmeyi bekliyor) / Gonderildi (eski 'sevkiyat'
+        durumundaki TUM kayitlar, teslim edilmis/edilmemis ayrimi sekme
+        seviyesinde artik yok - her satirda sevkiyat durumu rozeti olarak
+        gorunmeye devam ediyor) / Tumu. latest_status_subq artik KULLANILMIYOR
+        (eski delivered/undelivered ayrimi icindi) - geriye donuk cagiri
+        bozmamak icin parametre hala kabul ediliyor."""
         if tab == 'uretimde':
             return query.filter(Production.status == 'uretimde')
-        if tab == 'hazir':
-            return query.filter(Production.status == 'hazir')
-        if tab == 'sevkiyatta':
-            return query.filter(
-                Production.status == 'sevkiyat',
-                db.or_(
-                    latest_status_subq.c.latest_status.is_(None),
-                    latest_status_subq.c.latest_status != 'teslim_edildi'
-                )
-            )
         if tab == 'tamamlandi':
-            return query.filter(
-                Production.status == 'sevkiyat',
-                latest_status_subq.c.latest_status == 'teslim_edildi'
-            )
+            return query.filter(Production.status == 'hazir')
+        if tab == 'gonderildi':
+            return query.filter(Production.status == 'sevkiyat')
         return query  # 'tumu'
 
     def _production_tab_counts():
-        """5 sekmenin sayacini TEK round-trip'te (scalar_subquery) hesaplar -
-        Neon'a ayri ayri 5 COUNT sorgusu atmak yerine (bkz. dashboard'daki
+        """4 sekmenin sayacini TEK round-trip'te (scalar_subquery) hesaplar -
+        Neon'a ayri ayri 4 COUNT sorgusu atmak yerine (bkz. dashboard'daki
         ayni performans deseni, commit 153bc85)."""
-        latest_status_subq = _latest_shipment_status_subq()
-
         def count_subq(tab):
             q = _apply_production_tab(
-                db.session.query(db.func.count(Production.id)).select_from(Production),
-                tab, latest_status_subq
+                db.session.query(db.func.count(Production.id)).select_from(Production), tab
             )
             return q.scalar_subquery()
 
         row = db.session.query(
             count_subq('uretimde').label('uretimde'),
-            count_subq('hazir').label('hazir'),
-            count_subq('sevkiyatta').label('sevkiyatta'),
             count_subq('tamamlandi').label('tamamlandi'),
+            count_subq('gonderildi').label('gonderildi'),
             count_subq('tumu').label('tumu'),
         ).one()
-        return {'uretimde': row.uretimde, 'hazir': row.hazir, 'sevkiyatta': row.sevkiyatta,
-                'tamamlandi': row.tamamlandi, 'tumu': row.tumu}
+        return {'uretimde': row.uretimde, 'tamamlandi': row.tamamlandi,
+                'gonderildi': row.gonderildi, 'tumu': row.tumu}
 
     def _filtered_productions(tab, overdue_only=False):
         """Uretim Listesi + Excel/PDF disa aktarma routelarinin UCU: ayni
@@ -3214,7 +3182,6 @@ def register_routes(app):
         _production_report_data() ile AYNI 'termin asmis' tanimi
         (due_date < bugun, status uretimde/hazir) uygulanir - panelde
         gosterilen sayiyla listedeki kayit sayisi HER ZAMAN tutar."""
-        latest_status_subq = _latest_shipment_status_subq()
         # Performans: production.items (specs_missing/uretim_items/gecen_gun
         # gibi sablon icinde HER satirda okunan property'ler icin) burada
         # joinedload edilmezse her satir kendi ayri SELECT'ini tetikliyordu
@@ -3222,18 +3189,14 @@ def register_routes(app):
         query = Production.query.options(
             joinedload(Production.deal).joinedload(Deal.customer),
             joinedload(Production.items),
+            joinedload(Production.shipments),
         )
         if overdue_only:
             today = datetime.now().date()
             return query.filter(
                 Production.due_date < today, Production.status.in_(['uretimde', 'hazir'])
             ).order_by(Production.due_date.asc()).all()
-        if tab in ('sevkiyatta', 'tamamlandi'):
-            query = query.outerjoin(latest_status_subq, Production.id == latest_status_subq.c.production_id)
-            joined = True
-        else:
-            joined = False
-        query = _apply_production_tab(query, tab, latest_status_subq, joined=joined)
+        query = _apply_production_tab(query, tab)
         return query.order_by(Production.created_at.desc()).all()
 
     def _production_report_data():
@@ -3254,7 +3217,7 @@ def register_routes(app):
     @login_required
     def production_list():
         tab = request.args.get('tab', 'uretimde')
-        if tab not in ('uretimde', 'hazir', 'sevkiyatta', 'tamamlandi', 'tumu'):
+        if tab not in ('uretimde', 'tamamlandi', 'gonderildi', 'tumu'):
             tab = 'uretimde'
         overdue_filter = request.args.get('overdue') == '1'
         productions = _filtered_productions(tab, overdue_only=overdue_filter)
@@ -3268,7 +3231,7 @@ def register_routes(app):
     @login_required
     def production_export_excel():
         tab = request.args.get('tab', 'uretimde')
-        if tab not in ('uretimde', 'hazir', 'sevkiyatta', 'tamamlandi', 'tumu'):
+        if tab not in ('uretimde', 'tamamlandi', 'gonderildi', 'tumu'):
             tab = 'uretimde'
         productions = _filtered_productions(tab)
 
@@ -3301,11 +3264,11 @@ def register_routes(app):
     @login_required
     def production_export_pdf():
         tab = request.args.get('tab', 'uretimde')
-        if tab not in ('uretimde', 'hazir', 'sevkiyatta', 'tamamlandi', 'tumu'):
+        if tab not in ('uretimde', 'tamamlandi', 'gonderildi', 'tumu'):
             tab = 'uretimde'
         productions = _filtered_productions(tab)
-        tab_label = {'uretimde': 'Üretimde', 'hazir': 'Hazır', 'sevkiyatta': 'Sevkiyatta',
-                     'tamamlandi': 'Tamamlandı', 'tumu': 'Tümü'}.get(tab, tab)
+        tab_label = {'uretimde': 'Üretimde', 'tamamlandi': 'Tamamlandı',
+                     'gonderildi': 'Gönderildi', 'tumu': 'Tümü'}.get(tab, tab)
         pdf = generate_production_list_pdf(productions, tab_label)
         return send_file(pdf, as_attachment=True, download_name=f'uretim_listesi_{tab}_{datetime.now().strftime("%Y%m%d")}.pdf')
 
@@ -3469,7 +3432,7 @@ def register_routes(app):
         return render_template('production_detail.html', production=production, shipments=shipments,
                                 today=datetime.now().date(), stages=PRODUCTION_STAGES,
                                 ticaret_stages=TICARET_STAGES, daily_outputs=daily_outputs,
-                                daily_outputs_total_kg=daily_outputs_total_kg)
+                                daily_outputs_total_kg=daily_outputs_total_kg, carriers=CARRIER_OPTIONS)
 
     @app.route('/production/<int:id>/row-detail')
     @login_required
@@ -3931,21 +3894,24 @@ def register_routes(app):
         flash('Üretim "Hazır" olarak işaretlendi!', 'success')
         return redirect(url_for('production_detail', id=id))
 
-    @app.route('/production/<int:id>/tamamla-gonder', methods=['POST'])
+    @app.route('/production/<int:id>/gonderildi-isaretle', methods=['POST'])
     @login_required
-    def production_tamamla_gonder(id):
-        """Is 3: sade uretim akisi - tek butonla 'Uretim tamamlandi ->
-        Gonderildi'. Detayli akistaki (create_shipment_from_production)
-        irsaliye zorunlulugunu kullaniciya HISSETTIRMEZ: irsaliye zaten
-        yoksa bedelsiz (0 TL) bir Invoice(type='irsaliye') arka planda
-        otomatik olusturulur - yasal belge yine var, ama elle doldurma
-        adimi yok. Fatura/odeme/cari HICBIR SEKILDE bu akistan etkilenmez
-        (irsaliyenin cariye etkisi yoktur - bkz. Customer.total_invoiced,
-        sadece type='fatura' sayar); detayli sevkiyat sayfalari/akisi
-        DEGISTIRILMEDI, bu SADECE ek bir hizli yol."""
+    def production_gonderildi_isaretle(id):
+        """Is 17 (2026-10-05 denetimi, ONCEKI 'tamamla-gonder' akisinin
+        DUZELTILMIS hali - onceki surum kullaniciyla netlesmemis bir
+        karara dayanarak HER ZAMAN bedelsiz bir irsaliye otomatik
+        olusturuyordu, kullanici bunun ISTENMEDIGINI acikca belirtti).
+        Artik: irsaliye/kargo bilgisi TAMAMEN opsiyonel - form hic
+        doldurulmazsa HICBIR Invoice(irsaliye) olusturulmaz, sadece
+        production 'sevkiyat' (Gonderildi) durumuna gecer ve bos bir
+        sevkiyat kaydi acilir. 'irsaliye_ekle' checkbox'i isaretlenip
+        form gonderilirse (kargo bilgisiyle birlikte veya ayri) bedelsiz
+        bir irsaliye de olusturulur. Fatura/odeme/cari HICBIR SEKILDE bu
+        akistan etkilenmez (irsaliyenin cariye etkisi yoktur); detayli
+        sevkiyat akisi (create_shipment_from_production) DEGISTIRILMEDI."""
         production = Production.query.get_or_404(id)
         if production.status != 'hazir':
-            flash('Bu işlem için üretim "Hazır" aşamasında olmalı.', 'danger')
+            flash('Bu işlem için üretim "Tamamlandı" (hazır) aşamasında olmalı.', 'danger')
             return redirect(url_for('production_detail', id=id))
 
         recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
@@ -3957,32 +3923,22 @@ def register_routes(app):
             return redirect(url_for('shipment_detail', id=recent_duplicate.id))
 
         deal = production.deal
-        try:
-            irsaliye = Invoice.query.filter_by(deal_id=deal.id, type='irsaliye').first()
-            if not irsaliye:
-                irsaliye = Invoice(
-                    invoice_no=_next_invoice_no(), type='irsaliye', deal_id=deal.id,
-                    customer_id=deal.customer_id, user_id=current_user.id, date=datetime.now().date(),
-                    vat_rate=deal.vat_rate, notes='Sade üretim akışı - otomatik oluşturuldu.'
-                )
-                db.session.add(irsaliye)
-                db.session.flush()
-                for item in production.items:
-                    if item.produced_quantity and item.produced_quantity > 0:
-                        db.session.add(InvoiceItem(
-                            invoice_id=irsaliye.id, description=item.description,
-                            quantity=item.produced_quantity, unit=item.unit,
-                            unit_price=0, total_price=0
-                        ))
-                db.session.flush()
-                irsaliye.calculate_totals()
+        carrier = request.form.get('carrier', '').strip() or None
+        tracking_number = request.form.get('tracking_number', '').strip() or None
+        estimated_delivery_date_raw = request.form.get('estimated_delivery_date', '').strip()
+        create_irsaliye = request.form.get('irsaliye_ekle') == 'on'
 
-            has_invoice = Invoice.query.filter_by(deal_id=deal.id, type='fatura').first() is not None
+        try:
             today = datetime.now().date()
+            has_invoice = Invoice.query.filter_by(deal_id=deal.id, type='fatura').first() is not None
             shipment = Shipment(
-                production_id=id, ship_date=today, actual_delivery_date=today,
-                status='teslim_edildi', faturasiz_cikis=not has_invoice,
-                notes='Sade üretim akışı - "Üretim Tamamlandı → Gönderildi" ile oluşturuldu.'
+                production_id=id, ship_date=today,
+                estimated_delivery_date=datetime.strptime(estimated_delivery_date_raw, '%Y-%m-%d').date() if estimated_delivery_date_raw else None,
+                actual_delivery_date=None if (carrier or tracking_number or estimated_delivery_date_raw) else today,
+                carrier=carrier, tracking_number=tracking_number,
+                status='kargoya_verildi' if (carrier or tracking_number or estimated_delivery_date_raw) else 'teslim_edildi',
+                faturasiz_cikis=not has_invoice,
+                notes='Sade üretim akışı - "Gönderildi" ile oluşturuldu.'
             )
             db.session.add(shipment)
             db.session.flush()
@@ -3993,6 +3949,26 @@ def register_routes(app):
                         description=item.description, quantity=item.produced_quantity, unit=item.unit
                     ))
 
+            if create_irsaliye:
+                irsaliye = Invoice.query.filter_by(deal_id=deal.id, type='irsaliye').first()
+                if not irsaliye:
+                    irsaliye = Invoice(
+                        invoice_no=_next_invoice_no(), type='irsaliye', deal_id=deal.id,
+                        customer_id=deal.customer_id, user_id=current_user.id, date=today,
+                        vat_rate=deal.vat_rate, notes='Sade üretim akışı - "İrsaliye ekle" seçeneğiyle oluşturuldu.'
+                    )
+                    db.session.add(irsaliye)
+                    db.session.flush()
+                    for item in production.items:
+                        if item.produced_quantity and item.produced_quantity > 0:
+                            db.session.add(InvoiceItem(
+                                invoice_id=irsaliye.id, description=item.description,
+                                quantity=item.produced_quantity, unit=item.unit,
+                                unit_price=0, total_price=0
+                            ))
+                    db.session.flush()
+                    irsaliye.calculate_totals()
+
             production.status = 'sevkiyat'
             db.session.commit()
         except Exception:
@@ -4000,7 +3976,7 @@ def register_routes(app):
             flash('İşlem sırasında bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
             return redirect(url_for('production_detail', id=id))
 
-        flash('Üretim tamamlandı ve gönderildi olarak işaretlendi!', 'success')
+        flash('Üretim gönderildi olarak işaretlendi!', 'success')
         return redirect(url_for('production_detail', id=id))
 
     @app.route('/production/<int:id>/create-shipment', methods=['GET', 'POST'])

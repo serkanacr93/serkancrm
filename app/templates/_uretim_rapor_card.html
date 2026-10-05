@@ -8,8 +8,8 @@
         <div class="small text-muted mb-1"><i class="bi bi-pie-chart"></i> Durum Dağılımı</div>
         <div class="fw-bold mb-2">
             <a href="{{ url_for('production_list', tab='uretimde') }}" class="crm-panel-link d-inline">{{ production_report.tab_counts.uretimde }} Üretimde</a> /
-            <a href="{{ url_for('production_list', tab='hazir') }}" class="crm-panel-link d-inline">{{ production_report.tab_counts.hazir }} Hazır</a> /
-            <a href="{{ url_for('production_list', tab='sevkiyatta') }}" class="crm-panel-link d-inline">{{ production_report.tab_counts.sevkiyatta }} Sevkiyatta</a>
+            <a href="{{ url_for('production_list', tab='tamamlandi') }}" class="crm-panel-link d-inline">{{ production_report.tab_counts.tamamlandi }} Tamamlandı</a> /
+            <a href="{{ url_for('production_list', tab='gonderildi') }}" class="crm-panel-link d-inline">{{ production_report.tab_counts.gonderildi }} Gönderildi</a>
         </div>
         <div class="small text-muted mb-1"><i class="bi bi-exclamation-triangle"></i> Termin Aşımı</div>
         {% if production_report.overdue_count %}

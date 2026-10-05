@@ -23,18 +23,13 @@
         </a>
     </li>
     <li class="nav-item">
-        <a class="nav-link {{ 'active' if tab == 'hazir' }}" href="{{ url_for('production_list', tab='hazir') }}">
-            Hazır <span class="badge bg-secondary">{{ tab_counts.hazir }}</span>
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link {{ 'active' if tab == 'sevkiyatta' }}" href="{{ url_for('production_list', tab='sevkiyatta') }}">
-            Sevkiyatta <span class="badge bg-secondary">{{ tab_counts.sevkiyatta }}</span>
-        </a>
-    </li>
-    <li class="nav-item">
         <a class="nav-link {{ 'active' if tab == 'tamamlandi' }}" href="{{ url_for('production_list', tab='tamamlandi') }}">
             Tamamlandı <span class="badge bg-secondary">{{ tab_counts.tamamlandi }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if tab == 'gonderildi' }}" href="{{ url_for('production_list', tab='gonderildi') }}">
+            Gönderildi <span class="badge bg-secondary">{{ tab_counts.gonderildi }}</span>
         </a>
     </li>
     <li class="nav-item">
