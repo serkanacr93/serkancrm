@@ -1,9 +1,9 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
-from app import db, places_search, limiter
+from app import db, places_search, limiter, csrf
 from app.tcmb import fetch_tcmb_rate
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -789,10 +789,12 @@ def register_routes(app):
         # Listesi'yle AYNI _production_report_data() fonksiyonu - tek kaynak).
         open_tasks_count = Task.query.filter(Task.status != 'tamamlandi').count()
         production_report = _production_report_data()
+        open_system_error_count = SystemError.query.filter_by(resolved=False).count() if current_user.is_admin else 0
 
         return render_template('index.html',
                              pending_commission_total=pending_commission_total,
                              pending_commission_count=pending_commission_count,
+                             open_system_error_count=open_system_error_count,
                              takip_gerekiyor_count=takip_gerekiyor_count,
                              open_tasks_count=open_tasks_count,
                              production_report=production_report,
@@ -4590,6 +4592,91 @@ def register_routes(app):
         db.session.commit()
         flash('Tüm ödenmemiş primler ödendi olarak işaretlendi.', 'success')
         return redirect(url_for('commissions'))
+
+    def _record_system_error(source, page, message, line=None, browser=None, user_id=None):
+        """Hata yakalayici - AYNI hatayi (source+page+message+line'in
+        md5'i) tekrar tekrar yeni satir olarak ACMAZ, mevcut satirin
+        count'unu +1 artirip last_seen'i guncelleyip o satiri geri dondurur.
+        Cozulmus (resolved=True) bir hata TEKRAR olursa, 'yeniden acilmis'
+        sayilip resolved=False'a dondurulur - cozulmemis gibi gorunsun."""
+        message = (message or '')[:2000]
+        page = (page or '')[:300]
+        key_src = f'{source}|{page}|{message}|{line}'
+        dedup_key = hashlib.md5(key_src.encode('utf-8', errors='ignore')).hexdigest()
+        existing = SystemError.query.filter_by(dedup_key=dedup_key).first()
+        if existing:
+            existing.count += 1
+            existing.last_seen = datetime.utcnow()
+            if existing.resolved:
+                existing.resolved = False
+                existing.resolved_at = None
+                existing.resolved_by_user_id = None
+            db.session.commit()
+            return existing
+        err = SystemError(
+            dedup_key=dedup_key, source=source, page=page, message=message, line=line,
+            browser=(browser or '')[:300] or None, user_id=user_id
+        )
+        db.session.add(err)
+        db.session.commit()
+        return err
+
+    @app.route('/api/js-error', methods=['POST'])
+    @csrf.exempt
+    @limiter.limit('30 per minute')
+    def report_js_error():
+        """Tarayici-ici JS hatalarini (window.onerror/unhandledrejection,
+        bkz. base.html) kaydeder. CSRF'ten MUAFTIR - bir hata tam da CSRF
+        token'in bozuk/suresi dolmus oldugu bir durumda olusabilir, bu
+        yuzden hata raporlamanin kendisi CSRF'e bagli OLMAMALI. Oturumsuz
+        (login olmadan, orn. login sayfasindaki bir hata) da calisir."""
+        data = request.get_json(silent=True) or {}
+        try:
+            user_id = current_user.id if current_user.is_authenticated else None
+        except Exception:
+            user_id = None
+        _record_system_error(
+            source='js', page=data.get('page'), message=data.get('message'),
+            line=data.get('line'), browser=request.headers.get('User-Agent'), user_id=user_id
+        )
+        return '', 204
+
+    @app.errorhandler(500)
+    def handle_server_error(e):
+        import traceback
+        try:
+            user_id = current_user.id if current_user.is_authenticated else None
+        except Exception:
+            user_id = None
+        _record_system_error(
+            source='server', page=request.path, message=traceback.format_exc()[-2000:],
+            browser=request.headers.get('User-Agent'), user_id=user_id
+        )
+        db.session.rollback()
+        return render_template('500.html'), 500
+
+    @app.route('/sistem-hatalari')
+    @admin_required
+    def sistem_hatalari():
+        gosterilen = request.args.get('durum', 'acik')  # 'acik' / 'cozuldu' / 'tumu'
+        q = SystemError.query
+        if gosterilen == 'acik':
+            q = q.filter_by(resolved=False)
+        elif gosterilen == 'cozuldu':
+            q = q.filter_by(resolved=True)
+        errors = q.order_by(SystemError.last_seen.desc()).all()
+        return render_template('sistem_hatalari.html', errors=errors, gosterilen=gosterilen)
+
+    @app.route('/sistem-hatalari/<int:id>/cozuldu', methods=['POST'])
+    @admin_required
+    def sistem_hatasi_cozuldu(id):
+        err = SystemError.query.get_or_404(id)
+        err.resolved = True
+        err.resolved_at = datetime.utcnow()
+        err.resolved_by_user_id = current_user.id
+        db.session.commit()
+        flash('Hata çözüldü olarak işaretlendi.', 'success')
+        return redirect(url_for('sistem_hatalari', durum=request.args.get('durum', 'acik')))
 
     @app.route('/settings')
     @admin_required

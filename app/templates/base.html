@@ -10,6 +10,37 @@
     <link href="{{ asset_url('css/style.css') }}" rel="stylesheet">
 </head>
 <body>
+    <script>
+    /* Hata yakalayici (2026-10-05 denetimi): yakalanmamis JS hatalari ve
+     * reddedilmis Promise'ler /api/js-error'a bildirilir. Mumkun olan EN
+     * ERKEN noktada (body'nin basi, her seyden once) kayit edilir ki
+     * sayfanin herhangi bir yerindeki (content block dahil) bir hata
+     * kacirilmasin. CSRF token GEREKMEZ (endpoint muaf) - bir hata tam da
+     * CSRF altyapisinin bozuk oldugu bir anda olusabilir. */
+    (function () {
+        var reported = {};
+        function report(message, line, page) {
+            var key = message + '|' + line;
+            if (reported[key]) return; // ayni sayfa yuklemesinde ayni hatayi tekrar tekrar gondermez
+            reported[key] = true;
+            try {
+                fetch('/api/js-error', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ page: page || window.location.pathname, message: String(message).slice(0, 2000), line: line || null })
+                }).catch(function () {});
+            } catch (e) { /* fetch bile yoksa yapilabilecek bir sey yok */ }
+        }
+        window.addEventListener('error', function (e) {
+            report(e.message, e.lineno);
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+            var reason = e.reason;
+            var msg = (reason && (reason.message || reason.toString)) ? (reason.message || reason.toString()) : String(reason);
+            report('UnhandledPromiseRejection: ' + msg, null);
+        });
+    })();
+    </script>
     {% if current_user.is_authenticated %}
     <header class="crm-topbar">
         <div class="crm-topbar-inner">

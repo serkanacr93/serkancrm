@@ -1109,3 +1109,29 @@ class DailyProductionPhoto(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
 
     user = db.relationship('User')
+
+class SystemError(db.Model):
+    """Hata yakalayici (2026-10-05 denetimi): tarayici-ici JS hatalari
+    (window.onerror/unhandledrejection, bkz. base.html + /api/js-error)
+    VE sunucu taraflı 500'ler (bkz. app.errorhandler(500)) AYNI tabloya
+    duser. Dedup_key = source+page+message+line'in md5'i - ayni hata
+    tekrar olusunca YENI SATIR ACILMAZ, mevcut satirin count'u +1 artar
+    ve last_seen guncellenir (aksi halde bir dongu icindeki hata
+    tablonun saniyeler icinde sismesine yol acardi)."""
+    id = db.Column(db.Integer, primary_key=True)
+    dedup_key = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    source = db.Column(db.String(10), nullable=False)  # 'js' / 'server'
+    page = db.Column(db.String(300), nullable=True)
+    message = db.Column(db.Text, nullable=False)
+    line = db.Column(db.Integer, nullable=True)
+    browser = db.Column(db.String(300), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    count = db.Column(db.Integer, default=1, nullable=False)
+    first_seen = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow)
+    resolved = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    resolved_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    user = db.relationship('User', foreign_keys=[user_id])
+    resolved_by = db.relationship('User', foreign_keys=[resolved_by_user_id])

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Sistem Hataları - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h2><i class="bi bi-bug"></i> Sistem Hataları</h2>
+    <div class="btn-group">
+        <a href="{{ url_for('sistem_hatalari', durum='acik') }}" class="btn btn-sm {{ 'btn-primary' if gosterilen == 'acik' else 'btn-outline-primary' }}">Çözülmemiş</a>
+        <a href="{{ url_for('sistem_hatalari', durum='cozuldu') }}" class="btn btn-sm {{ 'btn-primary' if gosterilen == 'cozuldu' else 'btn-outline-primary' }}">Çözülmüş</a>
+        <a href="{{ url_for('sistem_hatalari', durum='tumu') }}" class="btn btn-sm {{ 'btn-primary' if gosterilen == 'tumu' else 'btn-outline-primary' }}">Tümü</a>
+    </div>
+</div>
+
+{% if errors %}
+<div class="table-responsive">
+    <table class="table table-sm table-hover">
+        <thead class="table-light">
+            <tr>
+                <th>Kaynak</th>
+                <th>Sayfa</th>
+                <th>Mesaj</th>
+                <th>Kaç Kez</th>
+                <th>İlk Görülme</th>
+                <th>Son Görülme</th>
+                <th>Durum</th>
+                <th class="no-print">İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in errors %}
+            <tr>
+                <td><span class="badge bg-{{ 'danger' if e.source == 'server' else 'warning text-dark' }}">{{ 'Sunucu' if e.source == 'server' else 'Tarayıcı (JS)' }}</span></td>
+                <td class="small">{{ e.page or '-' }}</td>
+                <td class="small" style="max-width:400px; overflow-x:auto; white-space:pre-wrap;">{{ e.message[:300] }}{{ '...' if e.message|length > 300 else '' }}</td>
+                <td><span class="badge bg-secondary">{{ e.count }}</span></td>
+                <td class="small">{{ e.first_seen.strftime('%d.%m.%Y %H:%M') }}</td>
+                <td class="small">{{ e.last_seen.strftime('%d.%m.%Y %H:%M') }}</td>
+                <td>
+                    {% if e.resolved %}
+                    <span class="badge bg-success">Çözüldü</span>
+                    {% else %}
+                    <span class="badge bg-danger">Açık</span>
+                    {% endif %}
+                </td>
+                <td class="no-print">
+                    {% if not e.resolved %}
+                    <form method="POST" action="{{ url_for('sistem_hatasi_cozuldu', id=e.id, durum=gosterilen) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline-success">Çözüldü İşaretle</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-success"><i class="bi bi-check-circle"></i> Bu kategoride hiç kayıt yok.</div>
+{% endif %}
+{% endblock %}

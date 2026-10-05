@@ -439,4 +439,14 @@ fetch('/api/chart-data')
         </a>
     </div>
 </div>
+{% if current_user.is_admin and open_system_error_count %}
+<div class="card shadow-sm border-danger">
+    <div class="card-header bg-danger text-white"><i class="bi bi-bug"></i> Sistem Hataları</div>
+    <div class="card-body">
+        <a href="{{ url_for('sistem_hatalari') }}" class="crm-panel-link fw-bold text-danger">
+            {{ open_system_error_count }} yeni sistem hatası
+        </a>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
