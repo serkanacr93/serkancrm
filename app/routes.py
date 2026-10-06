@@ -1260,16 +1260,25 @@ def register_routes(app):
 
     def _sync_payment_reminders_for_today():
         """Is 1.6 OTOMATIK odeme hatirlatma: Deal.pesinat_tarihi/bakiye_tarihi
-        BUGUN olan ve ilgili tutar henuz tamamen odenmemis teklifler icin
-        PaymentReminder olusturur (yoksa). source_type+source_id+due_date
-        kombinasyonu zaten varsa TEKRAR OLUSTURMAZ. Sayfa her acildiginda
-        cagrilir (ayri bir scheduler job'u gerekmez - lazy senkronizasyon)."""
+        BUGUN VEYA GECMISTE olan ve ilgili tutar henuz tamamen odenmemis
+        teklifler icin PaymentReminder olusturur (yoksa).
+
+        2026-10-06 duzeltmesi: eskiden SADECE `== today` kontrol ediliyordu -
+        sayfa o GUN hic acilmazsa (hafta sonu, tatil, kullanici o gun
+        giris yapmadi vb.) senkron hic tetiklenmiyor ve hatirlatma SONSUZA
+        KADAR olusmuyordu (ertesi gun `== today` artik gecmisi yakalamadigi
+        icin). Artik `<= today` kontrol edilir ve due_date GERCEK (gecmis)
+        tarih olarak kaydedilir - boylece "N gun gecikti" dogru hesaplanir.
+        Tekrar-olusturmama kontrolu de artik due_date'e bagli degil - bir
+        kaynak (source_type+source_id) icin HERHANGI bir tarihte bir
+        hatirlatma olusmussa (odenmis olsa bile) bir daha asla tekrar
+        olusturulmaz."""
         today = date.today()
         existing = set(db.session.query(PaymentReminder.source_type, PaymentReminder.source_id).filter(
-            PaymentReminder.due_date == today, PaymentReminder.source_type.in_(['deal_pesinat', 'deal_bakiye'])
+            PaymentReminder.source_type.in_(['deal_pesinat', 'deal_bakiye'])
         ).all())
         candidates = Deal.query.filter(
-            db.or_(Deal.pesinat_tarihi == today, Deal.bakiye_tarihi == today)
+            db.or_(Deal.pesinat_tarihi <= today, Deal.bakiye_tarihi <= today)
         ).all()
         created = 0
         for d in candidates:
@@ -1281,16 +1290,18 @@ def register_routes(app):
             # gibi dogrudan karsilastirma, orani olmayan bir teklifte
             # TypeError ile /takip-modu'nun tamamen cokmesine yol acardi).
             pesinat_tutari = d.pesinat_tutari if d.pesinat_orani is not None else d.outstanding_amount
-            if d.pesinat_tarihi == today and ('deal_pesinat', d.id) not in existing and pesinat_tutari and pesinat_tutari > 0.01:
+            if (d.pesinat_tarihi and d.pesinat_tarihi <= today and ('deal_pesinat', d.id) not in existing
+                    and pesinat_tutari and pesinat_tutari > 0.01):
                 db.session.add(PaymentReminder(
                     customer_id=d.customer_id, source_type='deal_pesinat', source_id=d.id,
-                    amount=pesinat_tutari, due_date=today
+                    amount=pesinat_tutari, due_date=d.pesinat_tarihi
                 ))
                 created += 1
-            if d.bakiye_tarihi == today and ('deal_bakiye', d.id) not in existing and not d.payment_complete and d.outstanding_amount > 0.01:
+            if (d.bakiye_tarihi and d.bakiye_tarihi <= today and ('deal_bakiye', d.id) not in existing
+                    and not d.payment_complete and d.outstanding_amount > 0.01):
                 db.session.add(PaymentReminder(
                     customer_id=d.customer_id, source_type='deal_bakiye', source_id=d.id,
-                    amount=d.outstanding_amount, due_date=today
+                    amount=d.outstanding_amount, due_date=d.bakiye_tarihi
                 ))
                 created += 1
         if created:
