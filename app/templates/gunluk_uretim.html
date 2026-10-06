@@ -3,6 +3,37 @@
 {% block title %}Günlük Üretim Takibi - CRM Sistemi{% endblock %}
 
 {% block content %}
+<style>
+/* 2026-10-07 - gorsel is: Serkan'in onayladigi taslagin duzeni/renkleri,
+   taslagin kendi CSS degiskenleri YERINE sabit renk degerleriyle. */
+.gu-card{border:1px solid #ddd;border-radius:12px;padding:14px 16px;margin-bottom:16px;background:#fff;}
+.gu-hd{font-size:12px;color:#666;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;}
+.gu-hd strong{font-size:14px;color:#333;}
+.gu-tag{font-size:12px;padding:3px 10px;border-radius:99px;background:#E6F1FB;color:#185FA5;white-space:nowrap;}
+.gu-tag a{color:#185FA5;text-decoration:none;font-weight:600;padding:0 5px;}
+.gu-mini{margin-top:6px;font-size:12px;padding:5px 8px;border:1px dashed #3B6D11;border-radius:8px;color:#3B6D11;cursor:pointer;}
+.gu-mini b{font-weight:600;}
+.gu-field-note{font-size:11px;color:#999;margin-top:4px;}
+.gu-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.gu-k{background:#f6f6f4;border-radius:8px;padding:10px 12px;}
+.gu-k .gu-t{font-size:12px;color:#666;}
+.gu-k .gu-v{font-size:22px;font-weight:500;margin-top:2px;}
+.gu-k .gu-s{font-size:12px;color:#666;margin-top:2px;}
+.gu-bar-row{display:grid;grid-template-columns:130px 1fr 110px;align-items:center;gap:10px;margin:7px 0;font-size:13px;}
+.gu-track{background:#f1efe8;border-radius:99px;height:12px;overflow:hidden;}
+.gu-fill{height:100%;border-radius:99px;}
+.gu-num{text-align:right;font-variant-numeric:tabular-nums;}
+.gu-li{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #eee;font-size:13px;}
+.gu-ins{font-size:13px;color:#666;line-height:1.6;margin:0;padding-left:16px;}
+.gu-days{display:flex;align-items:flex-end;gap:3px;height:70px;margin-top:6px;}
+.gu-days div{flex:1;background:#378ADD;border-radius:2px 2px 0 0;min-width:4px;}
+.gu-note{font-size:11px;color:#999;margin-top:4px;}
+@media (max-width:560px){
+  .gu-kpis{grid-template-columns:1fr;}
+  .gu-bar-row{grid-template-columns:90px 1fr 85px;font-size:12px;}
+}
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-journal-check"></i> Günlük Üretim Takibi</h2>
     <a href="{{ url_for('gunluk_uretim_bos_form_pdf') }}" class="btn btn-outline-secondary">
@@ -10,149 +41,144 @@
     </a>
 </div>
 
-<div class="card mb-4 shadow-sm">
-    <div class="card-header bg-primary text-white">
-        <i class="bi bi-plus-circle"></i> Yeni Kayıt Ekle
-    </div>
-    <div class="card-body">
-        <div id="entryErrorBox" class="alert alert-danger py-2 d-none"></div>
-        <form id="entryForm" class="row g-3">
-            <input type="hidden" id="csrf_token_value" value="{{ csrf_token() }}">
-            <div class="col-md-2">
-                <label class="form-label">Tarih</label>
-                <input type="date" class="form-control" id="entry_tarih" value="{{ today.strftime('%Y-%m-%d') }}" required>
-            </div>
-            <div class="col-md-3 position-relative">
-                <label class="form-label">Müşteri / Firma</label>
-                <input type="text" class="form-control" id="customer_search" name="musteri_adi" placeholder="Müşteri adı yazın veya sistemden arayın..." autocomplete="off" required>
-                <input type="hidden" id="customer_id" value="">
-                <input type="hidden" id="production_id" value="">
-                <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
-                <div id="productionPicker" class="mt-1 d-none">
-                    <select class="form-select form-select-sm" id="production_picker_select">
-                        <option value="">Bağlantısız (sadece kayıt)</option>
-                    </select>
-                </div>
-                <small class="text-muted">Mevcut bir müşteri seçebilir ya da serbest metin olarak yazabilirsiniz.</small>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">Koli Başı Kg</label>
-                <input type="number" step="any" min="0" class="form-control" id="entry_koli_basi_kg" required>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">Koli Adedi</label>
-                <input type="number" step="any" min="0" class="form-control" id="entry_koli_adedi" required>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">Toplam Kg</label>
-                <input type="number" step="any" min="0" class="form-control" id="entry_toplam_kg" placeholder="Otomatik hesaplanır">
-            </div>
-            <div class="col-md-1 d-flex align-items-end">
-                <button type="submit" class="btn btn-success w-100" id="entrySubmitBtn">
-                    <i class="bi bi-plus-lg"></i> Ekle
-                </button>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Kağıt Cinsi</label>
-                <select class="form-select" id="entry_kagit_cinsi">
-                    <option value="">Belirtilmemiş</option>
-                    {% for k in kagit_cinsleri %}
-                    <option value="{{ k }}">{{ k }}</option>
-                    {% endfor %}
+<div class="gu-card">
+    <div class="gu-hd"><strong>Yeni Kayıt Ekle</strong></div>
+    <div id="entryErrorBox" class="alert alert-danger py-2 d-none"></div>
+    <form id="entryForm" class="row g-3">
+        <input type="hidden" id="csrf_token_value" value="{{ csrf_token() }}">
+        <div class="col-md-2">
+            <label class="form-label">Tarih</label>
+            <input type="date" class="form-control" id="entry_tarih" value="{{ today.strftime('%Y-%m-%d') }}" required>
+        </div>
+        <div class="col-md-3 position-relative">
+            <label class="form-label">Müşteri / Firma</label>
+            <input type="text" class="form-control" id="customer_search" name="musteri_adi" placeholder="Müşteri adı yazın veya sistemden arayın..." autocomplete="off" required>
+            <input type="hidden" id="customer_id" value="">
+            <input type="hidden" id="production_id" value="">
+            <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
+            <div id="quickAddHint" class="gu-mini d-none">Sistemde yok → <b>＋ Müşteri olarak da ekle</b> (sadece ad yeter)</div>
+            <div id="productionPicker" class="mt-1 d-none">
+                <select class="form-select form-select-sm" id="production_picker_select">
+                    <option value="">Bağlantısız (sadece kayıt)</option>
                 </select>
             </div>
-            <div class="col-md-9">
-                <label class="form-label">Açıklama</label>
-                <input type="text" class="form-control" id="entry_aciklama" placeholder="Opsiyonel">
-            </div>
-        </form>
-    </div>
-</div>
-
-<div class="card mb-4 shadow-sm">
-    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-bar-chart-line"></i> Aylık Özet - {{ monthly.ay_baslik }}</span>
-        <div class="btn-group">
-            <a href="{{ url_for('gunluk_uretim', ay=prev_ay) }}" class="btn btn-sm btn-outline-light"><i class="bi bi-chevron-left"></i></a>
-            <a href="{{ url_for('gunluk_uretim', ay=next_ay) }}" class="btn btn-sm btn-outline-light"><i class="bi bi-chevron-right"></i></a>
         </div>
-    </div>
-    <div class="card-body">
-        {% if monthly.kayit_sayisi == 0 %}
-        <p class="text-muted mb-0"><i class="bi bi-info-circle"></i> Bu ay için kayıt bulunmuyor.</p>
-        {% else %}
-        <div class="row text-center mb-3">
-            <div class="col-md-3">
-                <div class="small text-muted">Ay Toplamı</div>
-                <div class="fw-bold fs-5">{{ "%.2f"|format(monthly.ay_toplam) }} kg</div>
-            </div>
-            <div class="col-md-3">
-                <div class="small text-muted">Çalışılan Gün</div>
-                <div class="fw-bold fs-5">{{ monthly.calisilan_gun_sayisi }}</div>
-            </div>
-            <div class="col-md-3">
-                <div class="small text-muted">Günlük Ortalama</div>
-                <div class="fw-bold fs-5">{{ "%.2f"|format(monthly.gunluk_ortalama) }} kg</div>
-            </div>
-            <div class="col-md-3">
-                <div class="small text-muted">Önceki Aya Göre</div>
-                <div class="fw-bold fs-5 {{ 'text-success' if monthly.fark_kg >= 0 else 'text-danger' }}">
-                    {{ '+' if monthly.fark_kg >= 0 else '' }}{{ "%.2f"|format(monthly.fark_kg) }} kg
-                    {% if monthly.fark_pct is not none %}({{ '+' if monthly.fark_pct >= 0 else '' }}{{ "%.1f"|format(monthly.fark_pct) }}%){% endif %}
-                </div>
-            </div>
-        </div>
-
-        <div class="mb-3">
-            <div class="small text-muted mb-1">Kağıt Cinsine Göre Üretim (kg)</div>
-            {% for k in monthly.kagit_dokum %}
-            <div class="d-flex align-items-center mb-1">
-                <div style="width:160px;" class="small">{{ k.cins }}</div>
-                <div class="flex-grow-1 bg-light rounded" style="height:18px;">
-                    <div class="bg-info rounded" style="height:18px;width:{{ k.pct }}%;"></div>
-                </div>
-                <div style="width:130px;" class="small text-end">{{ "%.2f"|format(k.kg) }} kg ({{ "%.1f"|format(k.pct) }}%)</div>
-            </div>
-            {% endfor %}
-        </div>
-
-        <div class="row">
-            <div class="col-md-6">
-                <div class="small text-muted mb-1">En Çok Üretilen Müşteriler</div>
-                {% for m in monthly.top_musteriler %}
-                <div class="d-flex justify-content-between small border-bottom py-1">
-                    <span>{{ m.ad }}</span>
-                    <span>{{ "%.2f"|format(m.kg) }} kg ({{ "%.1f"|format(m.pct) }}%)</span>
-                </div>
+        <div class="col-md-2">
+            <label class="form-label">Kağıt Cinsi</label>
+            <select class="form-select" id="entry_kagit_cinsi">
+                <option value="">Belirtilmemiş</option>
+                {% for k in kagit_cinsleri %}
+                <option value="{{ k }}">{{ k }}</option>
                 {% endfor %}
-                {% if monthly.diger_musteri_sayisi > 0 %}
-                <div class="d-flex justify-content-between small text-muted py-1">
-                    <span>Diğer ({{ monthly.diger_musteri_sayisi }} müşteri)</span>
-                    <span>{{ "%.2f"|format(monthly.diger_musteri_kg) }} kg</span>
-                </div>
-                {% endif %}
-            </div>
-            <div class="col-md-6">
-                <div class="small text-muted mb-1">Günlük Üretim (kg)</div>
-                <div class="d-flex align-items-end gap-1" style="height:90px;">
-                    {% set max_gun_kg = monthly.gunluk_bar|map(attribute='kg')|max if monthly.gunluk_bar else 1 %}
-                    {% for g in monthly.gunluk_bar %}
-                    <div class="bg-primary" style="width:8px;height:{{ (g.kg / max_gun_kg * 85) if max_gun_kg else 0 }}px;" title="{{ g.tarih.strftime('%d.%m') }}: {{ '%.2f'|format(g.kg) }} kg"></div>
-                    {% endfor %}
-                </div>
-            </div>
+            </select>
+            <div class="gu-field-note">{{ kagit_cinsleri|join(' · ') }} · (boş bırakılabilir)</div>
         </div>
+        <div class="col-md-2">
+            <label class="form-label">Koli Başı Kg</label>
+            <input type="number" step="any" min="0" class="form-control" id="entry_koli_basi_kg" required>
+        </div>
+        <div class="col-md-1">
+            <label class="form-label">Koli Adedi</label>
+            <input type="number" step="any" min="0" class="form-control" id="entry_koli_adedi" required>
+        </div>
+        <div class="col-md-1">
+            <label class="form-label">Toplam Kg</label>
+            <input type="number" step="any" min="0" class="form-control" id="entry_toplam_kg" placeholder="Oto">
+        </div>
+        <div class="col-md-1 d-flex align-items-end">
+            <button type="submit" class="btn btn-success w-100" id="entrySubmitBtn">
+                <i class="bi bi-plus-lg"></i> Ekle
+            </button>
+        </div>
+        <div class="col-md-12">
+            <label class="form-label">Açıklama</label>
+            <input type="text" class="form-control" id="entry_aciklama" placeholder="Opsiyonel">
+        </div>
+    </form>
+</div>
 
-        <ul class="small text-muted mt-3 mb-0">
-            {% if monthly.en_yogun %}<li>En yoğun gün: {{ monthly.en_yogun.tarih.strftime('%d.%m.%Y') }} ({{ "%.2f"|format(monthly.en_yogun.kg) }} kg)</li>{% endif %}
-            {% if monthly.en_dusuk %}<li>En düşük gün: {{ monthly.en_dusuk.tarih.strftime('%d.%m.%Y') }} ({{ "%.2f"|format(monthly.en_dusuk.kg) }} kg)</li>{% endif %}
-            <li>Esmer kağıtların (Recycle+Virjin) payı: %{{ "%.1f"|format(monthly.esmer_pct) }}</li>
-            <li>İlk 3 müşterinin payı: %{{ "%.1f"|format(monthly.top3_pct) }}</li>
-            <li>Kağıt cinsi girilmemiş kayıt: %{{ "%.1f"|format(monthly.kagitsiz_pct) }}</li>
-        </ul>
-        {% endif %}
+<div class="gu-card">
+    <div class="gu-hd">
+        <strong>Aylık özet</strong>
+        <span class="gu-tag"><a href="{{ url_for('gunluk_uretim', ay=prev_ay) }}">◀</a>{{ monthly.ay_baslik }}<a href="{{ url_for('gunluk_uretim', ay=next_ay) }}">▶</a></span>
+    </div>
+    {% if monthly.kayit_sayisi == 0 %}
+    <p class="text-muted mb-0"><i class="bi bi-info-circle"></i> Bu ay için kayıt bulunmuyor.</p>
+    {% else %}
+    <div class="gu-kpis">
+        <div class="gu-k">
+            <div class="gu-t">Ay toplamı</div>
+            <div class="gu-v">{{ "%.2f"|format(monthly.ay_toplam) }} kg</div>
+            <div class="gu-s">{{ monthly.prev_ay_baslik }}: {{ "%.2f"|format(monthly.prev_toplam) }} kg</div>
+        </div>
+        <div class="gu-k">
+            <div class="gu-t">Günlük ortalama</div>
+            <div class="gu-v">{{ "%.2f"|format(monthly.gunluk_ortalama) }} kg</div>
+            <div class="gu-s">{{ monthly.calisilan_gun_sayisi }} üretim günü</div>
+        </div>
+        <div class="gu-k">
+            <div class="gu-t">Önceki aya göre</div>
+            <div class="gu-v" style="color:{{ '#3B6D11' if monthly.fark_kg >= 0 else '#B3261E' }}">
+                {% if monthly.fark_pct is not none %}{{ '+' if monthly.fark_pct >= 0 else '' }}{{ "%.1f"|format(monthly.fark_pct) }}%{% else %}—{% endif %}
+            </div>
+            <div class="gu-s">{{ '+' if monthly.fark_kg >= 0 else '' }}{{ "%.2f"|format(monthly.fark_kg) }} kg</div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% if monthly.kayit_sayisi > 0 %}
+<div class="gu-card">
+    <div class="gu-hd">
+        <strong>Kağıt cinsine göre üretim (kg)</strong>
+        <span>Toplam {{ "%.2f"|format(monthly.ay_toplam) }} kg</span>
+    </div>
+    {% for k in monthly.kagit_dokum %}
+    <div class="gu-bar-row">
+        <span {% if k.cins == 'Belirtilmemiş' %}style="color:#888"{% endif %}>{{ k.cins }}</span>
+        <div class="gu-track"><div class="gu-fill" style="width:{{ k.pct }}%;background:{{ kagit_renkleri.get(k.cins, '#ccc') }};"></div></div>
+        <span class="gu-num" {% if k.cins == 'Belirtilmemiş' %}style="color:#888"{% endif %}>{{ "%.2f"|format(k.kg) }} kg · %{{ "%.1f"|format(k.pct) }}</span>
+    </div>
+    {% endfor %}
+    <div class="gu-note">"Belirtilmemiş" = eski kayıtlar ve cinsi seçilmeyenler. Eski kayıtlar bozulmaz.</div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="gu-card h-100">
+            <div class="gu-hd"><strong>Bu ay en çok üretilen müşteriler</strong></div>
+            {% for m in monthly.top_musteriler %}
+            <div class="gu-li"><span>{{ m.ad }}</span><strong>{{ "%.2f"|format(m.kg) }} kg</strong></div>
+            {% endfor %}
+            {% if monthly.diger_musteri_sayisi > 0 %}
+            <div class="gu-li text-muted"><span>Diğer ({{ monthly.diger_musteri_sayisi }} müşteri)</span><strong>{{ "%.2f"|format(monthly.diger_musteri_kg) }} kg</strong></div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="gu-card h-100">
+            <div class="gu-hd"><strong>Günlük üretim (kg)</strong></div>
+            <div class="gu-days">
+                {% set max_gun_kg = monthly.gunluk_bar|map(attribute='kg')|max if monthly.gunluk_bar else 1 %}
+                {% for g in monthly.gunluk_bar %}
+                <div style="height:{{ (g.kg / max_gun_kg * 100) if max_gun_kg else 0 }}%;" title="{{ g.tarih.strftime('%d.%m') }}: {{ '%.2f'|format(g.kg) }} kg"></div>
+                {% endfor %}
+            </div>
+            <div class="gu-note">Her çubuk bir üretim günü</div>
+        </div>
     </div>
 </div>
+
+<div class="gu-card">
+    <div class="gu-hd"><strong>Mini analiz (otomatik cümleler)</strong></div>
+    <ul class="gu-ins">
+        <li>{% if monthly.en_yogun %}En yoğun gün {{ monthly.en_yogun.tarih.strftime('%d.%m.%Y') }}: {{ "%.2f"|format(monthly.en_yogun.kg) }} kg.{% endif %} {% if monthly.en_dusuk %}En düşük gün: {{ "%.2f"|format(monthly.en_dusuk.kg) }} kg.{% endif %}</li>
+        <li>Esmer kağıtlar (recycle + virjin) toplamın %{{ "%.1f"|format(monthly.esmer_pct) }}'i.</li>
+        <li>İlk 3 müşteri ayın %{{ "%.1f"|format(monthly.top3_pct) }}'ini oluşturuyor.</li>
+        <li>Kağıt cinsi girilmemiş kayıt %{{ "%.1f"|format(monthly.kagitsiz_pct) }}.</li>
+    </ul>
+</div>
+{% endif %}
 
 <div id="dayGroupsContainer">
     {% for g in day_groups %}
@@ -308,9 +334,35 @@ productionPickerSelect.addEventListener('change', function () {
 initCustomerSearch({
     inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results',
     allowQuickAdd: true, quickAddSource: 'gunluk_uretim',
-    onSelect: function (c) { loadActiveProductionsForCustomer(c.id); },
+    onSelect: function (c) { loadActiveProductionsForCustomer(c.id); hideQuickAddHint(); },
     onClear: function () { resetProductionPicker(); },
-    onQuickAdd: function (c) { loadActiveProductionsForCustomer(c.id); }
+    onQuickAdd: function (c) { loadActiveProductionsForCustomer(c.id); hideQuickAddHint(); }
+});
+
+// 2026-10-07 (gorsel is): Musteri/Firma kutusunun ALTINDA kucuk bir ipucu
+// kutusu - mevcut arama bileseninin KENDI ic durumunu YANSITIR, yeni bir
+// eslesme/benzerlik mantigi YAZILMADI. ".qa-submit" butonu DOM'da varsa
+// (bilesen zaten "eslesme yok, quick-add formu goster" kararini vermis
+// demektir) ipucu gorunur olur; tiklaninca O AYNI butonu tetikler.
+var quickAddHint = document.getElementById('quickAddHint');
+var customerResultsEl = document.getElementById('customer_results');
+function hideQuickAddHint() { quickAddHint.classList.add('d-none'); }
+function syncQuickAddHint() {
+    var hasQuickAddForm = customerResultsEl.querySelector('.qa-submit') !== null;
+    var query = document.getElementById('customer_search').value.trim();
+    if (hasQuickAddForm && query.length >= 2) {
+        quickAddHint.classList.remove('d-none');
+    } else {
+        hideQuickAddHint();
+    }
+}
+new MutationObserver(syncQuickAddHint).observe(customerResultsEl, { childList: true, subtree: true });
+document.getElementById('customer_search').addEventListener('input', function () {
+    if (this.value.trim().length < 2) hideQuickAddHint();
+});
+quickAddHint.addEventListener('click', function () {
+    var submitBtn = customerResultsEl.querySelector('.qa-submit');
+    if (submitBtn) submitBtn.click();
 });
 
 // Toplam Kg otomatik hesaplama - kullanici elle de degistirebilir, o
@@ -456,6 +508,7 @@ document.getElementById('entryForm').addEventListener('submit', function (e) {
             document.getElementById('customer_search').value = '';
             document.getElementById('customer_id').value = '';
             resetProductionPicker();
+            hideQuickAddHint();
             document.getElementById('entry_koli_basi_kg').value = '';
             document.getElementById('entry_koli_adedi').value = '';
             document.getElementById('entry_toplam_kg').value = '';

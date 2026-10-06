@@ -3961,13 +3961,24 @@ def register_routes(app):
         flash('Manuel kayıt silindi!', 'success')
         return redirect(url_for('tedarik_takip'))
 
+    _TR_AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+                 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']
+    # 2026-10-07 (gorsel is - Serkan'in onayladigi taslak): kagit cinsi
+    # basina SABIT renk, sadece Aylik Ozet'teki dokum cubuklarinda kullanilir.
+    KAGIT_RENKLERI = {
+        'Esmer Recycle': '#BA7517', 'Esmer Virjin': '#854F0B', 'Beyaz Kraft': '#888780',
+        'Beyaz Virjin': '#378ADD', 'Kuşe': '#7F77DD', 'Belirtilmemiş': '#cccccc',
+    }
+
     def _gunluk_uretim_aylik_ozet(ay_param):
         """Is 4 (2026-10-07): Aylik Ozet + kagit dokumu + mini analiz.
         TEK sorguyla (join YOK, N+1 YOK) o ayin satirlarini (tarih,
         kagit_cinsi, musteri_adi, toplam_kg) ceker, TUM gruplamalar
         (gunluk toplam, kagit dokumu, en cok uretilen musteriler) Python
         tarafinda bu kucuk liste uzerinde yapilir; onceki ay icin ayrica
-        TEK bir SUM sorgusu (sadece 1 sayi) atilir."""
+        TEK bir SUM sorgusu (sadece 1 sayi) atilir. Ay adi icin strftime
+        '%B' KULLANILMAZ - sunucunun locale'i Turkce olmayabilir (Render'da
+        genelde degil), bu yuzden sabit _TR_AYLAR listesi kullanilir."""
         today_d = datetime.now().date()
         try:
             ay_year, ay_month = map(int, ay_param.split('-'))
@@ -4034,7 +4045,8 @@ def register_routes(app):
             'diger_musteri_sayisi': diger_musteri_sayisi, 'diger_musteri_kg': diger_musteri_kg,
             'gunluk_bar': gunluk_bar, 'en_yogun': en_yogun, 'en_dusuk': en_dusuk,
             'esmer_pct': esmer_pct, 'top3_pct': top3_pct, 'kagitsiz_pct': kagitsiz_pct,
-            'kayit_sayisi': len(rows), 'ay_baslik': ay_start.strftime('%B %Y'),
+            'kayit_sayisi': len(rows), 'ay_baslik': f'{_TR_AYLAR[ay_start.month - 1]} {ay_start.year}',
+            'prev_ay_baslik': _TR_AYLAR[prev_ay_start.month - 1],
         }
         return monthly, ay_str, prev_ay_start.strftime('%Y-%m'), next_ay_start.strftime('%Y-%m')
 
@@ -4078,6 +4090,7 @@ def register_routes(app):
 
         return render_template('gunluk_uretim.html', day_groups=day_groups, today=datetime.now().date(),
                                 kagit_cinsleri=DailyProductionOutput.KAGIT_CINSLERI,
+                                kagit_renkleri=KAGIT_RENKLERI,
                                 monthly=monthly, ay=ay_str, prev_ay=prev_ay_str, next_ay=next_ay_str)
 
     @app.route('/gunluk-uretim/bos-form-pdf')

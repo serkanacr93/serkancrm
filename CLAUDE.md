@@ -28,6 +28,10 @@ Sayfaya özel `<script>` bloğu **content bloğuna değil**, `base.html`'deki bo
 
 Mevcut tablo, alan, hesaplama ve sayfalar DEĞİŞTİRİLMEZ/SİLİNMEZ. Yeni özellik mevcut yapının YANINA eklenir (yeni alan, buton, sayfa, JS dosyası). Eklenen şey kapatılsa/geri alınsa bile sistem eskisi gibi çalışmalı. Yapı değişikliği (mevcut bir alanı/route'u kaldırma, mevcut bir hesaplamayı yeniden tanımlama) gerekiyorsa YAPILMAZ - raporda önerilir, karar kullanıcıya bırakılır. Yeni bir alan eklemeden önce AYNI amaca hizmet eden mevcut bir alan olup olmadığı kontrol edilir (örn. Deal.pesinat_tarihi/bakiye_tarihi zaten vardı - B7 isteği buna rastladığında yeni kolon açmak yerine mevcut kolon kullanılıp fark raporlandı).
 
+## Görsel işler
+
+Serkan'ın onayladığı taslak (komutta HTML olarak verilir) birebir hedeftir. İş bitince masaüstü ve mobil ekran görüntüsü alınır, taslakla karşılaştırılır ve farklar raporda gerekçesiyle yazılır. Taslak verilmemiş bir görsel iş varsa, kendi tasarımını yapmadan önce rapor et.
+
 ## Kullanıcıyla netleşmemiş kararlar
 
 Kullanıcı net bir talimat vermediği bir tasarım/iş kuralı kararında (örn. "irsaliye otomatik mi oluşsun yoksa hiç mi oluşmasın") kendi takdirini sessizce uygulama - mümkünse önce sor (AskUserQuestion), mümkün değilse/otonom modda isen kararını ver ama **raporda açıkça "istenenden farklı yapıldı" ya da "şu karar netleştirildi: X soruldu, Y cevabı alındı" yaz**. Sessizce farklı bir şey yapıp "tamamlandı" demek, kullanıcının bir sonraki oturumda aynı işi düzeltmek için tekrar zaman harcamasına yol açar.
