@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter, csrf
@@ -3326,6 +3326,124 @@ def register_routes(app):
                      'gonderildi': 'Gönderildi', 'tumu': 'Tümü'}.get(tab, tab)
         pdf = generate_production_list_pdf(productions, tab_label)
         return send_file(pdf, as_attachment=True, download_name=f'uretim_listesi_{tab}_{datetime.now().strftime("%Y%m%d")}.pdf')
+
+    @app.route('/uretim-plani')
+    @login_required
+    def uretim_plani():
+        """B8: SADECE kullanicinin takip ekrani - makine/baski adimi takibi
+        YOK, Production.status'u HICBIR SEKILDE degistirmez. 'Uretimde'
+        durumundaki is emirlerini mevcut siraya (yoksa olusturma tarihine
+        gore) listeler, her is icin son 30 gunluk GENEL ortalama uretim
+        hizina (kg/gun) gore kumulatif (kuyruktaki onceki islerin de
+        kalan kg'si dahil) bir tahmini bitis tarihi hesaplar."""
+        productions = Production.query.filter_by(status='uretimde').options(
+            joinedload(Production.deal).joinedload(Deal.customer),
+            joinedload(Production.deal).joinedload(Deal.items),
+            joinedload(Production.plan_order),
+        ).all()
+
+        existing_orders = {p.id: p.plan_order.sira for p in productions if p.plan_order}
+        next_sira = (max(existing_orders.values()) + 1) if existing_orders else 1
+        for p in sorted(productions, key=lambda p: p.created_at):
+            if p.id not in existing_orders:
+                db.session.add(ProductionPlanOrder(production_id=p.id, sira=next_sira))
+                existing_orders[p.id] = next_sira
+                next_sira += 1
+        db.session.commit()
+
+        productions.sort(key=lambda p: existing_orders.get(p.id, 0))
+
+        thirty_days_ago = datetime.now().date() - timedelta(days=30)
+        total_kg_30 = db.session.query(db.func.sum(DailyProductionOutput.toplam_kg)).filter(
+            DailyProductionOutput.tarih >= thirty_days_ago
+        ).scalar() or 0
+        avg_daily_kg = total_kg_30 / 30
+
+        actual_kg_by_production = dict(db.session.query(
+            DailyProductionOutput.production_id, db.func.sum(DailyProductionOutput.toplam_kg)
+        ).filter(DailyProductionOutput.production_id.isnot(None)).group_by(DailyProductionOutput.production_id).all())
+
+        today = datetime.now().date()
+        rows = []
+        cumulative_remaining = 0.0
+        total_remaining_kg = 0.0
+        for p in productions:
+            planned_kg = sum(
+                item.quantity for item in p.deal.items if item.unit == 'kg' and item.urun_tipi == 'uretim'
+            ) if p.deal else 0
+            actual_kg = actual_kg_by_production.get(p.id, 0) or 0
+            remaining_kg = max(planned_kg - actual_kg, 0)
+            cumulative_remaining += remaining_kg
+            total_remaining_kg += remaining_kg
+
+            estimated_finish = None
+            if avg_daily_kg > 0.01:
+                estimated_finish = today + timedelta(days=round(cumulative_remaining / avg_daily_kg))
+
+            termin_override = p.plan_order.termin_override if p.plan_order else None
+            termin = termin_override or p.due_date or (p.deal.expected_close if p.deal else None)
+
+            if estimated_finish and termin:
+                if estimated_finish > termin:
+                    renk = 'danger'
+                elif (termin - estimated_finish).days <= 2:
+                    renk = 'warning'
+                else:
+                    renk = 'success'
+            else:
+                renk = 'secondary'
+
+            baski_etiketi = 'Baskısız'
+            if p.deal:
+                renkler = [item.renk for item in p.deal.items if item.renk]
+                if renkler:
+                    baski_etiketi = renkler[0]
+
+            rows.append({
+                'production': p,
+                'sira': existing_orders.get(p.id, 0),
+                'musteri': p.deal.customer.display_name if p.deal and p.deal.customer else '-',
+                'urun': p.deal.title if p.deal else '-',
+                'baski_etiketi': baski_etiketi,
+                'planned_kg': planned_kg,
+                'actual_kg': actual_kg,
+                'estimated_finish': estimated_finish,
+                'termin': termin,
+                'termin_override': termin_override,
+                'renk': renk,
+            })
+
+        estimated_total_days = round(total_remaining_kg / avg_daily_kg) if avg_daily_kg > 0.01 else None
+        return render_template('uretim_plani.html', rows=rows, avg_daily_kg=avg_daily_kg,
+                                total_remaining_kg=total_remaining_kg, job_count=len(rows),
+                                estimated_total_days=estimated_total_days, today=today)
+
+    @app.route('/uretim-plani/reorder', methods=['POST'])
+    @login_required
+    def uretim_plani_reorder():
+        """B8: surukle-birak sonrasi yeni sira - JSON {"production_ids": [id, id, ...]}
+        (yukaridan asagiya yeni sira). Production.status'a DOKUNMAZ."""
+        data = request.get_json(silent=True) or {}
+        ids = data.get('production_ids', [])
+        for index, pid in enumerate(ids):
+            po = ProductionPlanOrder.query.filter_by(production_id=pid).first()
+            if po:
+                po.sira = index + 1
+        db.session.commit()
+        return jsonify({'ok': True})
+
+    @app.route('/uretim-plani/<int:id>/termin', methods=['POST'])
+    @login_required
+    def uretim_plani_termin(id):
+        po = ProductionPlanOrder.query.filter_by(production_id=id).first()
+        if not po:
+            po = ProductionPlanOrder(production_id=id, sira=0)
+            db.session.add(po)
+        termin_raw = request.form.get('termin_override', '').strip()
+        po.termin_override = datetime.strptime(termin_raw, '%Y-%m-%d').date() if termin_raw else None
+        db.session.commit()
+        flash('Termin güncellendi.', 'success')
+        return redirect(url_for('uretim_plani'))
 
     def _planning_group_key(item):
         """Gramaj bazli gruplama - gramaj yoksa daha once elle girilmis

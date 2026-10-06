@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Üretim Planı - CRM Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-list-ol"></i> Üretim Planı</h2>
+</div>
+
+<div class="alert alert-info">
+    <strong>{{ job_count }} iş</strong> · <strong>{{ "%.0f"|format(total_remaining_kg) }} kg</strong> kalan ·
+    ort. <strong>{{ "%.0f"|format(avg_daily_kg) }} kg/gün</strong>
+    {% if estimated_total_days is not none %}
+    → yaklaşık <strong>{{ estimated_total_days }} gün</strong>
+    {% else %}
+    (son 30 günde hiç üretim kaydı yok, tahmin hesaplanamıyor)
+    {% endif %}
+</div>
+
+<p class="text-muted small"><i class="bi bi-info-circle"></i> Bu sayfa sadece bir takip ekranıdır - sırayı değiştirmek veya termin girmek üretimin gerçek durumunu etkilemez. Satırları sürükleyerek sıralayabilirsiniz.</p>
+
+{% if rows %}
+<div class="table-responsive">
+    <table class="table table-hover align-middle" id="plan-table">
+        <thead class="table-dark">
+            <tr>
+                <th style="width:30px;"></th>
+                <th>#</th>
+                <th>Müşteri / Ürün</th>
+                <th>Baskı</th>
+                <th>İlerleme</th>
+                <th>Tahmini Bitiş</th>
+                <th>Termin</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr draggable="true" class="plan-row {{ 'table-' + row.renk if row.renk != 'secondary' else '' }}" data-production-id="{{ row.production.id }}">
+                <td class="text-muted" style="cursor:grab;"><i class="bi bi-grip-vertical"></i></td>
+                <td class="plan-sira">{{ row.sira }}</td>
+                <td>
+                    <a href="{{ url_for('production_detail', id=row.production.id) }}">{{ row.musteri }}</a>
+                    <div class="small text-muted">{{ row.urun }}</div>
+                </td>
+                <td><span class="badge bg-secondary">{{ row.baski_etiketi }}</span></td>
+                <td>
+                    {% if row.planned_kg > 0 %}
+                    <div class="progress" style="height:16px; min-width:100px;">
+                        <div class="progress-bar bg-{{ row.renk }}" style="width: {{ (row.actual_kg / row.planned_kg * 100) if row.planned_kg else 0 }}%;"></div>
+                    </div>
+                    <small class="text-muted">{{ "%.0f"|format(row.actual_kg) }} / {{ "%.0f"|format(row.planned_kg) }} kg</small>
+                    {% else %}
+                    <span class="text-muted small">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if row.estimated_finish %}
+                    <span class="badge bg-{{ row.renk }}">{{ row.estimated_finish.strftime('%d.%m.%Y') }}</span>
+                    {% else %}
+                    <span class="text-muted small">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <form method="POST" action="{{ url_for('uretim_plani_termin', id=row.production.id) }}" class="d-flex gap-1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="date" name="termin_override" class="form-control form-control-sm" style="width:140px;" value="{{ row.termin_override.strftime('%Y-%m-%d') if row.termin_override else '' }}" placeholder="{{ row.termin.strftime('%d.%m.%Y') if row.termin else '-' }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-check"></i></button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-success"><i class="bi bi-check-circle"></i> "Üretimde" durumunda iş yok.</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var tbody = document.querySelector('#plan-table tbody');
+    if (!tbody) return;
+    var dragEl = null;
+
+    tbody.addEventListener('dragstart', function (e) {
+        var row = e.target.closest('.plan-row');
+        if (!row) return;
+        dragEl = row;
+        e.dataTransfer.effectAllowed = 'move';
+    });
+
+    tbody.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        var row = e.target.closest('.plan-row');
+        if (!row || row === dragEl) return;
+        var rect = row.getBoundingClientRect();
+        var before = (e.clientY - rect.top) < rect.height / 2;
+        tbody.insertBefore(dragEl, before ? row : row.nextSibling);
+    });
+
+    tbody.addEventListener('dragend', function () {
+        var rows = tbody.querySelectorAll('.plan-row');
+        rows.forEach(function (r, i) {
+            r.querySelector('.plan-sira').textContent = i + 1;
+        });
+        var ids = Array.prototype.map.call(rows, function (r) { return parseInt(r.dataset.productionId, 10); });
+        fetch('{{ url_for("uretim_plani_reorder") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
+            body: JSON.stringify({ production_ids: ids })
+        }).catch(function () {});
+        dragEl = null;
+    });
+})();
+</script>
+{% endblock %}

@@ -1188,3 +1188,15 @@ class BaskiFiyatKatalog(db.Model):
     fiyat = db.Column(db.Float, nullable=True)
 
     __table_args__ = (db.UniqueConstraint('yuz', 'renk_sayisi', name='uq_baski_fiyat_yuz_renk'),)
+
+class ProductionPlanOrder(db.Model):
+    """B8: 'Uretim Plani' - SADECE kullanicinin surukle-birak sira ve
+    (istege bagli) termin override'ini saklar. Production.status'u
+    HICBIR SEKILDE degistirmez/okumaz-yazmaz - uretim akisindan
+    tamamen bagimsiz, ayri bir goruntuleme/planlama katmani."""
+    id = db.Column(db.Integer, primary_key=True)
+    production_id = db.Column(db.Integer, db.ForeignKey('production.id'), nullable=False, unique=True)
+    sira = db.Column(db.Integer, nullable=False, default=0)
+    termin_override = db.Column(db.Date, nullable=True)
+
+    production = db.relationship('Production', backref=db.backref('plan_order', uselist=False))

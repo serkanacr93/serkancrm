@@ -133,6 +133,10 @@
                                 <i class="bi bi-diagram-3"></i>
                                 <div><strong>Üretim Planlama</strong><small>Gramaj/kalıp bazlı gruplama</small></div>
                             </a>
+                            <a class="crm-mega-box" href="{{ url_for('uretim_plani') }}">
+                                <i class="bi bi-list-ol"></i>
+                                <div><strong>Üretim Planı</strong><small>Sıralı takip, tahmini bitiş</small></div>
+                            </a>
                             <a class="crm-mega-box" href="{{ url_for('gunluk_uretim') }}">
                                 <i class="bi bi-journal-check"></i>
                                 <div><strong>Günlük Üretim</strong><small>Dün {{ "%.0f"|format(navbar_summary.yesterday_kg) }} kg</small></div>
