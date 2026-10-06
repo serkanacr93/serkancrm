@@ -32,6 +32,33 @@ def format_price_precise(value):
         dec_part = dec_part.ljust(2, '0')
     return f'{sign}{int(int_part):,}.{dec_part}'
 
+CURRENCY_SYMBOLS = {'TRY': '₺', 'EUR': '€', 'USD': '$', 'GBP': '£'}
+
+def format_price_tr(value, currency='TRY'):
+    """B6 (2026-10-06): sistem geneli (toplam/bakiye/odeme gibi - birim
+    fiyat icin format_price_precise KULLANILMAYA devam eder, bu AYRI bir
+    kural) para gosterimi - tam sayiysa ondalik GOSTERILMEZ (150.000₺),
+    degilse 2 ondalige YUVARLANIR (354,8781 -> 354,88₺). Turkce ayrac
+    (bin: nokta, ondalik: virgul), sembol sona BITISIK, para birimine
+    gore (₺/€/$/£). Hesaplama/kayitli degerler DEGISMEZ - sadece gorunum."""
+    if value is None:
+        return '-'
+    value = float(value)
+    symbol = CURRENCY_SYMBOLS.get(currency, '₺')
+    sign = '-' if value < 0 else ''
+    value = abs(value)
+    if value == int(value):
+        int_with_sep = f'{int(value):,}'.replace(',', '.')
+        return f'{sign}{int_with_sep}{symbol}'
+    rounded = round(value, 2)
+    int_part = int(rounded)
+    dec_part = round((rounded - int_part) * 100)
+    if dec_part == 100:
+        int_part += 1
+        dec_part = 0
+    int_with_sep = f'{int_part:,}'.replace(',', '.')
+    return f'{sign}{int_with_sep},{dec_part:02d}{symbol}'
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
@@ -295,7 +322,7 @@ class Deal(db.Model):
 
     @property
     def para_birimi_sembol(self):
-        return {'TRY': '₺', 'EUR': '€', 'USD': '$'}.get(self.para_birimi, self.para_birimi)
+        return CURRENCY_SYMBOLS.get(self.para_birimi, self.para_birimi)
 
     @property
     def tl_karsiligi(self):

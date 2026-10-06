@@ -92,6 +92,7 @@
                                 <option value="TRY" selected>₺ TRY</option>
                                 <option value="EUR">€ EUR</option>
                                 <option value="USD">$ USD</option>
+                                <option value="GBP">£ GBP</option>
                             </select>
                         </div>
                         <div class="col-md-5 mb-3" id="kullanilan_kur_box" style="display:none;">
@@ -387,7 +388,7 @@ function attachEvents() {
 }
 
 // Coklu Para Birimi - secilen para birimine gore sembol/kur alani
-var CURRENCY_SYMBOLS = { TRY: '₺', EUR: '€', USD: '$' };
+var CURRENCY_SYMBOLS = { TRY: '₺', EUR: '€', USD: '$', GBP: '£' };
 
 function currentCurrencySymbol() {
     var cur = document.getElementById('para_birimi').value;

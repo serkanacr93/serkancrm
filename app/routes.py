@@ -2479,7 +2479,7 @@ def register_routes(app):
                 return redirect(url_for('deal_detail', id=recent_duplicate.id))
 
             para_birimi = request.form.get('para_birimi', 'TRY').strip().upper()
-            if para_birimi not in ('TRY', 'EUR', 'USD'):
+            if para_birimi not in ('TRY', 'EUR', 'USD', 'GBP'):
                 para_birimi = 'TRY'
             kullanilan_kur_raw = request.form.get('kullanilan_kur', '').strip()
             kullanilan_kur = float(kullanilan_kur_raw) if kullanilan_kur_raw and para_birimi != 'TRY' else None
@@ -2619,7 +2619,7 @@ def register_routes(app):
                 deal.bakiye_tarihi = datetime.strptime(bakiye_tarihi_raw, '%Y-%m-%d').date()
 
             para_birimi = request.form.get('para_birimi', 'TRY').strip().upper()
-            if para_birimi not in ('TRY', 'EUR', 'USD'):
+            if para_birimi not in ('TRY', 'EUR', 'USD', 'GBP'):
                 para_birimi = 'TRY'
             kullanilan_kur_raw = request.form.get('kullanilan_kur', '').strip()
             deal.para_birimi = para_birimi
@@ -3080,7 +3080,7 @@ def register_routes(app):
         TCMB efektif satis kurunu doner. Kullanici bu degeri elle de
         degistirebilir - burasi sadece otomatik on-doldurma icindir."""
         currency = request.args.get('currency', 'EUR').upper()
-        if currency not in ('TRY', 'EUR', 'USD'):
+        if currency not in ('TRY', 'EUR', 'USD', 'GBP'):
             return jsonify({'error': 'Desteklenmeyen para birimi.'}), 400
         rate = fetch_tcmb_rate(currency)
         if rate is None:

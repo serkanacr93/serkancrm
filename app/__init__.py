@@ -80,6 +80,13 @@ def create_app():
         from app.models import format_price_precise
         return format_price_precise(value)
 
+    @app.template_filter('para_goster')
+    def para_goster_filter(value, currency='TRY'):
+        """B6: sistem geneli tutar gosterimi (Turkce ayrac, sembol
+        bitisik, tam sayiysa ondalik yok) - bkz. app.models.format_price_tr."""
+        from app.models import format_price_tr
+        return format_price_tr(value, currency)
+
     @app.template_global()
     def asset_url(filename):
         """static/ altindaki bir dosya icin, dosyanin degisiklik tarihini

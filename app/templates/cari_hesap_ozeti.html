@@ -100,12 +100,12 @@
                     <tr>
                         <td><a href="{{ url_for('customer_detail', id=r.customer.id) }}">{{ r.customer.display_name }}</a></td>
                         <td>{{ r.city or '-' }}</td>
-                        <td class="text-end">{{ "{:,.2f}".format(r.invoiced) }} ₺</td>
-                        <td class="text-end text-muted">{{ "{:,.2f}".format(r.uninvoiced_won) }} ₺</td>
-                        <td class="text-end text-success">{{ "{:,.2f}".format(r.collected) }} ₺</td>
+                        <td class="text-end">{{ r.invoiced|para_goster }}</td>
+                        <td class="text-end text-muted">{{ r.uninvoiced_won|para_goster }}</td>
+                        <td class="text-end text-success">{{ r.collected|para_goster }}</td>
                         <td class="text-end">
                             <strong class="{{ 'text-danger' if r.balance > 0.01 else 'text-success' }}">
-                                {{ "{:,.2f}".format(r.balance) }} ₺
+                                {{ r.balance|para_goster }}
                             </strong>
                             {% if r.balance > 0.01 %}
                             <span class="badge bg-danger">Alacaklıyız</span>

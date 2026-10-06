@@ -87,12 +87,12 @@
                         <div class="card bg-light">
                             <div class="card-body text-center">
                                 <h6 class="text-muted mb-1">Ara Toplam</h6>
-                                <h4 class="text-primary">{{ "{:,.2f}".format(deal.subtotal) }} {{ deal.para_birimi_sembol }}</h4>
+                                <h4 class="text-primary">{{ deal.subtotal|para_goster(deal.para_birimi) }}</h4>
                                 <h6 class="text-muted mb-1">KDV (%{{ deal.vat_rate }})</h6>
-                                <h5 class="text-warning">{{ "{:,.2f}".format(deal.vat_amount) }} {{ deal.para_birimi_sembol }}</h5>
+                                <h5 class="text-warning">{{ deal.vat_amount|para_goster(deal.para_birimi) }}</h5>
                                 <hr>
                                 <h6 class="text-muted mb-1">GENEL TOPLAM</h6>
-                                <h3 class="text-success">{{ "{:,.2f}".format(deal.value) }} {{ deal.para_birimi_sembol }}</h3>
+                                <h3 class="text-success">{{ deal.value|para_goster(deal.para_birimi) }}</h3>
                             </div>
                         </div>
                     </div>
@@ -132,9 +132,9 @@
                             {% endfor %}
                         </tbody>
                         <tfoot class="table-light">
-                            <tr><td colspan="5" class="text-end">Ara Toplam:</td><td><strong>{{ "{:,.2f}".format(deal.subtotal) }} {{ deal.para_birimi_sembol }}</strong></td></tr>
-                            <tr><td colspan="5" class="text-end">KDV (%{{ deal.vat_rate }}):</td><td><strong>{{ "{:,.2f}".format(deal.vat_amount) }} {{ deal.para_birimi_sembol }}</strong></td></tr>
-                            <tr class="table-success"><td colspan="5" class="text-end"><strong>TOPLAM:</strong></td><td><strong>{{ "{:,.2f}".format(deal.value) }} {{ deal.para_birimi_sembol }}</strong></td></tr>
+                            <tr><td colspan="5" class="text-end">Ara Toplam:</td><td><strong>{{ deal.subtotal|para_goster(deal.para_birimi) }}</strong></td></tr>
+                            <tr><td colspan="5" class="text-end">KDV (%{{ deal.vat_rate }}):</td><td><strong>{{ deal.vat_amount|para_goster(deal.para_birimi) }}</strong></td></tr>
+                            <tr class="table-success"><td colspan="5" class="text-end"><strong>TOPLAM:</strong></td><td><strong>{{ deal.value|para_goster(deal.para_birimi) }}</strong></td></tr>
                         </tfoot>
                     </table>
                 </div>
