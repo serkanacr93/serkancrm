@@ -52,11 +52,105 @@
                     <i class="bi bi-plus-lg"></i> Ekle
                 </button>
             </div>
-            <div class="col-md-8">
+            <div class="col-md-3">
+                <label class="form-label">Kağıt Cinsi</label>
+                <select class="form-select" id="entry_kagit_cinsi">
+                    <option value="">Belirtilmemiş</option>
+                    {% for k in kagit_cinsleri %}
+                    <option value="{{ k }}">{{ k }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-9">
                 <label class="form-label">Açıklama</label>
                 <input type="text" class="form-control" id="entry_aciklama" placeholder="Opsiyonel">
             </div>
         </form>
+    </div>
+</div>
+
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-bar-chart-line"></i> Aylık Özet - {{ monthly.ay_baslik }}</span>
+        <div class="btn-group">
+            <a href="{{ url_for('gunluk_uretim', ay=prev_ay) }}" class="btn btn-sm btn-outline-light"><i class="bi bi-chevron-left"></i></a>
+            <a href="{{ url_for('gunluk_uretim', ay=next_ay) }}" class="btn btn-sm btn-outline-light"><i class="bi bi-chevron-right"></i></a>
+        </div>
+    </div>
+    <div class="card-body">
+        {% if monthly.kayit_sayisi == 0 %}
+        <p class="text-muted mb-0"><i class="bi bi-info-circle"></i> Bu ay için kayıt bulunmuyor.</p>
+        {% else %}
+        <div class="row text-center mb-3">
+            <div class="col-md-3">
+                <div class="small text-muted">Ay Toplamı</div>
+                <div class="fw-bold fs-5">{{ "%.2f"|format(monthly.ay_toplam) }} kg</div>
+            </div>
+            <div class="col-md-3">
+                <div class="small text-muted">Çalışılan Gün</div>
+                <div class="fw-bold fs-5">{{ monthly.calisilan_gun_sayisi }}</div>
+            </div>
+            <div class="col-md-3">
+                <div class="small text-muted">Günlük Ortalama</div>
+                <div class="fw-bold fs-5">{{ "%.2f"|format(monthly.gunluk_ortalama) }} kg</div>
+            </div>
+            <div class="col-md-3">
+                <div class="small text-muted">Önceki Aya Göre</div>
+                <div class="fw-bold fs-5 {{ 'text-success' if monthly.fark_kg >= 0 else 'text-danger' }}">
+                    {{ '+' if monthly.fark_kg >= 0 else '' }}{{ "%.2f"|format(monthly.fark_kg) }} kg
+                    {% if monthly.fark_pct is not none %}({{ '+' if monthly.fark_pct >= 0 else '' }}{{ "%.1f"|format(monthly.fark_pct) }}%){% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <div class="small text-muted mb-1">Kağıt Cinsine Göre Üretim (kg)</div>
+            {% for k in monthly.kagit_dokum %}
+            <div class="d-flex align-items-center mb-1">
+                <div style="width:160px;" class="small">{{ k.cins }}</div>
+                <div class="flex-grow-1 bg-light rounded" style="height:18px;">
+                    <div class="bg-info rounded" style="height:18px;width:{{ k.pct }}%;"></div>
+                </div>
+                <div style="width:130px;" class="small text-end">{{ "%.2f"|format(k.kg) }} kg ({{ "%.1f"|format(k.pct) }}%)</div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="small text-muted mb-1">En Çok Üretilen Müşteriler</div>
+                {% for m in monthly.top_musteriler %}
+                <div class="d-flex justify-content-between small border-bottom py-1">
+                    <span>{{ m.ad }}</span>
+                    <span>{{ "%.2f"|format(m.kg) }} kg ({{ "%.1f"|format(m.pct) }}%)</span>
+                </div>
+                {% endfor %}
+                {% if monthly.diger_musteri_sayisi > 0 %}
+                <div class="d-flex justify-content-between small text-muted py-1">
+                    <span>Diğer ({{ monthly.diger_musteri_sayisi }} müşteri)</span>
+                    <span>{{ "%.2f"|format(monthly.diger_musteri_kg) }} kg</span>
+                </div>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                <div class="small text-muted mb-1">Günlük Üretim (kg)</div>
+                <div class="d-flex align-items-end gap-1" style="height:90px;">
+                    {% set max_gun_kg = monthly.gunluk_bar|map(attribute='kg')|max if monthly.gunluk_bar else 1 %}
+                    {% for g in monthly.gunluk_bar %}
+                    <div class="bg-primary" style="width:8px;height:{{ (g.kg / max_gun_kg * 85) if max_gun_kg else 0 }}px;" title="{{ g.tarih.strftime('%d.%m') }}: {{ '%.2f'|format(g.kg) }} kg"></div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <ul class="small text-muted mt-3 mb-0">
+            {% if monthly.en_yogun %}<li>En yoğun gün: {{ monthly.en_yogun.tarih.strftime('%d.%m.%Y') }} ({{ "%.2f"|format(monthly.en_yogun.kg) }} kg)</li>{% endif %}
+            {% if monthly.en_dusuk %}<li>En düşük gün: {{ monthly.en_dusuk.tarih.strftime('%d.%m.%Y') }} ({{ "%.2f"|format(monthly.en_dusuk.kg) }} kg)</li>{% endif %}
+            <li>Esmer kağıtların (Recycle+Virjin) payı: %{{ "%.1f"|format(monthly.esmer_pct) }}</li>
+            <li>İlk 3 müşterinin payı: %{{ "%.1f"|format(monthly.top3_pct) }}</li>
+            <li>Kağıt cinsi girilmemiş kayıt: %{{ "%.1f"|format(monthly.kagitsiz_pct) }}</li>
+        </ul>
+        {% endif %}
     </div>
 </div>
 
@@ -85,6 +179,7 @@
                             <th>Koli Başı Kg</th>
                             <th>Koli Adedi</th>
                             <th>Toplam Kg</th>
+                            <th>Kağıt</th>
                             <th>Açıklama</th>
                             <th class="no-print">İşlem</th>
                         </tr>
@@ -96,6 +191,15 @@
                             <td>{{ "%.2f"|format(r.koli_basi_kg) }}</td>
                             <td>{{ "%.2f"|format(r.koli_adedi) }}</td>
                             <td>{{ "%.2f"|format(r.toplam_kg) }}</td>
+                            <td>
+                                <select class="form-select form-select-sm kagit-select no-print" data-id="{{ r.id }}">
+                                    <option value="" {{ 'selected' if not r.kagit_cinsi }}>—</option>
+                                    {% for k in kagit_cinsleri %}
+                                    <option value="{{ k }}" {{ 'selected' if r.kagit_cinsi == k }}>{{ k }}</option>
+                                    {% endfor %}
+                                </select>
+                                <span class="d-print-inline d-none">{{ r.kagit_cinsi or '—' }}</span>
+                            </td>
                             <td>{{ r.aciklama or '-' }}</td>
                             <td class="no-print">
                                 <form method="POST" action="{{ url_for('delete_daily_production_output', id=r.id) }}" onsubmit="return confirm('Bu kaydı silmek istediğinize emin misiniz?')">
@@ -109,7 +213,7 @@
                     <tfoot>
                         <tr class="table-warning">
                             <td colspan="3" class="text-end"><strong>GÜNÜN TOPLAM KİLOSU:</strong></td>
-                            <td colspan="3"><strong class="day-total">{{ "%.2f"|format(g.total_kg) }}</strong> kg</td>
+                            <td colspan="4"><strong class="day-total" data-kg="{{ g.total_kg }}">{{ "%.2f"|format(g.total_kg) }}</strong> kg</td>
                         </tr>
                     </tfoot>
                 </table>
@@ -159,6 +263,8 @@
 
 {% block scripts %}
 <script>
+var KAGIT_CINSLERI = {{ kagit_cinsleri|tojson }};
+
 // Musteri secilince (ya da serbest metin degisince) o musterinin aktif
 // (teslim edilmemis) uretimlerini kontrol eder - 0 ise is emri secici
 // gizli kalir (kayit production_id'siz eklenir), 1 ise otomatik secilir,
@@ -201,7 +307,7 @@ productionPickerSelect.addEventListener('change', function () {
 
 initCustomerSearch({
     inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results',
-    allowQuickAdd: true,
+    allowQuickAdd: true, quickAddSource: 'gunluk_uretim',
     onSelect: function (c) { loadActiveProductionsForCustomer(c.id); },
     onClear: function () { resetProductionPicker(); },
     onQuickAdd: function (c) { loadActiveProductionsForCustomer(c.id); }
@@ -228,12 +334,23 @@ function fmt2(n) {
     return Number(n).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function kagitSelectHtml(entryId, selectedKagit) {
+    var html = '<select class="form-select form-select-sm kagit-select no-print" data-id="' + entryId + '">';
+    html += '<option value=""' + (!selectedKagit ? ' selected' : '') + '>—</option>';
+    KAGIT_CINSLERI.forEach(function (k) {
+        html += '<option value="' + k + '"' + (selectedKagit === k ? ' selected' : '') + '>' + k + '</option>';
+    });
+    html += '</select><span class="d-print-inline d-none">' + (selectedKagit || '—') + '</span>';
+    return html;
+}
+
 function buildRowHtml(entry) {
     return '<tr>' +
         '<td>' + entry.musteri_adi + '</td>' +
         '<td>' + fmt2(entry.koli_basi_kg) + '</td>' +
         '<td>' + fmt2(entry.koli_adedi) + '</td>' +
         '<td>' + fmt2(entry.toplam_kg) + '</td>' +
+        '<td>' + kagitSelectHtml(entry.id, entry.kagit_cinsi) + '</td>' +
         '<td>' + (entry.aciklama || '-') + '</td>' +
         '<td class="no-print">' +
         '<form method="POST" action="/gunluk-uretim/' + entry.id + '/sil" onsubmit="return confirm(\'Bu kaydı silmek istediğinize emin misiniz?\')">' +
@@ -250,12 +367,35 @@ function buildGroupHtml(entry) {
         '<button type="button" class="btn btn-sm btn-outline-light" data-bs-toggle="modal" data-bs-target="#photoModal" data-tarih="' + entry.tarih + '">' +
         '<i class="bi bi-camera"></i> Fotoğraf Ekle</button></div></div>' +
         '<div class="card-body p-0"><div class="table-responsive"><table class="table table-bordered mb-0">' +
-        '<thead class="table-light"><tr><th>Müşteri / Firma</th><th>Koli Başı Kg</th><th>Koli Adedi</th><th>Toplam Kg</th><th>Açıklama</th><th class="no-print">İşlem</th></tr></thead>' +
+        '<thead class="table-light"><tr><th>Müşteri / Firma</th><th>Koli Başı Kg</th><th>Koli Adedi</th><th>Toplam Kg</th><th>Kağıt</th><th>Açıklama</th><th class="no-print">İşlem</th></tr></thead>' +
         '<tbody class="day-rows">' + buildRowHtml(entry) + '</tbody>' +
         '<tfoot><tr class="table-warning"><td colspan="3" class="text-end"><strong>GÜNÜN TOPLAM KİLOSU:</strong></td>' +
-        '<td colspan="3"><strong class="day-total">' + fmt2(entry.toplam_kg) + '</strong> kg</td></tr></tfoot>' +
+        '<td colspan="4"><strong class="day-total" data-kg="' + entry.toplam_kg + '">' + fmt2(entry.toplam_kg) + '</strong> kg</td></tr></tfoot>' +
         '</table></div></div></div>';
 }
+
+document.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('kagit-select')) return;
+    var select = e.target;
+    var id = select.dataset.id;
+    var kagit_cinsi = select.value;
+    _freshCsrfToken(document.getElementById('csrf_token_value')).then(function (token) {
+        return fetch('/gunluk-uretim/' + id + '/kagit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+            body: JSON.stringify({ kagit_cinsi: kagit_cinsi })
+        });
+    }).then(function (resp) {
+        if (!resp.ok) { select.value = select.dataset.prevValue || ''; alert('Kağıt cinsi güncellenemedi.'); }
+    }).catch(function () {
+        alert('Bağlantı hatası, tekrar deneyin.');
+    });
+});
+document.addEventListener('focusin', function (e) {
+    if (e.target.classList && e.target.classList.contains('kagit-select')) {
+        e.target.dataset.prevValue = e.target.value;
+    }
+});
 
 document.getElementById('entryForm').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -271,6 +411,7 @@ document.getElementById('entryForm').addEventListener('submit', function (e) {
     formData.append('koli_basi_kg', document.getElementById('entry_koli_basi_kg').value);
     formData.append('koli_adedi', document.getElementById('entry_koli_adedi').value);
     formData.append('toplam_kg', document.getElementById('entry_toplam_kg').value);
+    formData.append('kagit_cinsi', document.getElementById('entry_kagit_cinsi').value);
     formData.append('aciklama', document.getElementById('entry_aciklama').value);
 
     var submitBtn = document.getElementById('entrySubmitBtn');
@@ -295,7 +436,14 @@ document.getElementById('entryForm').addEventListener('submit', function (e) {
             if (existingGroup) {
                 existingGroup.querySelector('.day-rows').insertAdjacentHTML('beforeend', buildRowHtml(entry));
                 var totalEl = existingGroup.querySelector('.day-total');
-                var yeniToplam = parseFloat(totalEl.textContent.replace(/\./g, '').replace(',', '.')) + entry.toplam_kg;
+                // 2026-10-07 duzeltmesi: eskiden ekrandaki METINDEN
+                // (Turkce format varsayarak) geri okunuyordu - sunucunun ilk
+                // render'i ("%.2f", NOKTALI/Ingilizce) ile UYUMSUZDU, "565.00"
+                // -> 56500 gibi yanlis buyutmelere yol aciyordu (02.10.2026'da
+                // 715 yerine 56.650,00 gorunmesi). Artik HAM sayi data-kg'den
+                // okunur/yazilir, ekran metni sadece GORUNUM icin fmt2 ile uretilir.
+                var yeniToplam = parseFloat(totalEl.dataset.kg) + entry.toplam_kg;
+                totalEl.dataset.kg = yeniToplam;
                 totalEl.textContent = fmt2(yeniToplam);
             } else {
                 var container = document.getElementById('dayGroupsContainer');
@@ -311,6 +459,7 @@ document.getElementById('entryForm').addEventListener('submit', function (e) {
             document.getElementById('entry_koli_basi_kg').value = '';
             document.getElementById('entry_koli_adedi').value = '';
             document.getElementById('entry_toplam_kg').value = '';
+            document.getElementById('entry_kagit_cinsi').value = '';
             document.getElementById('entry_aciklama').value = '';
             toplamManuelDegistirildi = false;
             document.getElementById('customer_search').focus();

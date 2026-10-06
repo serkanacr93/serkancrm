@@ -1304,15 +1304,18 @@ def generate_gunluk_uretim_form_pdf():
     elements.append(Paragraph("GÜNLÜK ÜRETİM TAKİP FORMU", form_title_style))
     elements.append(Spacer(1, 8*mm))
 
-    headers = ['#', 'Müşteri / Firma', '1 Koli\nKaç Kg', 'Kaç\nKoli', 'Toplam\nKg']
+    # 2026-10-07 (Is 3): 'Kagit Cinsi' sutunu Musteri/Firma'dan sonra
+    # eklendi - Musteri/Firma genisligi (7.3->5.3cm) kucultulerek toplam
+    # genislik (17.0cm) AYNEN korundu.
+    headers = ['#', 'Müşteri / Firma', 'Kağıt\nCinsi', '1 Koli\nKaç Kg', 'Kaç\nKoli', 'Toplam\nKg']
     data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style) for h in headers]]
     for i in range(1, 9):
-        data.append([str(i), '', '', '', ''])
+        data.append([str(i), '', '', '', '', ''])
     toplam_label = Paragraph('GÜNÜN TOPLAM KİLOSU:', ParagraphStyle(
         'ToplamLabel', parent=styles['Normal'], fontName='Vera-Bold', fontSize=11, leading=13, alignment=2))
-    data.append([toplam_label, '', '', '', ''])
+    data.append([toplam_label, '', '', '', '', ''])
 
-    col_widths = [1.2*cm, 7.3*cm, 3*cm, 2.5*cm, 3*cm]
+    col_widths = [1.2*cm, 5.3*cm, 2.5*cm, 2.7*cm, 2.3*cm, 3*cm]
     table = Table(data, colWidths=col_widths, rowHeights=[1.1*cm] + [1.1*cm]*8 + [1.3*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
@@ -1322,14 +1325,14 @@ def generate_gunluk_uretim_form_pdf():
         ('FONTNAME', (0, 1), (-1, -2), 'Vera'),
         ('FONTSIZE', (0, 1), (-1, -2), 10),
         ('GRID', (0, 0), (-1, -2), 0.75, colors.black),
-        ('SPAN', (0, -1), (3, -1)),
-        ('ALIGN', (0, -1), (3, -1), 'RIGHT'),
-        ('RIGHTPADDING', (3, -1), (3, -1), 8),
+        ('SPAN', (0, -1), (4, -1)),
+        ('ALIGN', (0, -1), (4, -1), 'RIGHT'),
+        ('RIGHTPADDING', (4, -1), (4, -1), 8),
         ('LINEABOVE', (0, -1), (-1, -1), 1.25, colors.black),
         ('LINEBELOW', (0, -1), (-1, -1), 1.25, colors.black),
         ('LINEBEFORE', (0, 0), (0, -1), 0.75, colors.black),
         ('LINEAFTER', (-1, 0), (-1, -1), 0.75, colors.black),
-        ('LINEAFTER', (3, -1), (3, -1), 0.75, colors.black),
+        ('LINEAFTER', (4, -1), (4, -1), 0.75, colors.black),
     ]))
     elements.append(table)
     elements.append(Spacer(1, 20*mm))

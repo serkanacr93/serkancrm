@@ -120,7 +120,11 @@ def _takip_gerekiyor_query():
         db.or_(
             last_contact.c.last_contact.is_(None),
             last_contact.c.last_contact < cutoff
-        )
+        ),
+        # 2026-10-07 (Is 2): bilgi_eksik=True VE telefonu bos olan musteri
+        # (Gunluk Uretim'de sadece adla acilmis) aranamayacagi icin takip
+        # listesini kirletmesin - telefon girilince kendiliginden gorunur olur.
+        db.not_(db.and_(Customer.bilgi_eksik.is_(True), db.or_(Customer.phone.is_(None), Customer.phone == '')))
     )
     if not current_user.is_admin:
         query = query.filter(Customer.owner_user_id == current_user.id)
@@ -345,6 +349,20 @@ def _duplicate_phone_groups():
 # InvoiceItem dogrudan customer_id TUTMAZ (Deal/Production/Invoice
 # uzerinden dolayli baglanir) - Deal.customer_id tasinca onlar otomatik
 # "takip eder", ayrica islem gerekmez.
+#
+# 2026-10-07 (durum raporu madde g duzeltmesi): PaymentReminder ve
+# CustomerOldName EKLENDI - eskiden listede yoktu, birlestirmede kopya
+# musterinin acik odeme hatirlatmalari VE (varsa) onceki birlestirmelerden
+# gelen eski-ad kayitlari tasinmadan kopyayla birlikte SILINIYORDU.
+# CustomerOldName ozellikle onemli: eger "dup" musteri daha once BASKA bir
+# musteriyi kendi uzerinde birlestirmisse (yani kendi customer_id'sine
+# bagli CustomerOldName satirlari varsa), bu satirlar listede OLMADAN
+# db.session.delete(dup) calisinca ForeignKeyViolation ile COKERDI (ayni
+# sinif hata - bkz. Payment/CustomerStatement, bu oturumda daha once
+# test sirasinda karsilasilan). TakipModuAtla ozellikle LISTEDE DEGIL -
+# (user_id, customer_id, skip_date) benzersiz kisiti nedeniyle generic
+# bulk UPDATE cakisma hatasi verebilir, asagida _merge_customers() icinde
+# AYRI (cakisma varsa dup'unkini silen) mantikla tasiniyor.
 _CUSTOMER_FK_TABLES = [
     (Deal, 'customer_id'),
     (ManualPlanningEntry, 'customer_id'),
@@ -359,6 +377,8 @@ _CUSTOMER_FK_TABLES = [
     (Payment, 'customer_id'),
     (PotentialCustomer, 'converted_customer_id'),
     (DailyProductionOutput, 'customer_id'),
+    (PaymentReminder, 'customer_id'),
+    (CustomerOldName, 'customer_id'),
 ]
 
 def _merge_customers(main_id, duplicate_ids, user):
@@ -384,6 +404,20 @@ def _merge_customers(main_id, duplicate_ids, user):
             model.query.filter(getattr(model, fk_field) == dup_id).update(
                 {fk_field: main_id}, synchronize_session=False
             )
+
+        # TakipModuAtla: (user_id, customer_id, skip_date) benzersiz -
+        # generic bulk UPDATE'e DAHIL EDILMEDI (cakisma hatasi verebilir).
+        # Ana musteride AYNI kullanici+gun icin zaten bir "atla" kaydi
+        # varsa dup'unkini TASIMADAN sil (cakisma yok); yoksa tasi.
+        for skip in TakipModuAtla.query.filter_by(customer_id=dup_id).all():
+            exists_for_main = TakipModuAtla.query.filter_by(
+                user_id=skip.user_id, customer_id=main_id, skip_date=skip.skip_date
+            ).first()
+            if exists_for_main:
+                db.session.delete(skip)
+            else:
+                skip.customer_id = main_id
+
         db.session.add(CustomerOldName(
             customer_id=main_id,
             eski_ad=dup.display_name,
@@ -888,9 +922,12 @@ def register_routes(app):
         search = request.args.get('search', '')
         page = request.args.get('page', 1, type=int)
         created_this_week_filter = request.args.get('created_this_week') == '1'
+        bilgi_eksik_filter = request.args.get('bilgi_eksik') == '1'
         query = _apply_customers_search_filter(
             Customer.query.filter(Customer.status != 'musteri_degil'), search
         )
+        if bilgi_eksik_filter:
+            query = query.filter(Customer.bilgi_eksik.is_(True))
         if created_this_week_filter:
             # Is B (sag panel linki): "Bu Hafta Eklenen" sayisiyla AYNI
             # pencere (bkz. asagidaki this_week_count hesaplamasi).
@@ -928,6 +965,7 @@ def register_routes(app):
         dormant_count = list_stats.dormant_count
 
         takip_gerekiyor_count = _takip_gerekiyor_query().count()
+        bilgi_eksik_count = Customer.query.filter(Customer.status != 'musteri_degil', Customer.bilgi_eksik.is_(True)).count()
 
         # Is 2 (sag panel): bu hafta eklenen + mukerrer kayit sayisi
         # (/customers/mukerrer ile AYNI _duplicate_phone_groups() - tek kaynak).
@@ -952,6 +990,7 @@ def register_routes(app):
                                 not_customer_count=not_customer_count, never_transacted_count=never_transacted_count,
                                 dormant_count=dormant_count, takip_gerekiyor_count=takip_gerekiyor_count,
                                 this_week_count=this_week_count, duplicate_group_count=duplicate_group_count,
+                                bilgi_eksik_count=bilgi_eksik_count, bilgi_eksik_filter=bilgi_eksik_filter,
                                 all_users=all_users)
 
     def _customers_return_url():
@@ -1370,7 +1409,12 @@ def register_routes(app):
         today = date.today()
         show_all = current_user.is_admin and request.args.get('tumu') == '1'
 
-        base_q = Customer.query.filter(Customer.status != 'musteri_degil')
+        base_q = Customer.query.filter(
+            Customer.status != 'musteri_degil',
+            # 2026-10-07 (Is 2): bilgi_eksik=True + telefonsuz musteri
+            # aranamaz, kart listesinde gorunmez (telefon girilince gorunur).
+            db.not_(db.and_(Customer.bilgi_eksik.is_(True), db.or_(Customer.phone.is_(None), Customer.phone == '')))
+        )
         if not show_all:
             base_q = base_q.filter(Customer.owner_user_id == current_user.id)
         customers = base_q.all()
@@ -3209,10 +3253,17 @@ def register_routes(app):
         alanlar bos birakilir, sonra edit_customer'dan tamamlanabilir.
         Ayni telefona ya da ayni ad-soyad'a (unique_customer_name kisiti)
         sahip bir musteri zaten varsa, yeni kayit acmak yerine mevcut
-        musteriyi dondurur - boylece kaza ile duplikasyon olusmaz."""
+        musteriyi dondurur - boylece kaza ile duplikasyon olusmaz.
+
+        2026-10-07 (Gunluk Uretim Isi 2): opsiyonel 'source' parametresi -
+        gelmezse davranis AYNEN oncekiyle BIREBIR aynidir. source=
+        'gunluk_uretim' ile cagrilirsa (SADECE Gunluk Uretim formundan),
+        YENI olusturulan musteri bilgi_eksik=True isaretlenir (mevcut/
+        reuse edilen musterilere DOKUNULMAZ)."""
         data = request.get_json(silent=True) or request.form
         name = (data.get('name') or '').strip()
         phone = (data.get('phone') or '').strip()
+        source = (data.get('source') or '').strip()
 
         if not name and not phone:
             return jsonify({'error': 'İsim veya telefon numarasından en az biri gerekli.'}), 400
@@ -3233,7 +3284,8 @@ def register_routes(app):
             first_name = parts[0]
             last_name = parts[1] if len(parts) > 1 else None
 
-        customer = Customer(musteri_no=_next_musteri_no(), first_name=first_name, last_name=last_name, phone=phone or None, status='aktif', owner_user_id=current_user.id)
+        customer = Customer(musteri_no=_next_musteri_no(), first_name=first_name, last_name=last_name, phone=phone or None, status='aktif', owner_user_id=current_user.id,
+                             bilgi_eksik=True if source == 'gunluk_uretim' else None)
         db.session.add(customer)
         try:
             db.session.commit()
@@ -3909,6 +3961,83 @@ def register_routes(app):
         flash('Manuel kayıt silindi!', 'success')
         return redirect(url_for('tedarik_takip'))
 
+    def _gunluk_uretim_aylik_ozet(ay_param):
+        """Is 4 (2026-10-07): Aylik Ozet + kagit dokumu + mini analiz.
+        TEK sorguyla (join YOK, N+1 YOK) o ayin satirlarini (tarih,
+        kagit_cinsi, musteri_adi, toplam_kg) ceker, TUM gruplamalar
+        (gunluk toplam, kagit dokumu, en cok uretilen musteriler) Python
+        tarafinda bu kucuk liste uzerinde yapilir; onceki ay icin ayrica
+        TEK bir SUM sorgusu (sadece 1 sayi) atilir."""
+        today_d = datetime.now().date()
+        try:
+            ay_year, ay_month = map(int, ay_param.split('-'))
+            ay_start = date(ay_year, ay_month, 1)
+        except (ValueError, TypeError, AttributeError):
+            ay_start = date(today_d.year, today_d.month, 1)
+        ay_str = ay_start.strftime('%Y-%m')
+        ay_end = date(ay_start.year + 1, 1, 1) if ay_start.month == 12 else date(ay_start.year, ay_start.month + 1, 1)
+        prev_ay_start = date(ay_start.year - 1, 12, 1) if ay_start.month == 1 else date(ay_start.year, ay_start.month - 1, 1)
+        next_ay_start = ay_end
+
+        rows = db.session.query(
+            DailyProductionOutput.tarih, DailyProductionOutput.kagit_cinsi,
+            DailyProductionOutput.musteri_adi, DailyProductionOutput.toplam_kg
+        ).filter(DailyProductionOutput.tarih >= ay_start, DailyProductionOutput.tarih < ay_end).all()
+
+        ay_toplam = sum(r.toplam_kg for r in rows)
+        gun_toplamlari = {}
+        kagit_toplamlari = {}
+        musteri_toplamlari = {}
+        kagitsiz_satir = 0
+        for r in rows:
+            gun_toplamlari[r.tarih] = gun_toplamlari.get(r.tarih, 0) + r.toplam_kg
+            kagit_key = r.kagit_cinsi or 'Belirtilmemiş'
+            kagit_toplamlari[kagit_key] = kagit_toplamlari.get(kagit_key, 0) + r.toplam_kg
+            musteri_toplamlari[r.musteri_adi] = musteri_toplamlari.get(r.musteri_adi, 0) + r.toplam_kg
+            if not r.kagit_cinsi:
+                kagitsiz_satir += 1
+
+        calisilan_gun_sayisi = len(gun_toplamlari)
+        gunluk_ortalama = (ay_toplam / calisilan_gun_sayisi) if calisilan_gun_sayisi else 0
+
+        prev_toplam = db.session.query(db.func.sum(DailyProductionOutput.toplam_kg)).filter(
+            DailyProductionOutput.tarih >= prev_ay_start, DailyProductionOutput.tarih < ay_start
+        ).scalar() or 0
+        fark_kg = ay_toplam - prev_toplam
+        fark_pct = (fark_kg / prev_toplam * 100) if prev_toplam > 0 else None
+
+        kagit_dokum = []
+        for cins in DailyProductionOutput.KAGIT_CINSLERI + ['Belirtilmemiş']:
+            kg = kagit_toplamlari.get(cins, 0)
+            kagit_dokum.append({'cins': cins, 'kg': kg, 'pct': (kg / ay_toplam * 100) if ay_toplam > 0 else 0})
+
+        musteri_siralı = sorted(musteri_toplamlari.items(), key=lambda x: -x[1])
+        top_musteriler = [{'ad': ad, 'kg': kg, 'pct': (kg / ay_toplam * 100) if ay_toplam > 0 else 0}
+                           for ad, kg in musteri_siralı[:5]]
+        diger_musteri_sayisi = max(0, len(musteri_siralı) - 5)
+        diger_musteri_kg = sum(kg for _, kg in musteri_siralı[5:])
+
+        gunluk_bar = [{'tarih': d, 'kg': kg} for d, kg in sorted(gun_toplamlari.items())]
+
+        en_yogun = max(gunluk_bar, key=lambda x: x['kg']) if gunluk_bar else None
+        en_dusuk = min(gunluk_bar, key=lambda x: x['kg']) if gunluk_bar else None
+        esmer_kg = kagit_toplamlari.get('Esmer Recycle', 0) + kagit_toplamlari.get('Esmer Virjin', 0)
+        esmer_pct = (esmer_kg / ay_toplam * 100) if ay_toplam > 0 else 0
+        top3_kg = sum(kg for _, kg in musteri_siralı[:3])
+        top3_pct = (top3_kg / ay_toplam * 100) if ay_toplam > 0 else 0
+        kagitsiz_pct = (kagitsiz_satir / len(rows) * 100) if rows else 0
+
+        monthly = {
+            'ay_toplam': ay_toplam, 'calisilan_gun_sayisi': calisilan_gun_sayisi,
+            'gunluk_ortalama': gunluk_ortalama, 'fark_kg': fark_kg, 'fark_pct': fark_pct,
+            'prev_toplam': prev_toplam, 'kagit_dokum': kagit_dokum, 'top_musteriler': top_musteriler,
+            'diger_musteri_sayisi': diger_musteri_sayisi, 'diger_musteri_kg': diger_musteri_kg,
+            'gunluk_bar': gunluk_bar, 'en_yogun': en_yogun, 'en_dusuk': en_dusuk,
+            'esmer_pct': esmer_pct, 'top3_pct': top3_pct, 'kagitsiz_pct': kagitsiz_pct,
+            'kayit_sayisi': len(rows), 'ay_baslik': ay_start.strftime('%B %Y'),
+        }
+        return monthly, ay_str, prev_ay_start.strftime('%Y-%m'), next_ay_start.strftime('%Y-%m')
+
     @app.route('/gunluk-uretim')
     @login_required
     def gunluk_uretim():
@@ -3945,7 +4074,11 @@ def register_routes(app):
                 'photos': photos_by_date.get(d, []),
             })
 
-        return render_template('gunluk_uretim.html', day_groups=day_groups, today=datetime.now().date())
+        monthly, ay_str, prev_ay_str, next_ay_str = _gunluk_uretim_aylik_ozet(request.args.get('ay', ''))
+
+        return render_template('gunluk_uretim.html', day_groups=day_groups, today=datetime.now().date(),
+                                kagit_cinsleri=DailyProductionOutput.KAGIT_CINSLERI,
+                                monthly=monthly, ay=ay_str, prev_ay=prev_ay_str, next_ay=next_ay_str)
 
     @app.route('/gunluk-uretim/bos-form-pdf')
     @login_required
@@ -3997,9 +4130,12 @@ def register_routes(app):
         koli_adedi_raw = request.form.get('koli_adedi', '').strip()
         toplam_kg_raw = request.form.get('toplam_kg', '').strip()
         aciklama = request.form.get('aciklama', '').strip() or None
+        kagit_cinsi = request.form.get('kagit_cinsi', '').strip() or None
 
         if not tarih_raw:
             return jsonify({'error': 'Tarih girilmelidir.'}), 400
+        if kagit_cinsi and kagit_cinsi not in DailyProductionOutput.KAGIT_CINSLERI:
+            return jsonify({'error': 'Geçersiz kağıt cinsi.'}), 400
 
         production = None
         if production_id_raw:
@@ -4045,6 +4181,7 @@ def register_routes(app):
                 koli_basi_kg=koli_basi_kg,
                 koli_adedi=koli_adedi,
                 toplam_kg=toplam_kg,
+                kagit_cinsi=kagit_cinsi,
                 aciklama=aciklama,
                 user_id=current_user.id,
             )
@@ -4059,11 +4196,26 @@ def register_routes(app):
             'tarih': entry.tarih.strftime('%Y-%m-%d'),
             'tarih_display': entry.tarih.strftime('%d.%m.%Y'),
             'musteri_adi': entry.musteri_adi,
+            'kagit_cinsi': entry.kagit_cinsi or '',
             'koli_basi_kg': entry.koli_basi_kg,
             'koli_adedi': entry.koli_adedi,
             'toplam_kg': entry.toplam_kg,
             'aciklama': entry.aciklama or '',
         }), 201
+
+    @app.route('/gunluk-uretim/<int:id>/kagit', methods=['POST'])
+    @login_required
+    def update_daily_production_output_kagit(id):
+        """Is 3 (2026-10-07): bir satirin kagit_cinsi'ni SONRADAN secip/
+        degistirip/bosaltabilmek icin - baska hicbir alana dokunmaz."""
+        entry = DailyProductionOutput.query.get_or_404(id)
+        data = request.get_json(silent=True) or {}
+        kagit_cinsi = (data.get('kagit_cinsi') or '').strip() or None
+        if kagit_cinsi and kagit_cinsi not in DailyProductionOutput.KAGIT_CINSLERI:
+            return jsonify({'error': 'Geçersiz kağıt cinsi.'}), 400
+        entry.kagit_cinsi = kagit_cinsi
+        db.session.commit()
+        return jsonify({'id': entry.id, 'kagit_cinsi': entry.kagit_cinsi or ''})
 
     @app.route('/gunluk-uretim/<int:id>/sil', methods=['POST'])
     @login_required
@@ -5996,7 +6148,8 @@ def register_routes(app):
                                 sector_filter=sector_filter, product_filter=product_filter, cities=cities,
                                 sectors=PotentialCustomer.SECTORS, products=PotentialCustomer.PRODUCTS,
                                 statuses=PotentialCustomer.STATUSES, places_stats=places_stats,
-                                all_cities=places_search.ALL_CITIES, search_sectors=places_search.SEARCH_SECTORS)
+                                all_cities=places_search.ALL_CITIES, search_sectors=places_search.SEARCH_SECTORS,
+                                unlu_mamul_button_group=places_search.UNLU_MAMUL_BUTTON_GROUP)
 
     @app.route('/potential-customers/export/excel')
     @login_required

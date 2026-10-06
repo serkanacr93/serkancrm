@@ -212,7 +212,36 @@ var CRM_SEARCH = (function () {
         return results.slice(0, limit).map(function (r) { return r.customer; });
     }
 
-    return { load: load, search: search, trackRecent: trackRecent, foldTr: foldTr };
+    /* 2026-10-07 (Gunluk Uretim Isi 2): hizli-ekle oncesi "zaten var mi"
+     * guvenlik agi - ana search() TUM token'larin gecmesini sart kosuyor
+     * (siki), burada TEK bir gevsek tam-ad karsilastirmasi yeterli -
+     * search() zaten bos sonuc dondurdugu icin renderQuickAdd tetiklenmisti,
+     * bu fonksiyon o "bos" durumda bile yakin bir eslesme olup olmadigini
+     * ayrica kontrol eder. Esik: kisa adlarda daha sikiortam, uzun adlarda
+     * oransal tolerans. */
+    function findSimilar(query) {
+        if (!cache.data) return [];
+        var qFold = foldTr(query.trim());
+        if (qFold.length < 3) return [];
+        var qPhoneDigits = /\d/.test(query) ? normalizePhoneDigits(query) : null;
+        var out = [];
+        for (var i = 0; i < cache.data.length; i++) {
+            var idx = cache.data[i];
+            if (qPhoneDigits && qPhoneDigits.length >= 7 && idx.phoneDigits && idx.phoneDigits.indexOf(qPhoneDigits) !== -1) {
+                out.push(idx.c);
+                continue;
+            }
+            var target = idx.nameFold || idx.companyFold;
+            if (!target) continue;
+            var threshold = Math.max(1, Math.min(3, Math.floor(target.length * 0.25)));
+            if (Math.abs(target.length - qFold.length) <= threshold + 2 && levenshtein(qFold, target) <= threshold) {
+                out.push(idx.c);
+            }
+        }
+        return out.slice(0, 5);
+    }
+
+    return { load: load, search: search, trackRecent: trackRecent, foldTr: foldTr, findSimilar: findSimilar };
 })();
 
 function _highlightMatch(text, query) {
@@ -242,33 +271,65 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
         if (typeof opts.onSelect === 'function') opts.onSelect(c);
     }
 
-    function renderQuickAdd(query) {
-        resultsEl.innerHTML = '';
-        var msg = document.createElement('div');
-        msg.className = 'list-group-item text-muted small';
-        msg.textContent = '"' + query + '" ile eşleşen müşteri bulunamadı.';
-        resultsEl.appendChild(msg);
-
-        if (!opts.allowQuickAdd) {
-            resultsEl.style.display = 'block';
+    function doQuickAddSubmit(wrap, name, phone) {
+        var errorEl = wrap.querySelector('.qa-error');
+        var submitBtn = wrap.querySelector('.qa-submit');
+        errorEl.style.display = 'none';
+        if (!name && !phone) {
+            errorEl.textContent = 'İsim veya telefon numarasından en az biri gerekli.';
+            errorEl.style.display = 'block';
             return;
         }
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Ekleniyor...';
+        var csrfInput = input.closest('form') ? input.closest('form').querySelector('input[name=csrf_token]') : document.querySelector('input[name=csrf_token]');
+        var body = { name: name, phone: phone };
+        if (opts.quickAddSource) body.source = opts.quickAddSource;
+        _freshCsrfToken(csrfInput).then(function (token) {
+            return fetch('/api/customers/quick-add', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': token
+                },
+                body: JSON.stringify(body)
+            });
+        })
+            .then(_parseJsonResponse)
+            .then(function (r) {
+                if (!r.ok) {
+                    errorEl.textContent = r.body.error || 'Müşteri eklenemedi.';
+                    errorEl.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="bi bi-check-lg"></i> Ekle ve Seç';
+                    return;
+                }
+                CRM_SEARCH.load(true); // yeni musteri eklendi - onbellegi tazele
+                selectCustomer(r.body);
+                if (typeof opts.onQuickAdd === 'function') opts.onQuickAdd(r.body);
+            })
+            .catch(function () {
+                errorEl.textContent = 'Bağlantı hatası, tekrar deneyin.';
+                errorEl.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="bi bi-check-lg"></i> Ekle ve Seç';
+            });
+    }
 
-        var looksLikePhone = /^[0-9 ()+-]+$/.test(query) && /\d/.test(query);
+    function renderQuickAddForm(container, query, looksLikePhone) {
         var wrap = document.createElement('div');
         wrap.className = 'list-group-item p-2';
         wrap.innerHTML =
-            '<div class="small fw-bold mb-1"><i class="bi bi-person-plus"></i> Yeni müşteri olarak ekle</div>' +
+            '<div class="small fw-bold mb-1"><i class="bi bi-person-plus"></i> Müşteri olarak da ekle</div>' +
             '<div class="d-flex gap-1 mb-1">' +
             '<input type="text" class="form-control form-control-sm qa-name" placeholder="İsim">' +
-            '<input type="text" class="form-control form-control-sm qa-phone" placeholder="Telefon">' +
+            '<input type="text" class="form-control form-control-sm qa-phone" placeholder="Telefon (opsiyonel)">' +
             '</div>' +
             '<div class="qa-error small text-danger mb-1" style="display:none;"></div>' +
             '<button type="button" class="btn btn-sm btn-success w-100 qa-submit"><i class="bi bi-check-lg"></i> Ekle ve Seç</button>';
 
         var nameInput = wrap.querySelector('.qa-name');
         var phoneInput = wrap.querySelector('.qa-phone');
-        var errorEl = wrap.querySelector('.qa-error');
         var submitBtn = wrap.querySelector('.qa-submit');
 
         if (looksLikePhone) {
@@ -282,49 +343,62 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
         wrap.addEventListener('mousedown', stopRow);
 
         submitBtn.addEventListener('click', function () {
-            var name = nameInput.value.trim();
-            var phone = phoneInput.value.trim();
-            errorEl.style.display = 'none';
-            if (!name && !phone) {
-                errorEl.textContent = 'İsim veya telefon numarasından en az biri gerekli.';
-                errorEl.style.display = 'block';
-                return;
-            }
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Ekleniyor...';
-            var csrfInput = input.closest('form') ? input.closest('form').querySelector('input[name=csrf_token]') : document.querySelector('input[name=csrf_token]');
-            _freshCsrfToken(csrfInput).then(function (token) {
-                return fetch('/api/customers/quick-add', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': token
-                    },
-                    body: JSON.stringify({ name: name, phone: phone })
-                });
-            })
-                .then(_parseJsonResponse)
-                .then(function (r) {
-                    if (!r.ok) {
-                        errorEl.textContent = r.body.error || 'Müşteri eklenemedi.';
-                        errorEl.style.display = 'block';
-                        submitBtn.disabled = false;
-                        submitBtn.innerHTML = '<i class="bi bi-check-lg"></i> Ekle ve Seç';
-                        return;
-                    }
-                    CRM_SEARCH.load(true); // yeni musteri eklendi - onbellegi tazele
-                    selectCustomer(r.body);
-                    if (typeof opts.onQuickAdd === 'function') opts.onQuickAdd(r.body);
-                })
-                .catch(function () {
-                    errorEl.textContent = 'Bağlantı hatası, tekrar deneyin.';
-                    errorEl.style.display = 'block';
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = '<i class="bi bi-check-lg"></i> Ekle ve Seç';
-                });
+            doQuickAddSubmit(wrap, nameInput.value.trim(), phoneInput.value.trim());
         });
 
-        resultsEl.appendChild(wrap);
+        container.appendChild(wrap);
+    }
+
+    /* 2026-10-07: benzer isim/telefon uyarisi - "X zaten var, onu mu
+     * seçelim?" + kullanici isterse "Yeni olarak ekle" ile yine de devam
+     * edebilir (CRM_SEARCH.findSimilar ile, mevcut foldTr/levenshtein
+     * mantigi kullanilarak - ayri bir karsilastirma yontemi YAZILMADI). */
+    function renderQuickAdd(query) {
+        resultsEl.innerHTML = '';
+        var msg = document.createElement('div');
+        msg.className = 'list-group-item text-muted small';
+        msg.textContent = '"' + query + '" ile eşleşen müşteri bulunamadı.';
+        resultsEl.appendChild(msg);
+
+        if (!opts.allowQuickAdd) {
+            resultsEl.style.display = 'block';
+            return;
+        }
+
+        var similar = CRM_SEARCH.findSimilar(query);
+        var looksLikePhone = /^[0-9 ()+-]+$/.test(query) && /\d/.test(query);
+
+        if (similar.length) {
+            var warnWrap = document.createElement('div');
+            warnWrap.className = 'list-group-item p-2 bg-warning-subtle';
+            warnWrap.innerHTML = '<div class="small fw-bold mb-1"><i class="bi bi-exclamation-triangle"></i> Benzer isimli/telefonlu müşteri(ler) var - bunlardan biri mi?</div>';
+            similar.forEach(function (c) {
+                var btn = document.createElement('a');
+                btn.href = '#';
+                btn.className = 'list-group-item list-group-item-action py-1';
+                btn.innerHTML = '<strong>' + c.name + '</strong>' + (c.phone ? ' <small class="text-muted">(' + c.phone + ')</small>' : '');
+                btn.addEventListener('mousedown', function (e) { e.preventDefault(); selectCustomer(c); });
+                warnWrap.appendChild(btn);
+            });
+            var proceedBtn = document.createElement('button');
+            proceedBtn.type = 'button';
+            proceedBtn.className = 'btn btn-sm btn-outline-secondary w-100 mt-1';
+            proceedBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Hayır, yeni olarak ekle';
+            function stopRow(e) { e.stopPropagation(); }
+            warnWrap.addEventListener('click', stopRow);
+            warnWrap.addEventListener('mousedown', stopRow);
+            proceedBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+            proceedBtn.addEventListener('click', function () {
+                warnWrap.remove();
+                renderQuickAddForm(resultsEl, query, looksLikePhone);
+            });
+            warnWrap.appendChild(proceedBtn);
+            resultsEl.appendChild(warnWrap);
+            resultsEl.style.display = 'block';
+            return;
+        }
+
+        renderQuickAddForm(resultsEl, query, looksLikePhone);
         resultsEl.style.display = 'block';
     }
 

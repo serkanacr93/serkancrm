@@ -70,6 +70,14 @@ Kullanıcı net bir talimat vermediği bir tasarım/iş kuralı kararında (örn
 
 `TAKIP_SIPARIS_VERMIS_GUN`/`TAKIP_TEKLIF_ALMIS_GUN` bilerek `TAKIP_GEREKEN_GUN`'dan ayrı tutulur ki `hizli_iletisim()`/`customers_takip_gerekiyor()` davranışı değişmesin. Ödeme hatırlatmaları (`deal_pesinat`/`deal_bakiye`) artık `_auto_close_paid_reminders()` ile Deal'in gerçek ödeme durumuna göre otomatik kapanır (manuel hatırlatmalara dokunulmaz); "Atla" `TakipModuAtla` tablosuna günlük kalıcı yazılır (DailyReport yazılmaz, sayaçlar etkilenmez).
 
+## Günlük Üretim / Takip / Potansiyel (2026-10-07)
+
+- `DailyProductionOutput.kagit_cinsi` SABİT liste (`DailyProductionOutput.KAGIT_CINSLERI`): 'Esmer Recycle','Esmer Virjin','Beyaz Kraft','Beyaz Virjin','Kuşe'. "Diğer" yok, boş bırakılabilir - serbest metin DEĞİL.
+- `Customer.bilgi_eksik=True` SADECE Günlük Üretim'in "Müşteri olarak da ekle" akışından (`/api/customers/quick-add` ile `source='gunluk_uretim'`) açılan müşterilerde set edilir. Bu True VE telefonu boş olan müşteriler `_takip_gerekiyor_query()` ve `takip_modu()`'da (kart listesi + menü sayacı) GÖSTERİLMEZ - telefon girilince kendiliğinden görünür olur. Müşteriler listesinde NORMAL görünür (filtrelenmez, sadece rozet).
+- Yeni sektörler (Simitçi/Börekçi/vb., `places_search.UNLU_MAMUL_SECTORS`) SADECE manuel aramada (`SEARCH_SECTORS`) - otomatik rotasyon (`AUTO_ROTATION_SECTORS`) hariç tutulur, maliyet limitleri korunur.
+- Günlük Üretim "gün toplamı" HER ZAMAN `.day-total` elemanının `data-kg` attribute'undan okunur/yazılır - ekrandaki METİNDEN asla geri parse edilmez (format uyumsuzluğu = yanlış toplam, bkz. 02.10.2026 bug'ı).
+- Müşteri birleştirmede (`_merge_customers()`) `customer_id` (veya eşdeğeri) tutan YENİ bir tablo eklenirse `_CUSTOMER_FK_TABLES`'a da eklenmesi ZORUNLU - aksi halde kopya müşterinin o tablodaki kayıtları sessizce silinir (veya, benzersiz kısıtı olan tablolarda - örn. `TakipModuAtla` - FK ihlaliyle birleştirme tamamen çöker).
+
 ## Her işin sonunda
 
 1. `tests/smoke_test.py` canlıda (`--url https://serkancrm.onrender.com`) çalıştırılır; tablo temiz değilse "tamam" denmez.

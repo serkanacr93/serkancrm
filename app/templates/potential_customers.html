@@ -96,10 +96,13 @@
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Sektör(ler)</label>
+                    <button type="button" class="btn btn-sm btn-outline-warning mb-2" id="selectUnluMamulBtn">
+                        <i class="bi bi-basket"></i> Unlu Mamuller grubunu seç
+                    </button>
                     <div class="row">
                         {% for s in search_sectors %}
                         <div class="col-md-6 form-check mb-1">
-                            <input type="checkbox" class="form-check-input places-sector-cb" name="sectors" value="{{ s }}" id="places_sector_{{ loop.index }}">
+                            <input type="checkbox" class="form-check-input places-sector-cb" name="sectors" value="{{ s }}" id="places_sector_{{ loop.index }}" data-unlu-mamul="{{ '1' if s in unlu_mamul_button_group else '' }}">
                             <label class="form-check-label" for="places_sector_{{ loop.index }}">{{ s }}</label>
                         </div>
                         {% endfor %}
@@ -126,6 +129,12 @@ function confirmPlacesSearch() {
     var cost = (total * 0.035).toFixed(2);
     return confirm('Bu arama yaklaşık ' + total + ' istek yapacak (~$' + cost + '), onaylıyor musunuz?');
 }
+
+document.getElementById('selectUnluMamulBtn').addEventListener('click', function () {
+    document.querySelectorAll('.places-sector-cb[data-unlu-mamul="1"]').forEach(function (cb) {
+        cb.checked = true;
+    });
+});
 </script>
 
 <div class="card mb-4 shadow-sm">

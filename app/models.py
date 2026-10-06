@@ -160,6 +160,12 @@ class Customer(db.Model):
     # Takip Gerekiyor/60 gunluk liste gibi "benim musterilerim" gorunumlerinde
     # kullanilir - Deal'in user_id'sinden (satis sahipligi) AYRI bir kavram.
     owner_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
+    # 2026-10-07 (Gunluk Uretim 'Musteri olarak da ekle'): bu musteri SADECE
+    # isimle, eksik bilgiyle acildiysa True. Mevcut kayitlar NULL (dokunulmadi,
+    # server_default YOK). Takip Modu/_takip_gerekiyor_query bu True VE
+    # telefonu bos olan musterileri gostermez - aranamayacak bir kayit
+    # "takip gerekiyor" listesini kirletmesin diye.
+    bilgi_eksik = db.Column(db.Boolean, nullable=True, default=False)
 
     deals = db.relationship('Deal', backref='customer', lazy=True)
     owner = db.relationship('User', foreign_keys=[owner_user_id])
@@ -1051,8 +1057,14 @@ class Payment(db.Model):
         return f'<Payment {self.amount} ₺ - {self.customer.display_name}>'
 
 class PotentialCustomer(db.Model):
+    # 2026-10-07 (Is 5 - Unlu Mamul sektorleri): 'Diger'in ONUNE eklendi.
+    # Bu 7 yeni sektor OTOMATIK rotasyona girmez (bkz. places_search.py
+    # UNLU_MAMUL_SECTORS), sadece manuel aramada gorunur - maliyet
+    # limitleri (gunluk 75 istek) etkilenmesin.
     SECTORS = ['Dönerci', 'Restoran', 'Market', 'Bakkal', 'Kuruyemişçi', 'Burgerci',
-               'Tekstil', 'Çay-Kahve', 'Fırın-Pastane', 'Baharatçı', 'Şekerci', 'Diğer']
+               'Tekstil', 'Çay-Kahve', 'Fırın-Pastane', 'Baharatçı', 'Şekerci',
+               'Simitçi', 'Börekçi', 'Ekmek Fırını', 'Pideci-Lahmacuncu',
+               'Tatlıcı-Baklavacı', 'Kurabiye-Kek Üreticisi', 'Unlu Mamul Üreticisi', 'Diğer']
     PRODUCTS = ['Kare Dipli Kese Kağıdı', 'Dürüm-Sarma Kağıdı', 'Tepsi Altı Ambalaj Kağıdı',
                 'Taşıma Çantası', 'Baskılı Atlet Poşet', 'Market Poşeti', 'Baskılı Doypack']
     SOURCES = ['Elle', 'Otomatik']
@@ -1127,6 +1139,11 @@ class DailyProductionOutput(db.Model):
     kagit formdaki her satiri (musteri, koli basi kg, koli adedi, toplam
     kg) dijital olarak kaydeder. Musteri/Firma ManualPlanningEntry ile
     AYNI desen - serbest metin + opsiyonel gercek musteri eslestirmesi."""
+    # 2026-10-07 (Is 3 - Kagit Cinsi): sabit liste, "Diger" YOK (bos
+    # birakilabilir). Yeni kayitlar bu listeden secilir, serbest metin
+    # DEGIL - rapor/dokum gruplamasinin tutarli kalmasi icin.
+    KAGIT_CINSLERI = ['Esmer Recycle', 'Esmer Virjin', 'Beyaz Kraft', 'Beyaz Virjin', 'Kuşe']
+
     id = db.Column(db.Integer, primary_key=True)
     tarih = db.Column(db.Date, default=datetime.utcnow, nullable=False, index=True)
     musteri_adi = db.Column(db.String(200), nullable=False)  # serbest metin
@@ -1139,6 +1156,10 @@ class DailyProductionOutput(db.Model):
     koli_basi_kg = db.Column(db.Float, nullable=False)
     koli_adedi = db.Column(db.Float, nullable=False)
     toplam_kg = db.Column(db.Float, nullable=False)  # varsayilan koli_basi_kg*koli_adedi, elle degistirilebilir
+    # Is 3 (2026-10-07): opsiyonel, KAGIT_CINSLERI'nden biri - mevcut
+    # satirlarda NULL kalir (geriye donuk doldurma YOK, sadece OKUMA/oneri
+    # raporu ayrica sunulur).
+    kagit_cinsi = db.Column(db.String(30), nullable=True)
     aciklama = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)

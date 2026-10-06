@@ -104,6 +104,9 @@
                                 ⚠ Aynı numarada {{ duplicate_count_by_customer[customer.id] }} kayıt
                             </a>
                             {% endif %}
+                            {% if customer.bilgi_eksik %}
+                            <span class="badge bg-secondary" title="Bu kayıt sadece isimle hızlı eklendi, bilgileri tamamlanmamış">Bilgi eksik</span>
+                            {% endif %}
                         </td>
                         <td>{{ customer.contact_person or '-' }}</td>
                         <td>
@@ -332,6 +335,11 @@
         <a href="{{ url_for('duplicate_customers') }}" class="btn btn-sm btn-outline-info d-flex justify-content-between">
             <span><i class="bi bi-exclamation-diamond"></i> Mükerrer Kayıtlar</span> <span class="badge bg-dark">{{ duplicate_group_count }}</span>
         </a>
+        {% if bilgi_eksik_count %}
+        <a href="{{ url_for('customers', bilgi_eksik=1) }}" class="btn btn-sm btn-outline-secondary d-flex justify-content-between">
+            <span><i class="bi bi-person-exclamation"></i> Bilgi Eksik</span> <span class="badge bg-dark">{{ bilgi_eksik_count }}</span>
+        </a>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

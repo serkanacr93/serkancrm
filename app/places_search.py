@@ -54,6 +54,23 @@ AUTO_ROTATION_CITIES = ['Konya', 'İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Anta
 # 'Diger' aranabilir bir sektor terimi olmadigi icin arama listesine girmez.
 SEARCH_SECTORS = [s for s in PotentialCustomer.SECTORS if s != 'Diğer']
 
+# Is 5 (2026-10-07): Unlu Mamul sektorleri (Simitci/Borekci/vb.) SADECE
+# manuel aramada secilebilir - maliyet limitleri (gunluk 75 istek, 90
+# gunde 250$) korunsun diye OTOMATIK rotasyona hic girmezler. Fırın-Pastane
+# ONCEDEN VARDI ve otomatik rotasyonda kalmaya devam eder - bu listeye
+# bilerek DAHIL EDILMEDI.
+UNLU_MAMUL_SECTORS = ['Simitçi', 'Börekçi', 'Ekmek Fırını', 'Pideci-Lahmacuncu',
+                       'Tatlıcı-Baklavacı', 'Kurabiye-Kek Üreticisi', 'Unlu Mamul Üreticisi']
+
+# Manuel aramadaki "Unlu Mamuller grubunu seç" kısayol butonu icin -
+# Fırın-Pastane de dahil (8 sektor).
+UNLU_MAMUL_BUTTON_GROUP = UNLU_MAMUL_SECTORS + ['Fırın-Pastane']
+
+# Otomatik (zamanlanmis) rotasyon SADECE bu listeyi kullanir - manuel
+# aramadaki SEARCH_SECTORS'tan farkli olarak Unlu Mamul sektorlerini
+# ICERMEZ.
+AUTO_ROTATION_SECTORS = [s for s in SEARCH_SECTORS if s not in UNLU_MAMUL_SECTORS]
+
 
 def get_config():
     config = PlacesSearchConfig.query.get(1)
@@ -176,7 +193,7 @@ def get_status(config=None):
 
 
 def _next_auto_combo(config):
-    combos = [(c, s) for c in AUTO_ROTATION_CITIES for s in SEARCH_SECTORS]
+    combos = [(c, s) for c in AUTO_ROTATION_CITIES for s in AUTO_ROTATION_SECTORS]
     idx = config.last_combo_index % len(combos)
     config.last_combo_index = idx + 1
     db.session.commit()
