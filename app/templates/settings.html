@@ -173,5 +173,34 @@
             </div>
         </div>
     </div>
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header bg-{{ 'success' if company_settings.pdf_doviz_karsiligi_goster else 'secondary' }} text-white">
+                <i class="bi bi-currency-exchange"></i> Teklif PDF - Döviz Karşılığı
+            </div>
+            <div class="card-body">
+                <p>
+                    Durum:
+                    <span class="badge bg-{{ 'success' if company_settings.pdf_doviz_karsiligi_goster else 'secondary' }} fs-6">
+                        {{ 'Aktif' if company_settings.pdf_doviz_karsiligi_goster else 'Pasif' }}
+                    </span>
+                </p>
+                <p class="text-muted small">
+                    Aktifken, dövizli bir teklifin PDF'inde genel toplamın diğer para
+                    birimlerindeki (TCMB kuruyla, bilgi amaçlıdır) karşılığı gösterilir.
+                </p>
+                <form method="POST" action="{{ url_for('toggle_pdf_doviz_karsiligi') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-{{ 'outline-danger' if company_settings.pdf_doviz_karsiligi_goster else 'success' }}">
+                        {% if company_settings.pdf_doviz_karsiligi_goster %}
+                        <i class="bi bi-pause-circle"></i> Pasif Yap
+                        {% else %}
+                        <i class="bi bi-play-circle"></i> Aktif Yap
+                        {% endif %}
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

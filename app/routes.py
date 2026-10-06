@@ -4870,6 +4870,17 @@ def register_routes(app):
         flash(f"Otomatik müşteri arama {'aktif' if config.enabled else 'pasif'} edildi.", 'success')
         return redirect(url_for('settings'))
 
+    @app.route('/settings/pdf-doviz-karsiligi-toggle', methods=['POST'])
+    @admin_required
+    def toggle_pdf_doviz_karsiligi():
+        """B5e: Teklif PDF'inde genel toplamin diger para birimlerindeki
+        (bilgi amacli) karsiligini gosterme/gizleme anahtari."""
+        company_settings = _get_company_settings()
+        company_settings.pdf_doviz_karsiligi_goster = not company_settings.pdf_doviz_karsiligi_goster
+        db.session.commit()
+        flash(f"Teklif PDF'inde döviz karşılığı gösterimi {'aktif' if company_settings.pdf_doviz_karsiligi_goster else 'pasif'} edildi.", 'success')
+        return redirect(url_for('settings'))
+
     @app.route('/settings/teklif-yardimci-toggle', methods=['POST'])
     @admin_required
     def toggle_teklif_yardimci():

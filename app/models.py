@@ -1082,6 +1082,9 @@ class CompanySettings(db.Model):
     logo_data = db.Column(db.LargeBinary)
     logo_mimetype = db.Column(db.String(50))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # B5e (2026-10-06): Teklif PDF'inde genel toplamin diger 3 para
+    # birimindeki (bilgi amacli) karsiligini gosterip gostermeme ayari.
+    pdf_doviz_karsiligi_goster = db.Column(db.Boolean, default=True, nullable=False)
 
 class PlacesSearchConfig(db.Model):
     """Tekil satir (id=1) - Google Places otomatik arama ayarlari."""

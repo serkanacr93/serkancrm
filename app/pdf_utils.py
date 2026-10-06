@@ -341,6 +341,38 @@ def generate_deal_pdf(deal):
                 f"yaklaşık TL karşılığı: {deal.tl_karsiligi:,.2f} TL",
                 kur_note
             ))
+
+        # B5e (2026-10-06): Ayarlar'dan aciksa, genel toplamin DIGER 3
+        # para birimindeki (bilgi amaclidir) karsiligi - teklif tarihindeki
+        # TCMB kuru ile. Tek bir hatali/yavas TCMB cagrisi PDF'in tamamini
+        # KIRMASIN diye try/except ile sarildi - basarisiz olursa bu satir
+        # sessizce atlanir, PDF yine de olusur.
+        if company.pdf_doviz_karsiligi_goster:
+            try:
+                from app.tcmb import fetch_tcmb_rate
+                # deal.value -> TL (deal zaten TRY ise aynen, degilse kendi kuru ile)
+                deal_rate_to_try = 1.0 if deal.para_birimi == 'TRY' else (
+                    deal.kullanilan_kur or fetch_tcmb_rate(deal.para_birimi)
+                )
+                value_try = deal.value * (deal_rate_to_try or 1.0)
+                other_currencies = [c for c in ('TRY', 'USD', 'EUR', 'GBP') if c != deal.para_birimi]
+                parts = []
+                for cur in other_currencies:
+                    rate = 1.0 if cur == 'TRY' else fetch_tcmb_rate(cur)
+                    if not rate:
+                        continue
+                    value_in_cur = value_try / rate
+                    sym = {'TRY': '₺', 'USD': '$', 'EUR': '€', 'GBP': '£'}.get(cur, cur)
+                    parts.append(f"{value_in_cur:,.2f} {sym}")
+                if parts:
+                    elements.append(Spacer(1, 1*mm))
+                    doviz_note = ParagraphStyle('DovizKarsiligi', parent=terms_style, alignment=2, fontSize=6.5)
+                    elements.append(Paragraph(
+                        "Genel toplamın diğer para birimi karşılığı (bilgi amaçlıdır): " + " · ".join(parts),
+                        doviz_note
+                    ))
+            except Exception:
+                pass
     else:
         elements.append(Paragraph("<i>Henüz ürün eklenmemiş.</i>", normal))
 
