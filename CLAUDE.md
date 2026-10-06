@@ -32,6 +32,14 @@ Mevcut tablo, alan, hesaplama ve sayfalar DEĞİŞTİRİLMEZ/SİLİNMEZ. Yeni ö
 
 Kullanıcı net bir talimat vermediği bir tasarım/iş kuralı kararında (örn. "irsaliye otomatik mi oluşsun yoksa hiç mi oluşmasın") kendi takdirini sessizce uygulama - mümkünse önce sor (AskUserQuestion), mümkün değilse/otonom modda isen kararını ver ama **raporda açıkça "istenenden farklı yapıldı" ya da "şu karar netleştirildi: X soruldu, Y cevabı alındı" yaz**. Sessizce farklı bir şey yapıp "tamamlandı" demek, kullanıcının bir sonraki oturumda aynı işi düzeltmek için tekrar zaman harcamasına yol açar.
 
+## Yedekleme sistemi (ZATEN VAR - önce kontrol et)
+
+`scripts\backup_neon.py` Neon veritabanının TAMAMINI (artık `information_schema`'dan OTOMATİK okunan tüm tablolar, `alembic_version` dahil) `C:\CRM_Yedekler\neon_backup_<tarih>.json` dosyasına yedekler, 30 günden eski yedekleri siler. Windows Görev Zamanlayıcı'da `CRM_Neon_Backup` adıyla kayıtlı (oturum açılışında + her gün 03:30'da çalışacak şekilde 2026-10-06'da düzeltildi - eskiden SADECE oturum açılışında çalışıyordu ve "kaçırılan görevi çalıştır" kapalıydı, bu yüzden 10 gün yedeksiz kalınmıştı).
+
+**Kural: Büyük/riskli bir işe (çok sayıda gerçek kayıt değişikliği, migration, toplu silme/birleştirme vb.) başlamadan önce `C:\CRM_Yedekler` içindeki en son yedek dosyasının tarihi kontrol edilir - 24 saatten eskiyse `python scripts\backup_neon.py --force` çalıştırılır; yedek hiç alınamıyorsa (DATABASE_URL yok, bağlantı hatası vb.) işe BAŞLANMAZ, kullanıcıya bildirilir.**
+
+**Bilinen sınırlama:** Görev Zamanlayıcı'daki görev ayarlarını (tetikleyici, "kaçırılan görevi çalıştır" vb.) değiştirmek bu ortamda ADMIN YETKİSİ gerektiriyor - Claude Code oturumu bunu değiştiremez, sadece tespit edip kullanıcıya XML/talimat halinde bırakabilir.
+
 ## Güvenlik ve veri kuralları (her oturumda geçerli)
 
 - Gerçek müşteri, teklif, üretim, fatura, ödeme kaydı **SİLİNMEZ/DEĞİŞTİRİLMEZ**. Testler sadece adı `TEST` ile başlayan kayıtlarla yapılır, iş bitince silinir; gerçek kayıt sayıları test öncesi/sonrası karşılaştırılıp raporlanır.
