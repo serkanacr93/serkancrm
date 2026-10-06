@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter, csrf
@@ -127,6 +127,35 @@ def _get_company_settings():
         db.session.add(settings)
         db.session.commit()
     return settings
+
+def _get_teklif_yardimci_config():
+    """B3: PlacesSearchConfig ile AYNI tekil-satir deseni."""
+    config = TeklifYardimciConfig.query.first()
+    if not config:
+        config = TeklifYardimciConfig(enabled=True)
+        db.session.add(config)
+        db.session.commit()
+    return config
+
+def _teklif_yardimci_catalog_json():
+    """B1/B2: add_deal/edit_deal.html'e gomulen JS katalog verisi -
+    'Kese seç'/'Doypack seç' panelleri bu veriyle doldurulur, sayfa her
+    acildiginda tek seferde (ekstra API cagrisi olmadan) yuklenir."""
+    kese = KeseGramajKatalog.query.order_by(KeseGramajKatalog.sira.asc()).all()
+    doypack = DoypackKatalog.query.filter_by(aktif=True).order_by(DoypackKatalog.sira.asc()).all()
+    baski = BaskiFiyatKatalog.query.all()
+    return {
+        'kese': [{
+            'id': k.id, 'gramaj': k.gramaj, 'en': k.olcu_en, 'korugu': k.olcu_korugu, 'boy': k.olcu_boy,
+            'kraft_min': k.kraft_adet_kg_min, 'kraft_max': k.kraft_adet_kg_max,
+            'kuse_min': k.kuse_adet_kg_min, 'kuse_max': k.kuse_adet_kg_max, 'aktif': k.aktif,
+        } for k in kese],
+        'doypack': [{
+            'id': d.id, 'en': d.olcu_en, 'boy': d.olcu_boy, 'korugu': d.korugu,
+            'koli_adedi': d.koli_adedi, 'fiyat': d.fiyat,
+        } for d in doypack],
+        'baski': [{'yuz': b.yuz, 'renk_sayisi': b.renk_sayisi, 'fiyat': b.fiyat} for b in baski],
+    }
 
 def _save_uploaded_image(file_storage, subfolder):
     """Yuklenen gorseli static/uploads/<subfolder>/ altina guvenli/benzersiz
@@ -2541,8 +2570,11 @@ def register_routes(app):
         # Not: customers listesi burada kasitli olarak cekilmiyor - form
         # merkezi musteri arama bilesenini (customer-search.js) kullaniyor,
         # 1690+ satirlik bir <select> hic render edilmiyor (performans).
+        teklif_yardimci = _get_teklif_yardimci_config()
         return render_template('add_deal.html', today=datetime.now().date(),
-                             expire_date=datetime.now().date() + timedelta(days=7))
+                             expire_date=datetime.now().date() + timedelta(days=7),
+                             teklif_yardimci_enabled=teklif_yardimci.enabled,
+                             teklif_yardimci_katalog=_teklif_yardimci_catalog_json())
 
     @app.route('/deals/<int:id>')
     @login_required
@@ -2637,7 +2669,10 @@ def register_routes(app):
             if numune_errors:
                 flash('Bazı numune görselleri kaydedilemedi: ' + '; '.join(numune_errors), 'warning')
             return redirect(url_for('deal_detail', id=id))
-        return render_template('edit_deal.html', deal=deal)
+        teklif_yardimci = _get_teklif_yardimci_config()
+        return render_template('edit_deal.html', deal=deal,
+                             teklif_yardimci_enabled=teklif_yardimci.enabled,
+                             teklif_yardimci_katalog=_teklif_yardimci_catalog_json())
 
     @app.route('/deals/<int:id>/delete', methods=['POST'])
     @login_required
@@ -4705,6 +4740,82 @@ def register_routes(app):
         db.session.commit()
         flash(f"Otomatik müşteri arama {'aktif' if config.enabled else 'pasif'} edildi.", 'success')
         return redirect(url_for('settings'))
+
+    @app.route('/settings/teklif-yardimci-toggle', methods=['POST'])
+    @admin_required
+    def toggle_teklif_yardimci():
+        config = _get_teklif_yardimci_config()
+        config.enabled = not config.enabled
+        db.session.commit()
+        flash(f"'Kese seç'/'Doypack seç' butonları {'aktif' if config.enabled else 'pasif'} edildi.", 'success')
+        return redirect(url_for('settings_teklif_yardimci'))
+
+    @app.route('/settings/teklif-yardimci')
+    @admin_required
+    def settings_teklif_yardimci():
+        kese = KeseGramajKatalog.query.order_by(KeseGramajKatalog.sira.asc()).all()
+        doypack = DoypackKatalog.query.order_by(DoypackKatalog.sira.asc()).all()
+        baski = BaskiFiyatKatalog.query.order_by(BaskiFiyatKatalog.yuz.asc(), BaskiFiyatKatalog.renk_sayisi.asc()).all()
+        config = _get_teklif_yardimci_config()
+        return render_template('settings_teklif_yardimci.html', kese=kese, doypack=doypack, baski=baski, config=config)
+
+    @app.route('/settings/teklif-yardimci/kese/<int:id>', methods=['POST'])
+    @admin_required
+    def update_kese_gramaj(id):
+        k = KeseGramajKatalog.query.get_or_404(id)
+        k.olcu_en = request.form.get('olcu_en', '').strip() or None
+        k.olcu_korugu = request.form.get('olcu_korugu', '').strip() or None
+        k.olcu_boy = request.form.get('olcu_boy', '').strip() or None
+        for field in ['kraft_adet_kg_min', 'kraft_adet_kg_max', 'kuse_adet_kg_min', 'kuse_adet_kg_max']:
+            raw = request.form.get(field, '').strip()
+            setattr(k, field, float(raw) if raw else None)
+        k.aktif = request.form.get('aktif') == 'on'
+        db.session.commit()
+        flash(f'{k.gramaj} gr güncellendi.', 'success')
+        return redirect(url_for('settings_teklif_yardimci'))
+
+    @app.route('/settings/teklif-yardimci/doypack/<int:id>', methods=['POST'])
+    @admin_required
+    def update_doypack_katalog(id):
+        d = DoypackKatalog.query.get_or_404(id)
+        d.fiyat = float(request.form.get('fiyat', 0) or 0)
+        d.koli_adedi = int(request.form.get('koli_adedi')) if request.form.get('koli_adedi', '').strip() else None
+        d.aktif = request.form.get('aktif') == 'on'
+        db.session.commit()
+        flash(f'Doypack {d.olcu_en}x{d.olcu_boy} güncellendi.', 'success')
+        return redirect(url_for('settings_teklif_yardimci'))
+
+    @app.route('/settings/teklif-yardimci/baski/<int:id>', methods=['POST'])
+    @admin_required
+    def update_baski_fiyat(id):
+        b = BaskiFiyatKatalog.query.get_or_404(id)
+        raw = request.form.get('fiyat', '').strip()
+        b.fiyat = float(raw) if raw else None
+        db.session.commit()
+        flash('Baskı fiyatı güncellendi.', 'success')
+        return redirect(url_for('settings_teklif_yardimci'))
+
+    @app.route('/api/teklif-yardimci/baski-fiyat', methods=['POST'])
+    @login_required
+    def save_baski_fiyat():
+        """B2: teklif ekranindaki Doypack panelinde kullanici katalogda
+        olmayan (fiyati None olan) bir yuz+renk kombinasyonu icin elle
+        fiyat girerse, bir sonraki teklifte hazir gelsin diye buraya
+        upsert edilir. Sadece teklif olusturmayi/kaydetmeyi ETKILEMEZ -
+        ayri, ikincil bir kayit."""
+        data = request.get_json(silent=True) or {}
+        yuz = data.get('yuz')
+        renk_sayisi = data.get('renk_sayisi')
+        fiyat = data.get('fiyat')
+        if yuz not in ('tek', 'cift') or not isinstance(renk_sayisi, int) or fiyat is None:
+            return jsonify({'error': 'Geçersiz veri.'}), 400
+        row = BaskiFiyatKatalog.query.filter_by(yuz=yuz, renk_sayisi=renk_sayisi).first()
+        if row:
+            row.fiyat = float(fiyat)
+        else:
+            db.session.add(BaskiFiyatKatalog(yuz=yuz, renk_sayisi=renk_sayisi, fiyat=float(fiyat)))
+        db.session.commit()
+        return jsonify({'ok': True})
 
     @app.route('/settings/company', methods=['POST'])
     @admin_required

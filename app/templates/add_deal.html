@@ -138,11 +138,24 @@
             <div class="card mb-4">
                 <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-box"></i> Ürün / Hizmet Detayları</span>
-                    <button type="button" class="btn btn-sm btn-light" id="add-item">
-                        <i class="bi bi-plus"></i> Ürün Ekle
-                    </button>
+                    <div class="d-flex gap-2">
+                        {% if teklif_yardimci_enabled %}
+                        <button type="button" class="btn btn-sm btn-warning text-dark" id="ty-kese-btn">
+                            <i class="bi bi-bag"></i> Kese Seç
+                        </button>
+                        <button type="button" class="btn btn-sm btn-primary" id="ty-doypack-btn">
+                            <i class="bi bi-box-seam"></i> Doypack Seç
+                        </button>
+                        {% endif %}
+                        <button type="button" class="btn btn-sm btn-light" id="add-item">
+                            <i class="bi bi-plus"></i> Ürün Ekle
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
+                    {% if teklif_yardimci_enabled %}
+                    <div id="teklif-yardimci-mount"></div>
+                    {% endif %}
                     <div class="table-responsive">
                         <table class="table table-bordered" id="items-table">
                             <thead class="table-dark">
@@ -471,3 +484,13 @@ document.querySelector('form').addEventListener('submit', function () {
 });
 </script>
 {% endblock %}
+
+{% if teklif_yardimci_enabled %}
+{% block scripts %}
+<script>
+window.TEKLIF_YARDIMCI_KATALOG = {{ teklif_yardimci_katalog|tojson }};
+window.TEKLIF_YARDIMCI_CSRF = {{ csrf_token()|tojson }};
+</script>
+<script src="{{ asset_url('js/teklif-yardimci.js') }}"></script>
+{% endblock %}
+{% endif %}

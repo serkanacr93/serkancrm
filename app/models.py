@@ -1135,3 +1135,56 @@ class SystemError(db.Model):
 
     user = db.relationship('User', foreign_keys=[user_id])
     resolved_by = db.relationship('User', foreign_keys=[resolved_by_user_id])
+
+class TeklifYardimciConfig(db.Model):
+    """B3 (2026-10-06): 'Kese seç'/'Doypack seç' butonlarinin acik/kapali
+    oldugu tek satirlik ayar - PlacesSearchConfig ile AYNI singleton
+    desen. Kapaliyken add_deal/edit_deal.html bu butonlari hic render
+    etmez, teklif ekrani eskisi gibi kalir (koklu degisiklik yasagi)."""
+    id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
+
+class KeseGramajKatalog(db.Model):
+    """B1: 'Kese seç' panelindeki gramaj kartlari. kraft_adet_kg_min/max
+    esmer VE beyaz kraft icin AYNI (katalogda ayri satir yok, kagit_cinsi
+    secimi sadece Aciklama'ya yazilan metni degistirir); kuse_adet_kg_min/
+    max farkli bir deger seti. aktif=False olanlar 'Diger boylar' alt
+    basliginda, deger girilmemisse bos gorunur (Ayarlar'dan doldurulur)."""
+    id = db.Column(db.Integer, primary_key=True)
+    gramaj = db.Column(db.Integer, nullable=False, unique=True)
+    olcu_en = db.Column(db.String(20), nullable=True)
+    olcu_korugu = db.Column(db.String(20), nullable=True)
+    olcu_boy = db.Column(db.String(20), nullable=True)
+    kraft_adet_kg_min = db.Column(db.Float, nullable=True)
+    kraft_adet_kg_max = db.Column(db.Float, nullable=True)
+    kuse_adet_kg_min = db.Column(db.Float, nullable=True)
+    kuse_adet_kg_max = db.Column(db.Float, nullable=True)
+    aktif = db.Column(db.Boolean, default=True, nullable=False)
+    sira = db.Column(db.Integer, default=0, nullable=False)
+
+class DoypackKatalog(db.Model):
+    """B2: 'Doypack seç' panelindeki ölçü/fiyat kartları - liste fiyatı
+    01.07.2026 itibariyle, TL/adet, baskısız, kraft pencereli kilitli
+    doypack. fiyat_tarihi ayrı tutulur ki fiyat listesi güncellenince
+    panelde 'XX tarihli fiyat' notu gösterilebilsin."""
+    id = db.Column(db.Integer, primary_key=True)
+    olcu_en = db.Column(db.String(20), nullable=False)
+    olcu_boy = db.Column(db.String(20), nullable=False)
+    korugu = db.Column(db.String(20), nullable=True)
+    koli_adedi = db.Column(db.Integer, nullable=True)
+    fiyat = db.Column(db.Float, nullable=False)
+    fiyat_tarihi = db.Column(db.Date, nullable=True)
+    aktif = db.Column(db.Boolean, default=True, nullable=False)
+    sira = db.Column(db.Integer, default=0, nullable=False)
+
+class BaskiFiyatKatalog(db.Model):
+    """B2: doypack baskı ücret tablosu (yüz × renk sayısı). Kullanıcı
+    panelde fiyatı olmayan bir kombinasyon için elle bir tutar yazarsa
+    (bkz. /api/teklif-yardimci/baski-fiyat), buraya upsert edilir -
+    sonraki teklifte otomatik gelir."""
+    id = db.Column(db.Integer, primary_key=True)
+    yuz = db.Column(db.String(10), nullable=False)  # 'tek' / 'cift'
+    renk_sayisi = db.Column(db.Integer, nullable=False)
+    fiyat = db.Column(db.Float, nullable=True)
+
+    __table_args__ = (db.UniqueConstraint('yuz', 'renk_sayisi', name='uq_baski_fiyat_yuz_renk'),)

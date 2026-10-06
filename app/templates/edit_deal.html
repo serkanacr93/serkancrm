@@ -152,9 +152,22 @@
                 </div>
                 {% endfor %}
             </div>
-            <button type="button" class="btn btn-success btn-sm mb-3" id="add-item">
-                <i class="bi bi-plus"></i> Ürün Ekle
-            </button>
+            <div class="d-flex gap-2 mb-3">
+                {% if teklif_yardimci_enabled %}
+                <button type="button" class="btn btn-warning text-dark btn-sm" id="ty-kese-btn">
+                    <i class="bi bi-bag"></i> Kese Seç
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="ty-doypack-btn">
+                    <i class="bi bi-box-seam"></i> Doypack Seç
+                </button>
+                {% endif %}
+                <button type="button" class="btn btn-success btn-sm" id="add-item">
+                    <i class="bi bi-plus"></i> Ürün Ekle
+                </button>
+            </div>
+            {% if teklif_yardimci_enabled %}
+            <div id="teklif-yardimci-mount"></div>
+            {% endif %}
 
             <div class="mb-3">
                 <label for="notes" class="form-label">Notlar</label>
@@ -268,3 +281,13 @@ document.addEventListener('click', function(e) {
 });
 </script>
 {% endblock %}
+
+{% if teklif_yardimci_enabled %}
+{% block scripts %}
+<script>
+window.TEKLIF_YARDIMCI_KATALOG = {{ teklif_yardimci_katalog|tojson }};
+window.TEKLIF_YARDIMCI_CSRF = {{ csrf_token()|tojson }};
+</script>
+<script src="{{ asset_url('js/teklif-yardimci.js') }}"></script>
+{% endblock %}
+{% endif %}
