@@ -125,7 +125,7 @@
                         <button type="button" class="btn btn-sm btn-outline-secondary w-100 devret-btn" data-customer-id="{{ item.customer.id }}">Devret</button>
                     </div>
                     <div class="col-6 col-md-3">
-                        <button type="button" class="btn btn-sm btn-outline-dark w-100 skip-btn">Atla</button>
+                        <button type="button" class="btn btn-sm btn-outline-dark w-100 skip-btn" data-customer-id="{{ item.customer.id }}">Atla</button>
                     </div>
                 </div>
                 <a href="{{ url_for('duplicate_customers') }}" class="small d-block mt-2 text-muted">Mükerrer kayıt mı? Birleştir →</a>
@@ -267,13 +267,20 @@
         updateQueueInfo();
     }
 
-    // Is 1 madde 3: "Atla" TAMAMEN client-side - backend'e HICBIR kayit
-    // gitmez (sayaç/60-gunluk sayaç etkilenmez), sadece sirada bir
-    // sonraki musteri gosterilir.
+    // 2026-10-06 duzeltmesi (bulgu E): "Atla" artik backend'e KALICI kayit
+    // atar (TakipModuAtla - o GUN icin, sayaç/60-gunluk sayaç ETKILENMEZ)
+    // ki sayfa yenilenince musteri tekrar en basa gelmesin. fetch hata
+    // verirse (ag sorunu vb.) sessizce mevcut client-side davranisa
+    // (sadece sirada ilerleme) duser.
     document.addEventListener('click', function (e) {
-        if (e.target.closest('.skip-btn')) {
-            showNext();
-        }
+        var btn = e.target.closest('.skip-btn');
+        if (!btn) return;
+        showNext();
+        fetch('{{ url_for("takip_modu_atla") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': '{{ csrf_token() }}' },
+            body: 'customer_id=' + encodeURIComponent(btn.dataset.customerId)
+        }).catch(function () { /* sessizce yut - client-side ilerleme zaten oldu */ });
     });
 
     var noteModal = new bootstrap.Modal(document.getElementById('noteModal'));

@@ -1000,6 +1000,20 @@ class PaymentReminder(db.Model):
     customer = db.relationship('Customer', backref='payment_reminders')
     created_by = db.relationship('User')
 
+class TakipModuAtla(db.Model):
+    """Takip Modu - 'Atla' (2026-10-06, E duzeltmesi): eskiden tamamen
+    client-side'di (sayfa yenilenince sira bastan basliyordu). Artik gun
+    bazinda kalici kayit tutulur - DailyReport YAZILMAZ, 40/gunluk ve
+    60/30 gunluk sayaçlar ETKILENMEZ, sadece o GUN icin listeden cikarilir
+    (ertesi gun otomatik geri gelir)."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
+    skip_date = db.Column(db.Date, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'customer_id', 'skip_date', name='uq_takip_modu_atla'),)
+
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)

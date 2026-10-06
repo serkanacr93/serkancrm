@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, limiter, csrf
@@ -50,6 +50,13 @@ def _customers_with_activity_subquery():
 
 TAKIP_GEREKEN_GUN = 60
 GUNLUK_HEDEF_ILETISIM = 40
+
+# 2026-10-06 (/takip-modu mantik duzeltmesi): bu ikisi SADECE takip_modu()
+# route'unun kendi 3/4 gruplari icin kullanilir - TAKIP_GEREKEN_GUN'dan
+# BILEREK ayri tutulmustur ki hizli_iletisim()/customers_takip_gerekiyor()
+# davranisi degismesin.
+TAKIP_SIPARIS_VERMIS_GUN = 60
+TAKIP_TEKLIF_ALMIS_GUN = 30
 
 def _increment_daily_outreach(user_id, amount=1):
     """Is 1 - Takip Modu: kullanici+bugun icin DailyOutreachCount satirini
@@ -1307,6 +1314,43 @@ def register_routes(app):
         if created:
             db.session.commit()
 
+    def _auto_close_paid_reminders(customer_ids=None):
+        """2026-10-06 duzeltmesi (bulgu D): eskiden bir PaymentReminder
+        SADECE Takip Modu'nun 'Odeme Alindi' butonuyla (payment_reminder_id
+        ile add_payment) kapaniyordu - odeme Odemeler sayfasi/fatura/musteri
+        uzerinden girilirse hatirlatma acik kalirdi. Artik deal_pesinat/
+        deal_bakiye kaynakli acik hatirlatmalar, ilgili Deal'in GERCEK odeme
+        durumuna gore otomatik kapatilir. source_type='manuel' olanlara
+        DOKUNULMAZ (elle girilen hatirlatma sadece elle/Odeme Alindi ile
+        kapanir)."""
+        q = PaymentReminder.query.filter(
+            PaymentReminder.status != 'odendi',
+            PaymentReminder.source_type.in_(['deal_pesinat', 'deal_bakiye'])
+        )
+        if customer_ids is not None:
+            q = q.filter(PaymentReminder.customer_id.in_(customer_ids))
+        reminders = q.all()
+        if not reminders:
+            return []
+        deals = {d.id: d for d in Deal.query.filter(Deal.id.in_({r.source_id for r in reminders})).all()}
+        closed = []
+        for r in reminders:
+            d = deals.get(r.source_id)
+            if not d:
+                continue
+            if r.source_type == 'deal_pesinat':
+                should_close = (d.paid_amount >= d.pesinat_tutari - 0.01) if d.pesinat_orani is not None \
+                    else (d.outstanding_amount <= 0.01)
+            else:  # deal_bakiye
+                should_close = d.payment_complete
+            if should_close:
+                r.status = 'odendi'
+                r.resolved_at = datetime.utcnow()
+                closed.append(r)
+        if closed:
+            db.session.commit()
+        return closed
+
     @app.route('/takip-modu')
     @login_required
     def takip_modu():
@@ -1314,8 +1358,15 @@ def register_routes(app):
         (a->e): odeme gunu gelmis/gecmis > tekrar-ara bugun > 60+ gun
         sessiz (siparisi olan) > teklif almis-siparis vermemis > hic
         islemi olmayan. Sadece current_user'in musterileri (owner_user_id) -
-        admin icin ?tumu=1 ile tum musteriler."""
+        admin icin ?tumu=1 ile tum musteriler.
+
+        2026-10-06 mantik duzeltmesi (bulgu A/B/C/E): 3/4/5. gruplar artik
+        gun esigi VE gelecek tarihli tekrar_ara_tarihi'ne gore filtrelenir
+        (bkz. asagidaki for dongusu); ayni grup icinde days_silent AZALAN
+        (en uzun sessiz en ustte) siralanir; o gun 'Atla' denen musteriler
+        (TakipModuAtla) listeye hic girmez."""
         _sync_payment_reminders_for_today()
+        _auto_close_paid_reminders()
         today = date.today()
         show_all = current_user.is_admin and request.args.get('tumu') == '1'
 
@@ -1323,6 +1374,12 @@ def register_routes(app):
         if not show_all:
             base_q = base_q.filter(Customer.owner_user_id == current_user.id)
         customers = base_q.all()
+
+        skipped_today = set(cid for (cid,) in db.session.query(TakipModuAtla.customer_id).filter(
+            TakipModuAtla.user_id == current_user.id, TakipModuAtla.skip_date == today
+        ).all())
+        if skipped_today:
+            customers = [c for c in customers if c.id not in skipped_today]
         customer_ids = [c.id for c in customers]
 
         if not customer_ids:
@@ -1376,21 +1433,45 @@ def register_routes(app):
                 priority, priority_label = 0, 'Ödeme Günü'
             elif tekrar_ara and tekrar_ara <= today:
                 priority, priority_label = 1, 'Tekrar Ara'
-            elif c.id in has_won and (days_silent is None or days_silent >= TAKIP_GEREKEN_GUN):
-                priority, priority_label = 2, f'{days_silent} gün sessiz' if days_silent is not None else 'Sessiz'
-            elif c.id in has_deal and c.id not in has_won:
+            elif tekrar_ara and tekrar_ara > today:
+                # Kural 8: gelecek tarihli tekrar_ara_tarihi - o tarih
+                # gelene kadar 3/4/5. gruplarda HIC gosterilmez.
+                continue
+            elif c.id in has_won:
+                if days_silent is not None and days_silent < TAKIP_SIPARIS_VERMIS_GUN:
+                    continue  # kural 7: yakin zamanda gorusulmus - girmez
+                priority, priority_label = 2, (f'{days_silent} gün sessiz' if days_silent is not None else 'Sessiz')
+            elif c.id in has_deal:
+                if days_silent is not None and days_silent < TAKIP_TEKLIF_ALMIS_GUN:
+                    continue
                 priority, priority_label = 3, 'Teklif aldı, sipariş yok'
-            elif c.id not in has_deal:
-                priority, priority_label = 4, 'Hiç işlem yok'
             else:
-                continue  # siparisi var ama henuz 60 gun dolmamis - takip modunda gosterilmez
+                if days_silent is not None:
+                    # Hic deal'i olmayan ama en az bir kere gercek irtibati
+                    # OLMUS musteri - 'hic islem yok' grubuna girmez (kural
+                    # 7: yakin zamanda girilen not gibi durumlar dahil).
+                    continue
+                priority, priority_label = 4, 'Hiç işlem yok'
 
             city = extract_customer_city(c)
+            if priority in (2, 3):
+                # Kural 6: ayni grup icinde days_silent AZALAN (en uzun
+                # sessiz en ustte). days_silent None (teorik - deal'i olan
+                # musteride normalde olusmaz) 'sonsuz sessizlik' sayilir,
+                # en basa gelir.
+                tie = -(days_silent if days_silent is not None else 10**9)
+            elif priority == 4:
+                # Kural 5: 'hic islem yok' grubu EN SONDA, en eskiden
+                # yeniye (musteri kayit tarihine gore).
+                tie = c.created_at.timestamp() if c.created_at else 0.0
+            else:
+                tie = days_silent or 0  # 0/1. gruplarda mevcut davranis korunur
+
             cards.append({
                 'customer': c, 'priority': priority, 'priority_label': priority_label,
                 'days_silent': days_silent, 'last_order_date': last_order_date.get(c.id),
                 'city': city, 'payment_reminders': payment_due or [],
-                'sort_key': (priority, -(payment_due[0].amount if payment_due else 0), days_silent or 0),
+                'sort_key': (priority, -(payment_due[0].amount if payment_due else 0), tie),
             })
 
         cards.sort(key=lambda x: x['sort_key'])
@@ -1479,6 +1560,28 @@ def register_routes(app):
         db.session.add(report)
         db.session.commit()
         return redirect(url_for('takip_modu'))
+
+    @app.route('/takip-modu/atla', methods=['POST'])
+    @login_required
+    def takip_modu_atla():
+        """Is 1 (bulgu E duzeltmesi, 2026-10-06): 'Atla' artik KALICI -
+        bugun icin current_user+customer kombinasyonu TakipModuAtla'ya
+        yazilir (DailyReport YAZILMAZ, 40/gunluk ve 60/30 gunluk sayaçlar
+        ETKILENMEZ). Sayfa yenilense/kapatilip acilsa da musteri bugun
+        icin listede tekrar gorunmez; ertesi gun otomatik geri gelir.
+        JS tarafinda mevcut showNext() (client-side siradaki karti
+        gosterme) davranisi degismez - bu route arka planda fetch ile
+        cagrilir, hata olursa JS sessizce mevcut davranisa duser."""
+        customer_id = request.form.get('customer_id', type=int)
+        customer = Customer.query.get_or_404(customer_id)
+        today = date.today()
+        existing = TakipModuAtla.query.filter_by(
+            user_id=current_user.id, customer_id=customer.id, skip_date=today
+        ).first()
+        if not existing:
+            db.session.add(TakipModuAtla(user_id=current_user.id, customer_id=customer.id, skip_date=today))
+            db.session.commit()
+        return jsonify({'ok': True})
 
     @app.route('/takip-modu/devret', methods=['POST'])
     @login_required
@@ -5769,6 +5872,14 @@ def register_routes(app):
                     reminder.resolved_at = datetime.utcnow()
 
             db.session.commit()
+
+            # 2026-10-06 duzeltmesi (bulgu D): odeme Odemeler sayfasi/fatura/
+            # musteri uzerinden girildiginde de (payment_reminder_id ile
+            # BAGLANMAMIS olsa bile) ilgili deal'in peşinat/bakiye
+            # hatirlatmalari gercek odeme durumuna gore otomatik kapanir.
+            if payment.deal_id:
+                _auto_close_paid_reminders(customer_ids=[customer_id])
+
             flash('Ödeme kaydedildi!', 'success')
             if reminder_id:
                 return redirect(url_for('takip_modu'))

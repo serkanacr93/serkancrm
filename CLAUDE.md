@@ -55,6 +55,21 @@ Kullanıcı net bir talimat vermediği bir tasarım/iş kuralı kararında (örn
 - Cari bakiye HER ZAMAN `calculate_customer_balance()` / `Customer.balance` property'si üzerinden hesaplanır (faturalanmış + faturalanmamış kazanılan - tahsilat) - ikinci/farklı bir hesaplama yolu AÇILMAZ.
 - 60 günlük takip sayacı `_last_contact_subquery()` üzerinden hesaplanır - `DailyReport.status in ('ulasilamadi', 'sonra_ara')` olan kayıtlar kasıtlı olarak hariç tutulur (gerçek irtibat sayılmaz).
 
+## Takip Modu kuralları (2026-10-06)
+
+1. Ödeme günü gelmiş/geçmiş açık hatırlatması olanlar en üstte.
+2. `tekrar_ara_tarihi` bugün veya geçmiş olanlar ikinci sırada.
+3. "Sipariş vermiş" (kazanılan teklifi olan) müşteriler: son gerçek görüşmesinden `TAKIP_SIPARIS_VERMIS_GUN` (60) gün veya fazla geçmişse listeye girer.
+4. "Teklif aldı ama sipariş vermemiş": son gerçek görüşmesinden `TAKIP_TEKLIF_ALMIS_GUN` (30) gün veya fazla geçmişse girer.
+5. Hiç teklifi/görüşmesi olmayan/yeni kayıt müşteriler listenin EN SONUNDA, en eskiden yeniye sıralı.
+6. Gruplar 3/4/5 kendi içinde `days_silent` AZALAN (en uzun süredir aranmayan en üstte) sıralanır.
+7. Yakın zamanda görüşülmüş müşteri (gün sınırı dolmamış) listeye HİÇ girmez.
+8. Gelecek tarihli `tekrar_ara_tarihi` olan müşteri o tarih gelene kadar 3/4/5'te görünmez.
+9. "Son gerçek görüşme" tanımı = `_last_contact_subquery()` - başka bir yerde DEĞİŞTİRİLMEZ.
+10. `musteri_degil` hariç tutma ve devredilenlerin sahiplik davranışı (owner_user_id) aynen korunur.
+
+`TAKIP_SIPARIS_VERMIS_GUN`/`TAKIP_TEKLIF_ALMIS_GUN` bilerek `TAKIP_GEREKEN_GUN`'dan ayrı tutulur ki `hizli_iletisim()`/`customers_takip_gerekiyor()` davranışı değişmesin. Ödeme hatırlatmaları (`deal_pesinat`/`deal_bakiye`) artık `_auto_close_paid_reminders()` ile Deal'in gerçek ödeme durumuna göre otomatik kapanır (manuel hatırlatmalara dokunulmaz); "Atla" `TakipModuAtla` tablosuna günlük kalıcı yazılır (DailyReport yazılmaz, sayaçlar etkilenmez).
+
 ## Her işin sonunda
 
 1. `tests/smoke_test.py` canlıda (`--url https://serkancrm.onrender.com`) çalıştırılır; tablo temiz değilse "tamam" denmez.
