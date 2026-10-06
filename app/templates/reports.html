@@ -19,7 +19,7 @@
                         <tr>
                             <td><span class="badge bg-info">{{ stage }}</span></td>
                             <td>{{ count }}</td>
-                            <td>{{ "{:,.0f}".format(value or 0) }} ₺</td>
+                            <td>{{ (value or 0)|para_goster }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -73,7 +73,7 @@
                         </div>
                         <div class="text-end">
                             <span class="badge bg-info">{{ deal.stage }}</span>
-                            <div><strong>{{ "{:,.0f}".format(deal.value) }} ₺</strong></div>
+                            <div><strong>{{ deal.value|para_goster(deal.para_birimi) }}</strong></div>
                         </div>
                     </div>
                     {% endfor %}
@@ -98,7 +98,7 @@
                         <tr>
                             <td><a href="{{ url_for('customer_detail', id=customer.id) }}">{{ customer.first_name }} {{ customer.last_name }}</a></td>
                             <td>{{ deal_count }}</td>
-                            <td><strong>{{ "{:,.0f}".format(total_value or 0) }} ₺</strong></td>
+                            <td><strong>{{ (total_value or 0)|para_goster }}</strong></td>
                         </tr>
                         {% endfor %}
                     </tbody>

@@ -64,9 +64,9 @@
                         <td><span class="badge bg-{{ 'primary' if inv.type == 'fatura' else 'info' }}">{{ inv.type }}</span></td>
                         <td>{{ inv.customer.display_name }}</td>
                         <td>{{ inv.date.strftime('%d.%m.%Y') }}</td>
-                        <td>{{ "{:,.2f}".format(inv.subtotal) }} ₺</td>
-                        <td>{{ "{:,.2f}".format(inv.vat_amount) }} ₺</td>
-                        <td><strong>{{ "{:,.2f}".format(inv.total) }} ₺</strong></td>
+                        <td>{{ inv.subtotal|para_goster(inv.para_birimi) }}</td>
+                        <td>{{ inv.vat_amount|para_goster(inv.para_birimi) }}</td>
+                        <td><strong>{{ inv.total|para_goster(inv.para_birimi) }}</strong></td>
                         <td>
                             {% if inv.type == 'fatura' %}
                             <span class="badge bg-{{ 'success' if inv.payment_status == 'odendi' else 'warning' if inv.payment_status == 'kismi_odendi' else 'danger' }}">

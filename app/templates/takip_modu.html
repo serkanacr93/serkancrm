@@ -31,7 +31,7 @@
 <div class="card shadow-sm mb-3 border-danger">
     <div class="card-header bg-danger text-white">
         <i class="bi bi-cash-coin"></i> Bugünkü Ödemeler
-        <strong class="ms-2">Bugün beklenen tahsilat: {{ "{:,.0f}".format(today_payment_total) }} ₺ · {{ today_payments|length }} müşteri</strong>
+        <strong class="ms-2">Bugün beklenen tahsilat: {{ today_payment_total|para_goster }} · {{ today_payments|length }} müşteri</strong>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -41,7 +41,7 @@
                     {% for cid, r in today_payments %}
                     <tr class="today-payment-row" data-customer-id="{{ cid }}" data-reminder-id="{{ r.id }}" style="cursor:pointer;">
                         <td>{{ customers_by_id[cid].display_name }}</td>
-                        <td>{{ "{:,.2f}".format(r.amount) }} ₺</td>
+                        <td>{{ r.amount|para_goster }}</td>
                         <td>{{ {'deal_pesinat':'Peşinat','deal_bakiye':'Bakiye','manuel':'Manuel'}.get(r.source_type, r.source_type) }}</td>
                         <td><span class="badge bg-{{ 'secondary' if r.status=='bekliyor' else 'info' if r.status=='hatirlatildi' else 'warning text-dark' }}">{{ {'bekliyor':'Bekliyor','hatirlatildi':'Hatırlatıldı','soz_verildi':'Söz Verdi'}.get(r.status, r.status) }}</span></td>
                     </tr>
@@ -78,12 +78,12 @@
                 {% if item.payment_reminders %}
                 {% set r = item.payment_reminders[0] %}
                 <div class="alert alert-danger py-2 mb-3">
-                    <strong>{{ "{:,.2f}".format(r.amount) }} ₺</strong> —
+                    <strong>{{ r.amount|para_goster }}</strong> —
                     {% if r.due_date < today %}{{ (today - r.due_date).days }} gün gecikti{% else %}Ödeme günü{% endif %}
                     {% if r.notes %}<div class="small">{{ r.notes }}</div>{% endif %}
                 </div>
                 <div class="d-grid gap-2 mb-3">
-                    <a href="#" class="btn btn-success whatsapp-btn" data-customer-id="{{ item.customer.id }}" data-customer-name="{{ item.customer.display_name }}" data-customer-phone="{{ item.customer.phone }}" data-from-takip-modu="1" data-payment-reminder-id="{{ r.id }}" data-message="Merhaba, {{ "{:,.2f}".format(r.amount) }} ₺ tutarındaki ödemenizi hatırlatmak isteriz. İyi günler dileriz.">
+                    <a href="#" class="btn btn-success whatsapp-btn" data-customer-id="{{ item.customer.id }}" data-customer-name="{{ item.customer.display_name }}" data-customer-phone="{{ item.customer.phone }}" data-from-takip-modu="1" data-payment-reminder-id="{{ r.id }}" data-message="Merhaba, {{ r.amount|para_goster }} tutarındaki ödemenizi hatırlatmak isteriz. İyi günler dileriz.">
                         <i class="bi bi-whatsapp"></i> WhatsApp ile Hatırlat
                     </a>
                     <button type="button" class="btn btn-outline-primary note-btn" data-customer-id="{{ item.customer.id }}" data-reminder-id="{{ r.id }}">

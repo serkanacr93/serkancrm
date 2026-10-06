@@ -124,9 +124,9 @@
                             {{ deal.customer.first_name }} {{ deal.customer.last_name }}
                             {% endif %}
                         </td>
-                        <td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td>
+                        <td>{{ deal.subtotal|para_goster(deal.para_birimi) }}</td>
                         <td><small>%{{ deal.vat_rate }}</small></td>
-                        <td><strong class="text-success">{{ "{:,.2f}".format(deal.value) }} ₺</strong></td>
+                        <td><strong class="text-success">{{ deal.value|para_goster(deal.para_birimi) }}</strong></td>
                         <td><span class="badge bg-{{ 'success' if deal.stage == 'kazanilan' else 'danger' if deal.stage == 'kaybedilen' else 'warning' if deal.stage == 'revize' else 'info' }}">{{ deal.stage }}</span></td>
                         <td>
                             {% if deal.valid_until %}
@@ -219,7 +219,7 @@
 <div class="card shadow-sm">
     <div class="card-header bg-success text-white"><i class="bi bi-calendar-check"></i> Bu Ay Kazanılan</div>
     <div class="card-body">
-        <a href="{{ url_for('deals', tab='kazanilan', this_month=1) }}" class="crm-panel-link fw-bold text-success fs-5">{{ "{:,.0f}".format(this_month_won_total) }} ₺</a>
+        <a href="{{ url_for('deals', tab='kazanilan', this_month=1) }}" class="crm-panel-link fw-bold text-success fs-5">{{ this_month_won_total|para_goster }}</a>
     </div>
 </div>
 {% endblock %}

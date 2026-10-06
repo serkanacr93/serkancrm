@@ -61,22 +61,22 @@
                 <div class="row text-center">
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1">Faturalanmış</h6>
-                        <h5>{{ "{:,.2f}".format(balance_info.invoiced) }} ₺</h5>
+                        <h5>{{ balance_info.invoiced|para_goster }}</h5>
                     </div>
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1" title="Kazanılmış ama henüz fatura kesilmemiş tekliflerin toplam değeri">
                             Faturalanmamış Kazanılan
                         </h6>
-                        <h5>{{ "{:,.2f}".format(balance_info.uninvoiced_won) }} ₺</h5>
+                        <h5>{{ balance_info.uninvoiced_won|para_goster }}</h5>
                     </div>
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1">Toplam Tahsil Edilen</h6>
-                        <h5 class="text-success">{{ "{:,.2f}".format(balance_info.collected) }} ₺</h5>
+                        <h5 class="text-success">{{ balance_info.collected|para_goster }}</h5>
                     </div>
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1">Toplam Bakiye</h6>
                         <h4 class="{{ 'text-danger' if balance_info.balance > 0.01 else 'text-success' }}">
-                            {{ "{:,.2f}".format(balance_info.balance) }} ₺
+                            {{ balance_info.balance|para_goster }}
                             {% if balance_info.balance > 0.01 %}
                             <span class="badge bg-danger">Alacaklıyız</span>
                             {% else %}
@@ -234,9 +234,9 @@
                                     <tr class="{{ 'table-danger' if deal.is_expired else 'table-warning' if deal.is_expiring_soon else '' }}">
                                         <td><small>{{ deal.display_no }}</small></td>
                                         <td><a href="{{ url_for('deal_detail', id=deal.id) }}">{{ deal.title }}</a></td>
-                                        <td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td>
+                                        <td>{{ deal.subtotal|para_goster(deal.para_birimi) }}</td>
                                         <td><small>%{{ deal.vat_rate }}</small></td>
-                                        <td><strong>{{ "{:,.2f}".format(deal.value) }} ₺</strong></td>
+                                        <td><strong>{{ deal.value|para_goster(deal.para_birimi) }}</strong></td>
                                         <td><span class="badge bg-{{ 'success' if deal.stage == 'kazanilan' else 'danger' if deal.stage == 'kaybedilen' else 'warning' if deal.stage == 'revize' else 'info' }}">{{ deal.stage }}</span></td>
                                         <td>
                                             {% if deal.valid_until %}
@@ -254,7 +254,7 @@
                                                 <span class="badge bg-success" title="Kalan: 0 ₺">Tamamlandı</span>
                                                 {% else %}
                                                 <span class="badge bg-danger" title="Bakiye tarihi: {{ deal.bakiye_tarihi.strftime('%d.%m.%Y') if deal.bakiye_tarihi else '-' }}">
-                                                    Kalan {{ "{:,.2f}".format(deal.outstanding_amount) }} ₺
+                                                    Kalan {{ deal.outstanding_amount|para_goster(deal.para_birimi) }}
                                                 </span>
                                                 {% endif %}
                                             {% else %}
@@ -293,7 +293,7 @@
                                         <td>{{ s.created_at.strftime('%d.%m.%Y') }}</td>
                                         <td><span class="badge bg-{{ 'danger' if s.type == 'borc' else 'success' }}">{{ s.type|upper }}</span></td>
                                         <td>{{ s.description or '-' }}</td>
-                                        <td>{{ "{:,.2f}".format(s.amount) }} ₺</td>
+                                        <td>{{ s.amount|para_goster }}</td>
                                         <td>
                                             {% if s.source == 'pdf_import' %}
                                             <span class="badge bg-secondary"><i class="bi bi-file-earmark-arrow-up"></i> PDF İçe Aktarım</span>
@@ -305,9 +305,9 @@
                                     {% endfor %}
                                 </tbody>
                                 <tfoot class="table-light">
-                                    <tr><td colspan="4"><strong>Toplam Borç:</strong></td><td><strong class="text-danger">{{ "{:,.2f}".format(total_debit) }} ₺</strong></td></tr>
-                                    <tr><td colspan="4"><strong>Toplam Alacak:</strong></td><td><strong class="text-success">{{ "{:,.2f}".format(total_credit) }} ₺</strong></td></tr>
-                                    <tr class="table-warning"><td colspan="4"><strong>Ekstre Bakiyesi:</strong></td><td><strong>{{ "{:,.2f}".format(total_debit - total_credit) }} ₺</strong></td></tr>
+                                    <tr><td colspan="4"><strong>Toplam Borç:</strong></td><td><strong class="text-danger">{{ total_debit|para_goster }}</strong></td></tr>
+                                    <tr><td colspan="4"><strong>Toplam Alacak:</strong></td><td><strong class="text-success">{{ total_credit|para_goster }}</strong></td></tr>
+                                    <tr class="table-warning"><td colspan="4"><strong>Ekstre Bakiyesi:</strong></td><td><strong>{{ (total_debit - total_credit)|para_goster }}</strong></td></tr>
                                     <tr><td colspan="5"><small class="text-muted">Bu bakiye sadece aşağıdaki ekstre kayıtlarından (borç/alacak) hesaplanır - sayfanın üstündeki "Toplam Bakiye" güncel/kapsamlı hesaplamadır, esas alınmalıdır.</small></td></tr>
                                 </tfoot>
                             </table>
@@ -373,7 +373,7 @@
                                     {% for payment in customer.payments %}
                                     <tr>
                                         <td>{{ payment.payment_date.strftime('%d.%m.%Y') }}</td>
-                                        <td><strong>{{ "{:,.2f}".format(payment.amount) }} ₺</strong></td>
+                                        <td><strong>{{ payment.amount|para_goster }}</strong></td>
                                         <td>{{ payment.payment_method or '-' }}</td>
                                         <td>{{ payment.reference_no or '-' }}</td>
                                         <td>

@@ -11,7 +11,7 @@
         <div class="card border-warning shadow-sm">
             <div class="card-body text-center">
                 <i class="bi bi-hourglass-split text-warning fs-1"></i>
-                <h3 class="mt-2 text-warning">{{ "{:,.2f}".format(total_pending) }} ₺</h3>
+                <h3 class="mt-2 text-warning">{{ (total_pending)|para_goster }}</h3>
                 <small class="text-muted">Ödenmemiş Prim</small>
             </div>
         </div>
@@ -20,7 +20,7 @@
         <div class="card border-success shadow-sm">
             <div class="card-body text-center">
                 <i class="bi bi-check-circle text-success fs-1"></i>
-                <h3 class="mt-2 text-success">{{ "{:,.2f}".format(total_paid) }} ₺</h3>
+                <h3 class="mt-2 text-success">{{ (total_paid)|para_goster }}</h3>
                 <small class="text-muted">Ödenen Prim</small>
             </div>
         </div>
@@ -29,7 +29,7 @@
         <div class="card border-primary shadow-sm">
             <div class="card-body text-center">
                 <i class="bi bi-cash text-primary fs-1"></i>
-                <h3 class="mt-2 text-primary">{{ "{:,.2f}".format(total_pending + total_paid) }} ₺</h3>
+                <h3 class="mt-2 text-primary">{{ (total_pending + total_paid)|para_goster }}</h3>
                 <small class="text-muted">Toplam Prim</small>
             </div>
         </div>
@@ -50,9 +50,9 @@
                         <td>{{ c.created_at.strftime('%d.%m.%Y') }}</td>
                         <td>{{ c.deal.customer.first_name }} {{ c.deal.customer.last_name }}</td>
                         <td>{{ c.deal.title }}</td>
-                        <td>{{ "{:,.2f}".format(c.sale_amount) }} ₺</td>
+                        <td>{{ (c.sale_amount)|para_goster }}</td>
                         <td><span class="badge bg-{{ 'success' if c.customer_type == 'yeni' else 'info' }}">%{{ c.rate }}</span></td>
-                        <td><strong>{{ "{:,.2f}".format(c.amount) }} ₺</strong></td>
+                        <td><strong>{{ (c.amount)|para_goster }}</strong></td>
                         <td><span class="badge bg-{{ 'success' if c.customer_type == 'yeni' else 'secondary' }}">{{ c.customer_type }}</span></td>
                         <td><span class="badge bg-{{ 'success' if c.status == 'odendi' else 'warning' }}">{{ 'Ödendi' if c.status == 'odendi' else 'Ödenmedi' }}</span></td>
                     </tr>

@@ -15,7 +15,7 @@
         <div class="card shadow-sm text-center">
             <div class="card-body">
                 <h6 class="text-muted mb-1">Toplam Fatura Tutarı</h6>
-                <h4>{{ "{:,.2f}".format(total_invoiced) }} ₺</h4>
+                <h4>{{ total_invoiced|para_goster }}</h4>
             </div>
         </div>
     </div>
@@ -23,7 +23,7 @@
         <div class="card shadow-sm text-center">
             <div class="card-body">
                 <h6 class="text-muted mb-1">Toplam Tahsilat</h6>
-                <h4 class="text-success">{{ "{:,.2f}".format(total_collected) }} ₺</h4>
+                <h4 class="text-success">{{ total_collected|para_goster }}</h4>
             </div>
         </div>
     </div>
@@ -31,7 +31,7 @@
         <div class="card shadow-sm text-center">
             <div class="card-body">
                 <h6 class="text-muted mb-1">Bekleyen Tahsilat</h6>
-                <h4 class="text-danger">{{ "{:,.2f}".format(total_outstanding) }} ₺</h4>
+                <h4 class="text-danger">{{ total_outstanding|para_goster }}</h4>
             </div>
         </div>
     </div>
@@ -45,10 +45,10 @@
                     <i class="bi bi-graph-up-arrow"></i> Beklenen Toplam Tahsilat
                     <span class="text-muted small">(açık teklifler + bekleyen faturalar - ileriye dönük tahmin)</span>
                 </h6>
-                <h3 class="text-info">{{ "{:,.2f}".format(expected_total_receivable) }} ₺</h3>
+                <h3 class="text-info">{{ expected_total_receivable|para_goster }}</h3>
                 <small class="text-muted">
-                    Açık/bekleyen teklifler: {{ "{:,.2f}".format(total_open_deals_value) }} ₺
-                    + Faturalardan kalan bakiye: {{ "{:,.2f}".format(total_outstanding) }} ₺
+                    Açık/bekleyen teklifler: {{ total_open_deals_value|para_goster }}
+                    + Faturalardan kalan bakiye: {{ total_outstanding|para_goster }}
                 </small>
             </div>
         </div>
@@ -81,9 +81,9 @@
                         <td><a href="{{ url_for('invoice_detail', id=inv.id) }}">{{ inv.display_no }}</a></td>
                         <td>{{ inv.customer.display_name }}</td>
                         <td>{{ inv.date.strftime('%d.%m.%Y') }}</td>
-                        <td>{{ "{:,.2f}".format(inv.total) }} ₺</td>
-                        <td class="text-success">{{ "{:,.2f}".format(inv.paid_amount) }} ₺</td>
-                        <td class="text-danger"><strong>{{ "{:,.2f}".format(inv.remaining_amount) }} ₺</strong></td>
+                        <td>{{ inv.total|para_goster(inv.para_birimi) }}</td>
+                        <td class="text-success">{{ inv.paid_amount|para_goster(inv.para_birimi) }}</td>
+                        <td class="text-danger"><strong>{{ inv.remaining_amount|para_goster(inv.para_birimi) }}</strong></td>
                         <td>
                             <a href="{{ url_for('add_payment', invoice_id=inv.id) }}" class="btn btn-sm btn-success">
                                 <i class="bi bi-plus-circle"></i> Ödeme Ekle
@@ -163,7 +163,7 @@
                             -
                             {% endif %}
                         </td>
-                        <td><strong>{{ "{:,.2f}".format(payment.amount) }} ₺</strong></td>
+                        <td><strong>{{ payment.amount|para_goster }}</strong></td>
                         <td>{{ payment.payment_method or '-' }}</td>
                         <td>{{ payment.reference_no or '-' }}</td>
                         <td>

@@ -16,7 +16,7 @@
         <div class="card border-warning shadow-sm">
             <div class="card-body text-center">
                 <i class="bi bi-hourglass-split text-warning fs-1"></i>
-                <h3 class="mt-2 text-warning">{{ "{:,.2f}".format(total_pending) }} ₺</h3>
+                <h3 class="mt-2 text-warning">{{ (total_pending)|para_goster }}</h3>
                 <small class="text-muted">Ödenmemiş Prim</small>
             </div>
         </div>
@@ -25,7 +25,7 @@
         <div class="card border-success shadow-sm">
             <div class="card-body text-center">
                 <i class="bi bi-check-circle text-success fs-1"></i>
-                <h3 class="mt-2 text-success">{{ "{:,.2f}".format(total_paid) }} ₺</h3>
+                <h3 class="mt-2 text-success">{{ (total_paid)|para_goster }}</h3>
                 <small class="text-muted">Ödenen Prim</small>
             </div>
         </div>
@@ -43,7 +43,7 @@
         <div class="card border-info shadow-sm">
             <div class="card-body text-center">
                 <i class="bi bi-cash text-info fs-1"></i>
-                <h3 class="mt-2 text-info">{{ "{:,.2f}".format(total_pending + total_paid) }} ₺</h3>
+                <h3 class="mt-2 text-info">{{ (total_pending + total_paid)|para_goster }}</h3>
                 <small class="text-muted">Toplam Prim</small>
             </div>
         </div>
@@ -65,9 +65,9 @@
                             <tr>
                                 <td><strong>{{ uid }}</strong></td>
                                 <td>{{ stats.count }}</td>
-                                <td class="text-warning">{{ "{:,.2f}".format(stats.pending) }} ₺</td>
-                                <td class="text-success">{{ "{:,.2f}".format(stats.paid) }} ₺</td>
-                                <td><strong>{{ "{:,.2f}".format(stats.pending + stats.paid) }} ₺</strong></td>
+                                <td class="text-warning">{{ (stats.pending)|para_goster }}</td>
+                                <td class="text-success">{{ (stats.paid)|para_goster }}</td>
+                                <td><strong>{{ (stats.pending + stats.paid)|para_goster }}</strong></td>
                                 <td><a href="{{ url_for('user_commissions', id=uid) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> Detay</a></td>
                             </tr>
                             {% endfor %}
@@ -106,9 +106,9 @@
                         <td>{{ c.created_at.strftime('%d.%m.%Y') }}</td>
                         <td>{{ c.deal.customer.first_name }} {{ c.deal.customer.last_name }}</td>
                         <td><a href="{{ url_for('deal_detail', id=c.deal.id) }}">{{ c.deal.title }}</a></td>
-                        <td>{{ "{:,.2f}".format(c.sale_amount) }} ₺</td>
+                        <td>{{ (c.sale_amount)|para_goster }}</td>
                         <td><span class="badge {{ 'badge-manual-rate' if c.customer_type == 'manuel' else 'bg-success' if c.customer_type == 'yeni' else 'bg-info' }}">%{{ c.rate }}</span></td>
-                        <td><strong>{{ "{:,.2f}".format(c.amount) }} ₺</strong></td>
+                        <td><strong>{{ (c.amount)|para_goster }}</strong></td>
                         <td><span class="badge {{ 'badge-manual-rate' if c.customer_type == 'manuel' else 'bg-success' if c.customer_type == 'yeni' else 'bg-secondary' }}">{{ 'Manuel' if c.customer_type == 'manuel' else c.customer_type }}</span></td>
                         <td><span class="badge bg-{{ 'success' if c.status == 'odendi' else 'warning' }}">{{ 'Ödendi' if c.status == 'odendi' else 'Ödenmedi' }}</span></td>
                         {% if current_user.is_admin and c.status == 'odenmedi' %}

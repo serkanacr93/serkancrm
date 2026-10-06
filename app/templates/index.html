@@ -81,7 +81,7 @@
     <div class="col-6 col-md-2 mb-3 mb-md-0"><div class="card border-primary h-100 shadow-sm"><div class="card-body text-center"><div class="text-primary"><i class="bi bi-people fs-1"></i></div><h3 class="mt-2 mb-0">{{ customers }}</h3><small class="text-muted">Müşteri</small></div></div></div>
     <div class="col-6 col-md-2 mb-3 mb-md-0"><div class="card border-success h-100 shadow-sm"><div class="card-body text-center"><div class="text-success"><i class="bi bi-file-earmark-text fs-1"></i></div><h3 class="mt-2 mb-0">{{ deals }}</h3><small class="text-muted">Teklif</small></div></div></div>
     <div class="col-6 col-md-2 mb-3 mb-md-0"><div class="card border-warning h-100 shadow-sm"><div class="card-body text-center"><div class="text-warning"><i class="bi bi-clock-history fs-1"></i></div><h3 class="mt-2 mb-0">{{ active_deals }}</h3><small class="text-muted">Aktif</small></div></div></div>
-    <div class="col-6 col-md-2 mb-3 mb-md-0"><div class="card border-info h-100 shadow-sm"><div class="card-body text-center"><div class="text-info"><i class="bi bi-currency-exchange fs-1"></i></div><h3 class="mt-2 mb-0">{{ "{:,.0f}".format(total_value) }}</h3><small class="text-muted">Toplam ₺</small></div></div></div>
+    <div class="col-6 col-md-2 mb-3 mb-md-0"><div class="card border-info h-100 shadow-sm"><div class="card-body text-center"><div class="text-info"><i class="bi bi-currency-exchange fs-1"></i></div><h3 class="mt-2 mb-0">{{ total_value|para_goster }}</h3><small class="text-muted">Toplam</small></div></div></div>
     <div class="col-6 col-md-2 mb-3 mb-md-0"><div class="card border-secondary h-100 shadow-sm"><div class="card-body text-center"><div class="text-secondary"><i class="bi bi-box-seam fs-1"></i></div><h3 class="mt-2 mb-0">{{ product_count }}</h3><small class="text-muted">Ürün{% if low_stock > 0 %} <span class="badge bg-danger">{{ low_stock }}</span>{% endif %}</small></div></div></div>
     <div class="col-6 col-md-2 mb-3 mb-md-0"><div class="card border-danger h-100 shadow-sm"><div class="card-body text-center"><div class="text-danger"><i class="bi bi-truck fs-1"></i></div><h3 class="mt-2 mb-0">{{ pending_shipments }}</h3><small class="text-muted">Sevkiyat</small></div></div></div>
 </div>
@@ -128,7 +128,7 @@
                     {% for deal in recent_deals %}
                     <li class="list-group-item d-flex justify-content-between">
                         <a href="{{ url_for('deal_detail', id=deal.id) }}">{{ deal.title[:30] }}</a>
-                        <span class="badge bg-{{ 'success' if deal.stage == 'kazanilan' else 'info' }}">{{ "{:,.0f}".format(deal.value) }} ₺</span>
+                        <span class="badge bg-{{ 'success' if deal.stage == 'kazanilan' else 'info' }}">{{ deal.value|para_goster(deal.para_birimi) }}</span>
                     </li>
                     {% endfor %}
                 </ul>
@@ -435,7 +435,7 @@ fetch('/api/chart-data')
         {% endif %}
         <hr class="my-2">
         <a href="{{ url_for('commissions') }}" class="crm-panel-link fw-bold">
-            {{ "{:,.0f}".format(pending_commission_total) }} ₺ <span class="text-muted small">({{ pending_commission_count }} ödenmemiş prim)</span>
+            {{ pending_commission_total|para_goster }} <span class="text-muted small">({{ pending_commission_count }} ödenmemiş prim)</span>
         </a>
     </div>
 </div>
