@@ -61,3 +61,63 @@ Bu rapor, kullanıcının "tamam denen ama canlıda çalışmayan şeyler çıkt
 - **`/reports` 5.9 saniye** (madde 23) - dashboard'un bilinen çok-sorgu yapısıyla aynı kökten, bu turun kapsamı dışında bırakıldı, ayrı bir performans turu önerilir.
 - **Günlük Üretim "Toplam Kg = 152" hatası** - kodda formül doğru bulundu, yeniden üretilemedi; canlıda tekrar görülürse spesifik girdi değerleriyle (hangi sayılar girildi) bildirilmesi gerekir.
 - **"Elle değişirse uyarı" (Günlük Üretim)** - küçük bir iyileştirme, bu turda uygulanmadı.
+
+---
+
+## EK - "DEVAM: DENETİMİ BİTİR + EKLEME PAKETİ 1" sonucu (2026-10-06)
+
+### A6 - Bağımsız alt-ajan kontrolü sonucu
+
+Bu konuşmayı bilmeyen ayrı bir ajan, canlı sitede rastgele seçilen 13 ✅ maddeyi (DENETIM_RAPORU.md'den) bağımsız olarak yeniden denedi:
+- **11/13 tam ✅** (madde 1, 2, 5, 8, 10, 11, 16, 20, 22, 23, 24)
+- **2/13 kısmi ⚠️**: madde 6 (ikinci kullanıcının şifresi elinde olmadığı için çapraz doğrulama yapamadı - kendisi test etmedi, benim GERÇEK HTTP testim madde 11 altında bunu zaten kanıtlamıştı), madde 19 (arama sonuçlarının "üretimi olmayan" müşterileri GERÇEKTEN içerip içermediğini ayrıca doğrulamadı - sadece dropdown'un çalıştığını gördü)
+- **0/13 ❌**
+- `tests/smoke_test.py` canlıda 46/46 (o anki sürüm)
+- `/sistem-hatalari`: 0 kayıt
+- Not: ajan, benim o sırada temizlemekte olduğum bir TEST müşterisini (TESTB4) geçici olarak canlıda gördü - zamanlama çakışmasıydı, kontrol ettiğimde kayıt gerçekten silinmişti.
+
+### Bölüm B sonuç tablosu
+
+| İş | Durum | Canlıda test edildi mi |
+|----|-------|------------------------|
+| B1 (Kese Seç) | ✅ | Evet (yerel Playwright, gramaj kartı+tahmini adet doğrulandı) |
+| B2 (Doypack Seç) | ✅ | Evet (yerel Playwright, baskı fiyat hesabı+öğrenme özelliği doğrulandı, gerçek bir hata bulunup düzeltildi) |
+| B3 (Katalog ayarları) | ✅ | Evet (toggle aç/kapa test edildi) |
+| B4 (edit_deal KDV) | ✅ | Evet (test verisiyle %20→%0 doğrulandı) |
+| B5a (birim fiyat tam hassasiyet) | ✅ | Evet (0.003548781 ile yeniden doğrulandı) |
+| B5b (hardcoded ₺/TL temizliği) | ❌ yapılmadı | - |
+| B5c (GBP) | ✅ | Evet (GBP teklif oluşturulup test edildi) |
+| B5d (döviz ile gir) | ❌ yapılmadı | - |
+| B5e (PDF çoklu para birimi alt toplamı) | ❌ yapılmadı | - |
+| B5f (küsurat kaybı yok) | ✅ | Evet (0.003548781 round-trip doğrulandı) |
+| B6 (ortak para gösterimi) | ⚠️ kısmi | Evet (cari_hesap_ozeti + deal_detail'de test edildi), ama sistem geneline YAYILMADI |
+| B7 (Peşinat/Bakiye tarihi) | ✅ | Evet (add_deal/edit_deal'da test edildi, otomatik hatırlatma tetiklendi) |
+| B8 (Üretim Planı) | ✅ | Evet (25 gerçek iş emriyle, reorder+termin test edildi) |
+
+### Başta/sonda karşılaştırma
+
+| Ölçüt | Değer |
+|-------|-------|
+| Müşteri (musteri_degil hariç) | 1582 (sabit) |
+| Toplam müşteri | 1740 (sabit) |
+| Teklif | 105 (sabit) |
+| Üretim | 36 (sabit - bağımsız ajanın ara kontrolüyle de 36 olarak doğrulandı) |
+| Fatura/İrsaliye | 10 (sabit) |
+| Ödeme | 13 (sabit) |
+| Tüm tekliflerin toplam tutarı | 10.408.500,10 ₺ (sabit) |
+| Kalan "TEST" ön ekli kayıt | 0 (son taramada doğrulandı) |
+
+### İstenenden farklı yapılanlar
+
+1. **Neon yedek branch alınmadı** (Bölüm B başlamadan önce istenmişti) - bu ortamda Neon kontrol düzlemine (API/CLI) erişimim yok. Onun yerine: her alt-iş SADECE "TEST" ön ekli kayıtlarla test edildi, her testin sonunda açıkça silindi, ve son olarak sistemde "TEST" ön ekli hiçbir kayıt kalmadığı + teklif/müşteri/üretim/fatura/ödeme sayılarının ve toplam tutarın oturum başından sonuna DEĞİŞMEDİĞİ doğrulandı. Gerçek bir Neon branch yedeği olmadığı için risk tamamen ortadan kalkmıyor - bu konuda sizi bilgilendiriyorum.
+2. **B6 (para gösterimi) tüm sisteme yayılmadı** - sadece cari_hesap_ozeti.html ve deal_detail.html'e uygulandı. Filtre/JS fonksiyonu hazır, kalan dosyalara (fatura, ödeme, raporlar, Takip Modu, Özet Panel) uygulanması ayrı bir iş olarak kaldı.
+3. **B5b/B5d/B5e hiç yapılmadı** - zaman/kapsam kısıtı nedeniyle bu turda atlandı.
+4. **Günlük Üretim'deki "elle değişirse uyarı"** küçük bir iyileştirme olarak atlandı.
+5. **"Üretim Planı" (B8)** tahmini bitiş hesabı, işlerin TEK bir paylaşılan kapasiteyi (kuyruk) sırayla kullandığı varsayımıyla kümülatif hesaplandı - spesifikasyonda bu varsayım açıkça yazılmamıştı, makul bir yorum olarak uygulandı.
+
+### Size bırakılan kararlar
+
+- Admin şifresinin değiştirilip değiştirilmeyeceği (hâlâ zayıf, talimatla değiştirilmedi).
+- B5b/B5d/B5e/B6'nın tüm sisteme yayılması ayrı bir iş turu olarak planlanmalı mı.
+- `/reports` ve dashboard'un genel yavaşlığı (bu turun kapsamı dışında, bilinen bir performans borcu) için ayrı bir performans turu istenip istenmediği.
+- "Günlük Üretim Toplam Kg = 152" şikayetinin kodda yeniden üretilememesi - canlıda tekrar görülürse hangi değerlerin girildiğinin not edilmesi gerekiyor.
