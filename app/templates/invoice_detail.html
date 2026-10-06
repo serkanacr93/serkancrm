@@ -48,12 +48,12 @@
                         <div class="card bg-light">
                             <div class="card-body text-center">
                                 <h6 class="text-muted mb-1">Ara Toplam</h6>
-                                <h4 class="text-primary">{{ "{:,.2f}".format(invoice.subtotal) }} ₺</h4>
+                                <h4 class="text-primary">{{ invoice.subtotal|para_goster(invoice.para_birimi) }}</h4>
                                 <h6 class="text-muted mb-1">KDV (%{{ invoice.vat_rate }})</h6>
-                                <h5 class="text-warning">{{ "{:,.2f}".format(invoice.vat_amount) }} ₺</h5>
+                                <h5 class="text-warning">{{ invoice.vat_amount|para_goster(invoice.para_birimi) }}</h5>
                                 <hr>
                                 <h6 class="text-muted mb-1">GENEL TOPLAM</h6>
-                                <h3 class="text-success">{{ "{:,.2f}".format(invoice.total) }} ₺</h3>
+                                <h3 class="text-success">{{ invoice.total|para_goster(invoice.para_birimi) }}</h3>
                             </div>
                         </div>
                     </div>
@@ -87,15 +87,15 @@
                                 <td>{{ item.description }}</td>
                                 <td>{{ item.quantity }}</td>
                                 <td>{{ item.unit }}</td>
-                                <td>{{ item.unit_price|price_precise }} ₺</td>
-                                <td><strong>{{ item.total_price|price_precise }} ₺</strong></td>
+                                <td>{{ item.unit_price|price_precise }} {{ invoice.para_birimi_sembol }}</td>
+                                <td><strong>{{ item.total_price|price_precise }} {{ invoice.para_birimi_sembol }}</strong></td>
                             </tr>
                             {% endfor %}
                         </tbody>
                         <tfoot class="table-light">
-                            <tr><td colspan="5" class="text-end">Ara Toplam:</td><td><strong>{{ "{:,.2f}".format(invoice.subtotal) }} ₺</strong></td></tr>
-                            <tr><td colspan="5" class="text-end">KDV (%{{ invoice.vat_rate }}):</td><td><strong>{{ "{:,.2f}".format(invoice.vat_amount) }} ₺</strong></td></tr>
-                            <tr class="table-success"><td colspan="5" class="text-end"><strong>TOPLAM:</strong></td><td><strong>{{ "{:,.2f}".format(invoice.total) }} ₺</strong></td></tr>
+                            <tr><td colspan="5" class="text-end">Ara Toplam:</td><td><strong>{{ invoice.subtotal|para_goster(invoice.para_birimi) }}</strong></td></tr>
+                            <tr><td colspan="5" class="text-end">KDV (%{{ invoice.vat_rate }}):</td><td><strong>{{ invoice.vat_amount|para_goster(invoice.para_birimi) }}</strong></td></tr>
+                            <tr class="table-success"><td colspan="5" class="text-end"><strong>TOPLAM:</strong></td><td><strong>{{ invoice.total|para_goster(invoice.para_birimi) }}</strong></td></tr>
                         </tfoot>
                     </table>
                 </div>
@@ -129,8 +129,8 @@
             </div>
             <div class="card-body">
                 <table class="table table-borderless table-sm mb-3">
-                    <tr><th>Ödenen:</th><td class="text-success">{{ "{:,.2f}".format(invoice.paid_amount) }} ₺</td></tr>
-                    <tr><th>Kalan:</th><td class="text-danger"><strong>{{ "{:,.2f}".format(invoice.remaining_amount) }} ₺</strong></td></tr>
+                    <tr><th>Ödenen:</th><td class="text-success">{{ invoice.paid_amount|para_goster(invoice.para_birimi) }}</td></tr>
+                    <tr><th>Kalan:</th><td class="text-danger"><strong>{{ invoice.remaining_amount|para_goster(invoice.para_birimi) }}</strong></td></tr>
                 </table>
 
                 {% if ledger_rows %}
@@ -159,7 +159,7 @@
                 </div>
                 <div class="alert alert-dark d-flex justify-content-between align-items-center mb-3">
                     <span>Güncel Kalan Bakiye</span>
-                    <strong class="fs-4">{{ "{:,.2f}".format(invoice.remaining_amount) }} ₺</strong>
+                    <strong class="fs-4">{{ invoice.remaining_amount|para_goster(invoice.para_birimi) }}</strong>
                 </div>
                 {% endif %}
 

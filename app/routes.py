@@ -5181,6 +5181,7 @@ def register_routes(app):
                     user_id=current_user.id,
                     date=datetime.now().date(),
                     vat_rate=deal.vat_rate,
+                    para_birimi=deal.para_birimi,  # B5b: tekliften gelen para birimi korunur
                     notes=request.form.get('notes', '')
                 )
                 db.session.add(invoice)

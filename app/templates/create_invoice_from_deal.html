@@ -55,7 +55,7 @@
                                         <input type="number" step="any" class="form-control price-input" name="price_{{ loop.index0 }}" value="{{ item.unit_price }}" required>
                                     </td>
                                     <td>
-                                        <span class="row-total fw-bold">{{ "{:,.2f}".format(item.total_price) }} ₺</span>
+                                        <span class="row-total fw-bold">{{ item.total_price|price_precise }} {{ deal.para_birimi_sembol }}</span>
                                     </td>
                                     <td></td>
                                 </tr>
@@ -64,15 +64,15 @@
                             <tfoot>
                                 <tr class="table-light">
                                     <td colspan="5" class="text-end"><strong>Ara Toplam:</strong></td>
-                                    <td><span id="subtotal">{{ "{:,.2f}".format(deal.subtotal) }} ₺</span></td>
+                                    <td><span id="subtotal">{{ "{:,.2f}".format(deal.subtotal) }} {{ deal.para_birimi_sembol }}</span></td>
                                 </tr>
                                 <tr class="table-light">
                                     <td colspan="5" class="text-end">KDV (%{{ deal.vat_rate }}):</td>
-                                    <td><span id="vat_amount">{{ "{:,.2f}".format(deal.vat_amount) }} ₺</span></td>
+                                    <td><span id="vat_amount">{{ "{:,.2f}".format(deal.vat_amount) }} {{ deal.para_birimi_sembol }}</span></td>
                                 </tr>
                                 <tr class="table-success">
                                     <td colspan="5" class="text-end"><strong>TOPLAM:</strong></td>
-                                    <td><span id="total" class="fw-bold">{{ "{:,.2f}".format(deal.value) }} ₺</span></td>
+                                    <td><span id="total" class="fw-bold">{{ "{:,.2f}".format(deal.value) }} {{ deal.para_birimi_sembol }}</span></td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -130,7 +130,7 @@
                     </div>
                     <div class="alert alert-light border mb-3 py-2">
                         <small class="text-muted d-block">Kaydedilince Kalan Bakiye</small>
-                        <strong id="kalan_bakiye_preview" class="fs-5">{{ "{:,.2f}".format(deal.value) }} ₺</strong>
+                        <strong id="kalan_bakiye_preview" class="fs-5">{{ deal.value|para_goster(deal.para_birimi) }}</strong>
                     </div>
 
                     <button type="submit" class="btn btn-primary w-100">
@@ -150,7 +150,7 @@
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" name="link_payment_{{ p.id }}" id="link_payment_{{ p.id }}" checked>
                         <label class="form-check-label small" for="link_payment_{{ p.id }}">
-                            {{ "{:,.2f}".format(p.amount) }} ₺ - {{ p.payment_date.strftime('%d.%m.%Y') }}{% if p.payment_method %} ({{ p.payment_method }}){% endif %}
+                            {{ p.amount|para_goster(deal.para_birimi) }} - {{ p.payment_date.strftime('%d.%m.%Y') }}{% if p.payment_method %} ({{ p.payment_method }}){% endif %}
                         </label>
                     </div>
                     {% endfor %}
@@ -188,8 +188,9 @@
 
 <script>
 var VAT_RATE = {{ deal.vat_rate|safe }};
+var CURRENCY_SYMBOL = {{ deal.para_birimi_sembol|tojson }};
 var extraItemCount = {{ deal.items|length }};
-function fmt(n) { return n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' ₺'; }
+function fmt(n) { return n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' ' + CURRENCY_SYMBOL; }
 
 function renumberItemRows() {
     var rows = document.querySelectorAll('#items-table tbody tr');
@@ -244,7 +245,7 @@ document.getElementById('add-extra-item').addEventListener('click', function () 
         '<td><input type="number" step="0.001" class="form-control qty-input" name="qty_' + extraItemCount + '" required></td>' +
         '<td><input type="text" class="form-control" name="unit_' + extraItemCount + '" value="adet"></td>' +
         '<td><input type="number" step="any" class="form-control price-input" name="price_' + extraItemCount + '" required></td>' +
-        '<td><span class="row-total fw-bold">0,00 ₺</span></td>' +
+        '<td><span class="row-total fw-bold">' + fmt(0) + '</span></td>' +
         '<td><button type="button" class="btn btn-sm btn-danger remove-extra-item"><i class="bi bi-trash"></i></button></td>';
     tbody.appendChild(row);
     extraItemCount++;

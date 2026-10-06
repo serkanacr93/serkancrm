@@ -803,10 +803,20 @@ class Invoice(db.Model):
     # degismemis demektir).
     updated_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     updated_at = db.Column(db.DateTime, nullable=True)
+    # B5b (2026-10-06): Invoice'ta HIC para birimi alani yoktu - dovizli
+    # bir tekliften (EUR/USD/GBP) fatura olusturulunca tutarlar PDF/
+    # ekranda hep "TL" etiketiyle gosteriliyordu (sayi dogru kopyalaniyordu,
+    # SADECE etiket yanlisti). YENI, nullable kolon - eski faturalarda
+    # NULL kalir ve TRY gibi davranilir (geriye donuk davranis degismez).
+    para_birimi = db.Column(db.String(3), nullable=True)
 
     customer = db.relationship('Customer', backref='invoices')
     items = db.relationship('InvoiceItem', backref='invoice', lazy=True, cascade='all, delete-orphan')
     updated_by = db.relationship('User', foreign_keys=[updated_by_user_id])
+
+    @property
+    def para_birimi_sembol(self):
+        return CURRENCY_SYMBOLS.get(self.para_birimi or 'TRY', self.para_birimi)
 
     @property
     def owner_id(self):

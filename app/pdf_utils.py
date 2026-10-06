@@ -616,6 +616,13 @@ def generate_invoice_pdf(invoice):
     elements.append(Spacer(1, 5*mm))
 
     elements.append(Paragraph("KALEMLER", heading_style))
+    # B5b (2026-10-06): eskiden burada HER ZAMAN sabit 'TL' yaziliyordu -
+    # Invoice'ta para birimi alani olmadigi icin dovizli bir tekliften
+    # olusturulan fatura PDF'inde tutarlar (sayi dogru olsa bile) yanlis
+    # etiketleniyordu. Artik faturanin kendi para_birimi'ne gore (Deal
+    # PDF'indeki ayni desen - TRY ise 'TL' metni, degilse gercek sembol -
+    # TL sembolu Vera fontunda glif olarak yok, bkz. _sanitize_pdf_free_text).
+    invoice_para_text = 'TL' if (invoice.para_birimi or 'TRY') == 'TRY' else invoice.para_birimi_sembol
     if invoice.items:
         data = [['Açıklama', 'Miktar', 'Birim', 'Birim Fiyat', 'Toplam']]
         for item in invoice.items:
@@ -623,12 +630,12 @@ def generate_invoice_pdf(invoice):
                 Paragraph(item.description, small),
                 f"{item.quantity:.2f}",
                 item.unit,
-                f"{format_price_precise(item.unit_price)} TL",
-                f"{format_price_precise(item.total_price)} TL"
+                f"{format_price_precise(item.unit_price)} {invoice_para_text}",
+                f"{format_price_precise(item.total_price)} {invoice_para_text}"
             ])
-        data.append(['', '', '', 'Ara Toplam:', f"{invoice.subtotal:,.2f} TL"])
-        data.append(['', '', '', f'KDV (%{invoice.vat_rate:.0f}):', f"{invoice.vat_amount:,.2f} TL"])
-        data.append(['', '', '', 'TOPLAM:', f"{invoice.total:,.2f} TL"])
+        data.append(['', '', '', 'Ara Toplam:', f"{invoice.subtotal:,.2f} {invoice_para_text}"])
+        data.append(['', '', '', f'KDV (%{invoice.vat_rate:.0f}):', f"{invoice.vat_amount:,.2f} {invoice_para_text}"])
+        data.append(['', '', '', 'TOPLAM:', f"{invoice.total:,.2f} {invoice_para_text}"])
 
         table = Table(data, colWidths=[6.5*cm, 2*cm, 1.5*cm, 3.5*cm, 3.5*cm])
         table.setStyle(TableStyle([
