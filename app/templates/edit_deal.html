@@ -283,12 +283,13 @@ document.addEventListener('click', function(e) {
 </script>
 {% endblock %}
 
-{% if teklif_yardimci_enabled %}
 {% block scripts %}
+{% if teklif_yardimci_enabled %}
 <script>
 window.TEKLIF_YARDIMCI_KATALOG = {{ teklif_yardimci_katalog|tojson }};
 window.TEKLIF_YARDIMCI_CSRF = {{ csrf_token()|tojson }};
 </script>
 <script src="{{ asset_url('js/teklif-yardimci.js') }}"></script>
-{% endblock %}
 {% endif %}
+<script src="{{ asset_url('js/doviz-ile-gir.js') }}"></script>
+{% endblock %}
