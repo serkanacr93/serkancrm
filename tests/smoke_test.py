@@ -35,8 +35,8 @@ STATIC_PAGES = [
     "/payments/add", "/potential-customers", "/potential-customers/add",
     "/production", "/products", "/products/add", "/reminders", "/reports",
     "/settings", "/shipments", "/sistem-hatalari", "/takip-modu", "/tasks",
-    "/tasks/add", "/tedarik-takip", "/uretim-planlama", "/users",
-    "/users/add", "/visits", "/visits/add",
+    "/tasks/add", "/tedarik-takip", "/uretim-planlama", "/uretim-plani",
+    "/settings/teklif-yardimci", "/users", "/users/add", "/visits", "/visits/add",
 ]
 
 
