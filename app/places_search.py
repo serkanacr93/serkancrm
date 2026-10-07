@@ -22,7 +22,16 @@ from app.models import PotentialCustomer, PlacesSearchConfig, PlacesSearchLog
 TR_TZ = ZoneInfo('Europe/Istanbul')
 UTC_TZ = ZoneInfo('UTC')
 
-DAILY_REQUEST_LIMIT = 75
+# 2026-10-08 (maliyet kilidi): Google'in field mask'imiz (telefon alanlari
+# dahil) her istegi "Text Search Enterprise" SKU'su yapiyor - Google'in
+# resmi fiyatlandirmasina gore AYDA ILK 1.000 ISTEK UCRETSIZ, sonrasi
+# 1.000 basina $35. Serkan'in kartindan cekim YAPILAMIYOR - kota asilirsa
+# Google faturalandirma hesabini KAPATIYOR (3 Agustos - 7 Ekim 2026 arasi
+# tum aramalar bu yuzden "403 The caller does not have permission"
+# hatasi aldi). Asagidaki iki sabit TEK kilit kaynagi - degistirilecekse
+# SADECE burada, Serkan'in onayiyla degistirilir.
+AYLIK_UCRETSIZ_SINIR = 800  # 1.000'in altinda guvenlik payi (Google'in ay siniri Pasifik saatine gore donebilir + eszamanli istek payi)
+GUNLUK_SINIR = 30  # 30 x 31 = 930 > 800 oldugundan aylik sinir her zaman asil kilit, gunluk sadece tek gunde hizli tuketimi onler
 COST_PER_REQUEST = 0.035
 COST_90_DAY_BUDGET = 250.0
 
@@ -183,6 +192,17 @@ def combined_usage_stats():
     }
 
 
+def quota_remaining():
+    """(aylik_kalan, gunluk_kalan) - SERT KILIT ve formdaki on-kontrol AYNI
+    bu fonksiyonu kullanir (tek kaynak). PlacesSearchLog.request_count
+    toplami sayilir - HATALI istekler de (request_count=1 ile loglanan
+    basarisiz denemeler) dahildir, guvenli taraf icin: Google'a GIDEN her
+    cagri (basarili/basarisiz fark etmez) 'kullanilan istek' sayilir."""
+    month_used = month_stats()['requests']
+    day_used = todays_request_count()
+    return max(0, AYLIK_UCRETSIZ_SINIR - month_used), max(0, GUNLUK_SINIR - day_used)
+
+
 def get_status(config=None):
     config = config or get_config()
     if not config.enabled:
@@ -217,8 +237,26 @@ def _search_text(query, api_key):
 
 def _run_one_combo(city, sector, triggered_by):
     """Tek bir il x sektor icin arama yapar, sonuclari havuza ekler,
-    bir PlacesSearchLog kaydi olusturur. Her cagri = 1 istek."""
+    bir PlacesSearchLog kaydi olusturur. Her cagri = 1 istek.
+
+    SERT KILIT: Google'a istek atmadan HEMEN ONCE (bu fonksiyonun EN
+    BASINDA, api_key kontrolunden bile once) aylik/gunluk ucretsiz kota
+    kontrol edilir - hem otomatik rotasyon hem manuel toplu arama AYNI
+    bu fonksiyonu COMBO BASINA cagirdigi icin ('for' donguleri _run_one_
+    combo'yu her adimda cagirir), kontrol otomatik olarak HER istekten
+    once, guncel veriyle tekrarlanir - atlanamaz."""
     query = f"{sector} {city}"
+
+    month_remaining, day_remaining = quota_remaining()
+    if month_remaining <= 0 or day_remaining <= 0:
+        log = PlacesSearchLog(city=city, sector=sector, search_query=query, request_count=0,
+                               results_found=0, new_companies=0, triggered_by=triggered_by,
+                               error='Ücretsiz kota sınırı: istek atılmadı')
+        db.session.add(log)
+        db.session.commit()
+        return {'city': city, 'sector': sector, 'query': query, 'request_count': 0,
+                'results_found': 0, 'new_companies': 0, 'error': log.error}
+
     api_key = os.environ.get('GOOGLE_PLACES_API_KEY')
 
     if not api_key:
@@ -279,14 +317,17 @@ def _run_one_combo(city, sector, triggered_by):
 
 def run_search(triggered_by='otomatik'):
     """Zamanlayici tarafindan cagrilir: rotasyondaki bir sonraki il x
-    sektor kombinasyonuyla TEK bir arama yapar."""
+    sektor kombinasyonuyla TEK bir arama yapar. Bu on-kontrol sadece
+    erken/aciklayici bir cikis - gercek sert kilit _run_one_combo()
+    icindedir (asagidaki cagri da oradan gecer)."""
     config = get_config()
     if not config.enabled:
         return {'skipped': True, 'reason': 'Sistem pasif (kapali).'}
 
-    used_today = todays_request_count()
-    if used_today >= DAILY_REQUEST_LIMIT:
-        return {'skipped': True, 'reason': f'Günlük kota doldu ({used_today}/{DAILY_REQUEST_LIMIT}).'}
+    month_remaining, day_remaining = quota_remaining()
+    if month_remaining <= 0 or day_remaining <= 0:
+        return {'skipped': True, 'reason':
+                f'Ücretsiz kota sınırı doldu (aylık kalan: {month_remaining}, günlük kalan: {day_remaining}).'}
 
     city, sector = _next_auto_combo(config)
     result = _run_one_combo(city, sector, triggered_by)
@@ -294,28 +335,34 @@ def run_search(triggered_by='otomatik'):
 
 
 def run_batch_search(cities, sectors, triggered_by='manuel'):
-    """Secilen il(ler) x sektor(ler) kombinasyonlarinin tamamini,
-    gunluk kalan kotayla sinirli olarak calistirir."""
+    """Secilen il(ler) x sektor(ler) kombinasyonlarinin tamamini calistirir.
+    2026-10-08: eskiden 'kalan kota kadarini calistir, gerisini atla'
+    (kismi calisma) davranisindaydi - artik secilen toplam kombinasyon
+    sayisi (aylik, gunluk) ucretsiz kota kalanindan FAZLAYSA, TUMU
+    reddedilir (hicbir istek atilmaz), kullaniciya kac kombinasyon
+    secebilecegi soylenir. Yine de dongu icindeki HER _run_one_combo
+    cagrisi kendi kotasini ayrica kontrol eder (sert kilit, atlanamaz)."""
     valid_cities = [c for c in cities if c in ALL_CITIES]
     valid_sectors = [s for s in sectors if s in SEARCH_SECTORS]
     if not valid_cities or not valid_sectors:
         return {'skipped': True, 'reason': 'En az bir il ve bir sektör seçmelisiniz.'}
 
-    used_today = todays_request_count()
-    remaining = DAILY_REQUEST_LIMIT - used_today
-    if remaining <= 0:
-        return {'skipped': True, 'reason': f'Günlük kota doldu ({used_today}/{DAILY_REQUEST_LIMIT}).'}
-
     combos = [(c, s) for c in valid_cities for s in valid_sectors]
+    total_requested = len(combos)
+
+    month_remaining, day_remaining = quota_remaining()
+    allowed = max(0, min(month_remaining, day_remaining))
+    if total_requested > allowed:
+        return {'skipped': True, 'reason':
+                f'Seçtiğiniz {total_requested} kombinasyon ücretsiz kota sınırını aşıyor. '
+                f'Şu an en fazla {allowed} kombinasyon seçebilirsiniz '
+                f'(bu ay kalan ücretsiz: {month_remaining}, bugün kalan: {day_remaining}).'}
+
     executed = []
     combos_skipped = 0
 
     for city, sector in combos:
-        if remaining <= 0:
-            combos_skipped += 1
-            continue
         result = _run_one_combo(city, sector, triggered_by)
-        remaining -= result['request_count']
         executed.append(result)
 
     return {

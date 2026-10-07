@@ -154,8 +154,9 @@
                 </p>
                 <p class="text-muted small">
                     Aktifken Pazartesi-Cuma 09:00-18:00 (TR saati) arası her saat başı
-                    otomatik arama yapılır, günlük en fazla 75 istek kullanılır.
-                    Kapalıyken hiç arama yapılmaz.
+                    otomatik arama yapılır, günlük en fazla 30, aylık en fazla 800 istek
+                    kullanılır (Google'ın ücretsiz kotası - bu sınırın üzerine ASLA
+                    çıkılmaz). Kapalıyken hiç arama yapılmaz.
                 </p>
                 <form method="POST" action="{{ url_for('toggle_places_search') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -169,6 +170,9 @@
                     <a href="{{ url_for('potential_customers') }}" class="btn btn-outline-primary">
                         <i class="bi bi-graph-up"></i> Takip Panelini Gör
                     </a>
+                    {% if not places_config.enabled %}
+                    <div class="form-text mt-1">Açarsanız da aylık 800 / günlük 30 istek ücretsiz kota sınırı geçerli olmaya devam eder.</div>
+                    {% endif %}
                 </form>
             </div>
         </div>

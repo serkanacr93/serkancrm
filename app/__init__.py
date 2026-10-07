@@ -87,6 +87,16 @@ def create_app():
         from app.models import format_price_tr
         return format_price_tr(value, currency)
 
+    @app.template_filter('tr_saat')
+    def tr_saat_filter(dt, fmt='%d.%m %H:%M'):
+        """2026-10-08 (Google Places kota): veritabaninda UTC (naive)
+        tutulan bir datetime'i SADECE GORUNUM icin Turkiye saatine (+3)
+        cevirir - veri/DB degismez, sadece ekranda gosterilen metin."""
+        if not dt:
+            return ''
+        from zoneinfo import ZoneInfo
+        return dt.replace(tzinfo=ZoneInfo('UTC')).astimezone(ZoneInfo('Europe/Istanbul')).strftime(fmt)
+
     @app.template_global()
     def asset_url(filename):
         """static/ altindaki bir dosya icin, dosyanin degisiklik tarihini

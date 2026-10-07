@@ -6146,14 +6146,20 @@ def register_routes(app):
         # round-trip'te geliyor (bkz. denetim, /potential-customers 10->7 sorgu).
         places_config = places_search.get_config()
         usage = places_search.combined_usage_stats()
+        month_remaining, day_remaining = places_search.quota_remaining()
         places_stats = {
             'status': places_search.get_status(places_config),
             'today_used': usage['today_used'],
-            'today_limit': places_search.DAILY_REQUEST_LIMIT,
+            'today_limit': places_search.GUNLUK_SINIR,
             'today_new': usage['today_new'],
             'month': usage['month'],
             'last_90_days': usage['last_90_days'],
             'recent_logs': PlacesSearchLog.query.order_by(PlacesSearchLog.run_at.desc()).limit(5).all(),
+            # 2026-10-08 (maliyet kilidi): ucretsiz kota gostergeleri +
+            # formdaki on-kontrol icin.
+            'aylik_sinir': places_search.AYLIK_UCRETSIZ_SINIR,
+            'month_remaining': month_remaining,
+            'day_remaining': day_remaining,
         }
 
         return render_template('potential_customers.html', potentials=potentials, pagination=pagination,

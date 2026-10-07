@@ -29,7 +29,7 @@
     <div class="card-body">
         <div class="row g-4">
             <div class="col-md-4">
-                <small class="text-muted">Bugünkü İstek (TR günü)</small>
+                <small class="text-muted">Bugün (TR günü)</small>
                 <div class="progress my-1" style="height: 22px;">
                     <div class="progress-bar bg-info" style="width: {{ (places_stats.today_used / places_stats.today_limit * 100) | round(1) }}%">
                         {{ places_stats.today_used }}/{{ places_stats.today_limit }}
@@ -38,19 +38,24 @@
                 <small class="text-success">Bugün bulunan yeni firma: <strong>{{ places_stats.today_new }}</strong></small>
             </div>
             <div class="col-md-4">
-                <small class="text-muted">Bu Ay</small>
-                <h5 class="mb-0">{{ places_stats.month.requests }} istek</h5>
-                <small class="text-muted">≈ ${{ "%.2f"|format(places_stats.month.cost) }}</small>
-            </div>
-            <div class="col-md-4">
-                <small class="text-muted">90 Günlük Maliyet / ${{ "%.0f"|format(places_stats.last_90_days.budget) }} Bütçe</small>
+                {% set ay_yuzde = (places_stats.month.requests / places_stats.aylik_sinir * 100) | round(1) %}
+                <small class="text-muted">Bu ay ücretsiz kota</small>
                 <div class="progress my-1" style="height: 22px;">
-                    <div class="progress-bar {{ 'bg-danger' if places_stats.last_90_days.percent > 80 else 'bg-warning' if places_stats.last_90_days.percent > 50 else 'bg-success' }}"
-                         style="width: {{ places_stats.last_90_days.percent }}%">
-                        ${{ "%.2f"|format(places_stats.last_90_days.cost) }}
+                    <div class="progress-bar {{ 'bg-danger' if ay_yuzde > 90 else 'bg-warning' if ay_yuzde > 70 else 'bg-success' }}"
+                         style="width: {{ [ay_yuzde, 100] | min }}%">
+                        {{ places_stats.month.requests }}/{{ places_stats.aylik_sinir }}
                     </div>
                 </div>
-                <small class="text-muted">{{ places_stats.last_90_days.requests }} istek (%{{ places_stats.last_90_days.percent }})</small>
+                <small class="text-muted">Bu ay kalan ücretsiz istek: <strong>{{ places_stats.month_remaining }}</strong></small>
+            </div>
+            <div class="col-md-4">
+                <small class="text-muted">Tahmini Google Faturası</small>
+                {% if places_stats.month.requests <= places_stats.aylik_sinir %}
+                <h5 class="mb-0 text-success">0 TL <small class="text-muted fs-6">(ücretsiz kota içinde)</small></h5>
+                {% else %}
+                <h5 class="mb-0 text-danger">≈ ${{ "%.2f"|format(places_stats.month.cost) }} <small class="fs-6">(ücretsiz kota aşıldı)</small></h5>
+                {% endif %}
+                <small class="text-muted">90 günde {{ places_stats.last_90_days.requests }} istek toplam</small>
             </div>
         </div>
 
@@ -60,13 +65,16 @@
         <div class="table-responsive">
             <table class="table table-sm mb-0">
                 <thead>
-                    <tr><th>Saat</th><th>Şehir/Sektör</th><th>Sonuç</th><th>Yeni Firma</th><th>İstek</th><th>Tetikleyen</th></tr>
+                    <tr><th>Saat (TR)</th><th>Şehir/Sektör</th><th>Sonuç</th><th>Yeni Firma</th><th>İstek</th><th>Tetikleyen</th></tr>
                 </thead>
                 <tbody>
                     {% for log in places_stats.recent_logs %}
                     <tr class="{{ 'table-danger' if log.error }}">
-                        <td>{{ log.run_at.strftime('%d.%m %H:%M') }}</td>
-                        <td>{{ log.city }} / {{ log.sector }}</td>
+                        <td>{{ log.run_at|tr_saat }}</td>
+                        <td>
+                            {{ log.city }} / {{ log.sector }}
+                            {% if log.error %}<br><small class="text-muted" title="{{ log.error }}">{{ log.error }}</small>{% endif %}
+                        </td>
                         <td>{{ log.results_found }}</td>
                         <td>{{ log.new_companies }}</td>
                         <td>{{ log.request_count }}</td>
@@ -109,7 +117,8 @@
                     </div>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary mt-3">
+            <div id="placesQuotaWarning" class="alert py-2 mt-3 d-none"></div>
+            <button type="submit" class="btn btn-primary mt-3" id="placesSearchSubmitBtn">
                 <i class="bi bi-search"></i> Ara ve Havuza Ekle
             </button>
         </form>
@@ -117,23 +126,70 @@
 </div>
 
 <script>
-function confirmPlacesSearch() {
-    var citiesSelect = document.getElementById('placesCitiesSelect');
-    var citiesCount = citiesSelect.selectedOptions.length;
+// 2026-10-08 (maliyet kilidi): sunucudaki ayni gun/ay sayaclarindan - bu
+// sayfanin yuklendigi andaki anlik kalan kota. Form uzerinde GERCEK
+// ZAMANLI (secim degistikce) on-kontrol icin kullanilir; asil kilit
+// sunucu tarafinda (places_search._run_one_combo) - burasi sadece
+// kullaniciya erken geri bildirim verir, atlanirsa bile sunucu reddeder.
+var PLACES_MONTH_REMAINING = {{ places_stats.month_remaining }};
+var PLACES_DAY_REMAINING = {{ places_stats.day_remaining }};
+
+function placesSelectedTotal() {
+    var citiesCount = document.getElementById('placesCitiesSelect').selectedOptions.length;
     var sectorsCount = document.querySelectorAll('.places-sector-cb:checked').length;
-    var total = citiesCount * sectorsCount;
+    return citiesCount * sectorsCount;
+}
+
+function updatePlacesQuotaCheck() {
+    var total = placesSelectedTotal();
+    var allowed = Math.max(0, Math.min(PLACES_MONTH_REMAINING, PLACES_DAY_REMAINING));
+    var warnEl = document.getElementById('placesQuotaWarning');
+    var btn = document.getElementById('placesSearchSubmitBtn');
+    if (total === 0) {
+        warnEl.classList.add('d-none');
+        btn.disabled = false;
+        return;
+    }
+    if (total > allowed) {
+        warnEl.className = 'alert alert-danger py-2 mt-3';
+        warnEl.textContent = 'Bu arama ' + total + ' istek kullanacak. Bu ay kalan ücretsiz: ' +
+            PLACES_MONTH_REMAINING + ', bugün kalan: ' + PLACES_DAY_REMAINING +
+            '. Şu an en fazla ' + allowed + ' kombinasyon seçebilirsiniz.';
+        warnEl.classList.remove('d-none');
+        btn.disabled = true;
+    } else {
+        warnEl.className = 'alert alert-info py-2 mt-3';
+        warnEl.textContent = 'Bu arama ' + total + ' istek kullanacak. Bu ay kalan ücretsiz: ' +
+            PLACES_MONTH_REMAINING + ', bugün kalan: ' + PLACES_DAY_REMAINING + '.';
+        warnEl.classList.remove('d-none');
+        btn.disabled = false;
+    }
+}
+
+document.getElementById('placesCitiesSelect').addEventListener('change', updatePlacesQuotaCheck);
+document.querySelectorAll('.places-sector-cb').forEach(function (cb) {
+    cb.addEventListener('change', updatePlacesQuotaCheck);
+});
+
+function confirmPlacesSearch() {
+    var total = placesSelectedTotal();
+    var allowed = Math.max(0, Math.min(PLACES_MONTH_REMAINING, PLACES_DAY_REMAINING));
     if (total === 0) {
         alert('En az bir il ve bir sektör seçmelisiniz.');
         return false;
     }
-    var cost = (total * 0.035).toFixed(2);
-    return confirm('Bu arama yaklaşık ' + total + ' istek yapacak (~$' + cost + '), onaylıyor musunuz?');
+    if (total > allowed) {
+        alert('Bu arama ücretsiz kota sınırını aşıyor, en fazla ' + allowed + ' kombinasyon seçebilirsiniz.');
+        return false;
+    }
+    return confirm('Bu arama ' + total + ' istek kullanacak (ücretsiz kota içinde kalacak), onaylıyor musunuz?');
 }
 
 document.getElementById('selectUnluMamulBtn').addEventListener('click', function () {
     document.querySelectorAll('.places-sector-cb[data-unlu-mamul="1"]').forEach(function (cb) {
         cb.checked = true;
     });
+    updatePlacesQuotaCheck();
 });
 </script>
 

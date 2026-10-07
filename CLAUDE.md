@@ -59,6 +59,10 @@ Kullanıcı net bir talimat vermediği bir tasarım/iş kuralı kararında (örn
 - Cari bakiye HER ZAMAN `calculate_customer_balance()` / `Customer.balance` property'si üzerinden hesaplanır (faturalanmış + faturalanmamış kazanılan - tahsilat) - ikinci/farklı bir hesaplama yolu AÇILMAZ.
 - 60 günlük takip sayacı `_last_contact_subquery()` üzerinden hesaplanır - `DailyReport.status in ('ulasilamadi', 'sonra_ara')` olan kayıtlar kasıtlı olarak hariç tutulur (gerçek irtibat sayılmaz).
 
+## Google Places (2026-10-08)
+
+Ücretsiz kota dışına ÇIKILMAZ. Aylık 800 / günlük 30 sert kilit (`places_search.AYLIK_UCRETSIZ_SINIR` / `GUNLUK_SINIR`, kontrol `_run_one_combo()` içinde her istekten hemen önce, atlanamaz). Test sırasında Google'a GERÇEK istek ATILMAZ (`_search_text` mock'lanır). Sınırlar Serkan'ın onayı olmadan artırılmaz.
+
 ## Takip Modu kuralları (2026-10-06)
 
 1. Ödeme günü gelmiş/geçmiş açık hatırlatması olanlar en üstte.
