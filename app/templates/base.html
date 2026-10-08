@@ -120,6 +120,8 @@
 
                     <li class="nav-item"><a class="nav-link {% if 'deal' in request.endpoint %}active{% endif %}" href="{{ url_for('deals') }}"><i class="bi bi-file-earmark-text"></i> Teklifler</a></li>
 
+                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'siparisler_sayfa' %}active{% endif %}" href="{{ url_for('siparisler_sayfa') }}"><i class="bi bi-bag-check"></i> Siparişler</a></li>
+
                     <li class="nav-item dropdown crm-mega-group">
                         <a class="nav-link {{ 'active' if uretim_active }}" href="{{ url_for('production_list') }}">
                             <i class="bi bi-gear"></i> Üretim <i class="bi bi-caret-down-fill small"></i>
@@ -227,16 +229,75 @@
     {% if current_user.is_authenticated %}
     <!-- Is 2: sagdan kayan Ozet Panel - her sayfa kendi side_panel blogunu
          doldurur, set/endset ile TEK seferlik yakalanir (blok iki kez
-         render edilmez), bos ise sekme hic gorunmez. -->
+         render edilmez), bos ise sekme hic gorunmez.
+         2026-10-08: tab'lar (ÖZET PANEL + SİPARİŞLER) artik PAYLASILAN
+         .crm-side-tabs-stack flex kabinde ustuste dizilir - eskiden her
+         tab kendi wrapper'i icinde bagimsiz top:50% ile ortalaniyordu,
+         IKI tab ayni anda varken bu ORTUSUYORDU (Playwright testinde
+         yakalandi: Ozet Panel tiklanamiyor cikti, Siparisler tab'i onun
+         UZERINE biniyordu). Flex-stack boyut tahmini GEREKTIRMEZ, kendi
+         kendine dogru siralar. Panel'ler (kayan icerik kutulari) KENDI
+         wrapper'larinda kalmaya devam eder - JS (initSlidePanel) sadece
+         id ile calistigi icin DOM'da nerede olduklari onemli degil. -->
     {% set side_panel_html %}{% block side_panel %}{% endblock %}{% endset %}
-    {% if side_panel_html | trim %}
-    <div class="crm-side-panel-wrapper" id="sidePanelWrapper">
+    <div class="crm-side-tabs-stack">
+        {% if side_panel_html | trim %}
         <div class="crm-side-panel-tab" id="sidePanelTab">
             <i class="bi bi-layout-sidebar-inset-reverse"></i> ÖZET PANEL
         </div>
+        {% endif %}
+        {% if siparisler_sidebar %}
+        <div class="crm-side-panel-tab crm-side-panel-tab-siparis" id="siparisPanelTab">
+            <i class="bi bi-bag-check"></i> SİPARİŞLER
+            {% if siparisler_sidebar.bu_ay_sayisi %}<span class="crm-side-panel-badge">{{ siparisler_sidebar.bu_ay_sayisi }}</span>{% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if side_panel_html | trim %}
+    <div class="crm-side-panel-wrapper" id="sidePanelWrapper">
         <div class="crm-side-panel" id="sidePanel">
             <h6 class="crm-panel-title"><i class="bi bi-layout-sidebar-inset-reverse"></i> Özet Panel</h6>
             {{ side_panel_html }}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if siparisler_sidebar %}
+    <div class="crm-side-panel-wrapper" id="siparisPanelWrapper">
+        <div class="crm-side-panel" id="siparisPanel">
+            <h6 class="crm-panel-title crm-panel-title-siparis"><i class="bi bi-bag-check"></i> Siparişler</h6>
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <div class="crm-siparis-box crm-siparis-box-ay">
+                        <div class="small text-muted">Bu ay</div>
+                        <div class="fw-bold fs-5">{{ siparisler_sidebar.bu_ay_sayisi }}</div>
+                        <div class="small">{{ siparisler_sidebar.bu_ay_tutar|para_goster }}</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="crm-siparis-box crm-siparis-box-toplam">
+                        <div class="small text-muted">Toplam</div>
+                        <div class="fw-bold fs-5">{{ siparisler_sidebar.toplam_sayisi }}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="small text-muted mb-2">Son 5 Sipariş</div>
+            {% for r in siparisler_sidebar.son_n %}
+            <a href="{{ url_for('deal_detail', id=r.id) }}" class="crm-panel-link d-block mb-2">
+                <div class="d-flex justify-content-between">
+                    <strong>{{ r.musteri_adi }}</strong>
+                    <strong>{{ r.miktar|round(0)|int if r.miktar else '' }} {{ r.birim or '' }}</strong>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <small class="text-muted">{{ r.urun }}</small>
+                    <small class="text-muted">{{ r.tarih.strftime('%d.%m.%Y') if r.tarih else '' }}</small>
+                </div>
+            </a>
+            {% else %}
+            <p class="text-muted small">Henüz sipariş yok.</p>
+            {% endfor %}
+            <a href="{{ url_for('siparisler_sayfa') }}" class="btn btn-dark btn-sm w-100 mt-2">Tüm siparişler →</a>
         </div>
     </div>
     {% endif %}
@@ -364,13 +425,16 @@
     <!-- Is 2: sagdan kayan Ozet Panel - hover (masaustu) + tiklama (mobil)
          ile ac/kapat. Sekme/panel'de pointer-events:auto, sarmalayici
          (wrapper) pointer-events:none oldugu icin kapaliyken altindaki
-         sayfa icerigine tiklanabilir kalir. -->
+         sayfa icerigine tiklanabilir kalir. 2026-10-08: ayni mantik
+         initSlidePanel() olarak genellestirildi - Siparisler sekmesi
+         (Komuta Merkezi, Is 2) AYNI fonksiyonu kendi id'leriyle kullanir,
+         Ozet Panel'in davranisi/id'leri DEGISMEDI. -->
     <script>
-    (function () {
-        var wrapper = document.getElementById('sidePanelWrapper');
+    function initSlidePanel(wrapperId, tabId, panelId) {
+        var wrapper = document.getElementById(wrapperId);
         if (!wrapper) return;
-        var tab = document.getElementById('sidePanelTab');
-        var panel = document.getElementById('sidePanel');
+        var tab = document.getElementById(tabId);
+        var panel = document.getElementById(panelId);
         var closeTimer = null;
 
         function openPanel() {
@@ -393,6 +457,10 @@
                 wrapper.classList.remove('open');
             }
         });
+    }
+    (function () {
+        initSlidePanel('sidePanelWrapper', 'sidePanelTab', 'sidePanel');
+        initSlidePanel('siparisPanelWrapper', 'siparisPanelTab', 'siparisPanel');
     })();
     </script>
 

@@ -34,6 +34,13 @@ def format_price_precise(value):
 
 CURRENCY_SYMBOLS = {'TRY': '₺', 'EUR': '€', 'USD': '$', 'GBP': '£'}
 
+# 2026-10-08 (Komuta Merkezi + Siparisler): ay adi icin strftime('%B')
+# KULLANILMAZ - sunucu locale'i Turkce olmayabilir. Paylasilan TEK kaynak
+# (eskiden Gunluk Uretim route'u icinde yerel/duplike bir kopyasi vardi,
+# artik oradan da bu import edilir).
+TR_AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+            'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']
+
 def format_price_tr(value, currency='TRY'):
     """B6 (2026-10-06): sistem geneli (toplam/bakiye/odeme gibi - birim
     fiyat icin format_price_precise KULLANILMAYA devam eder, bu AYRI bir
@@ -338,6 +345,32 @@ class Deal(db.Model):
         if self.para_birimi == 'TRY' or not self.kullanilan_kur:
             return None
         return self.value * self.kullanilan_kur
+
+    @property
+    def deger_tl(self):
+        """2026-10-08 (Komuta Merkezi + Siparisler): tl_karsiligi'ndan
+        FARKLI olarak HER ZAMAN bir sayi dondurur (None degil) - Siparisler
+        toplam/aylik tutar hesaplarinda dogrudan toplanabilsin diye.
+        TRY ise value aynen; doviz ise kullanilan_kur varsa TL'ye cevrilir;
+        kur hic girilmemisse (nadir - B5d/B7'den once olusturulmus eski
+        kayitlar) YENI BIR KUR CEKILMEZ, value oldugu gibi TL sayilir
+        (bilinen bir tahmin sapması - bkz. Komuta Merkezi raporu)."""
+        if self.para_birimi == 'TRY' or not self.para_birimi:
+            return self.value
+        if self.kullanilan_kur:
+            return self.value * self.kullanilan_kur
+        return self.value
+
+    @property
+    def siparis_tarihi(self):
+        """2026-10-08: siparis (onaylanmis teklif, stage='kazanilan')
+        tarihi = approve_deal()'da esanli olusturulan Production'in
+        start_date'i (onay anidir) - deal_date/created_at TEKLIF olusturma
+        tarihidir, onay/siparis tarihi DEGIL. Production yoksa (nadir veri
+        tutarsizligi) deal_date'e duser."""
+        if self.production and self.production.start_date:
+            return self.production.start_date
+        return self.deal_date
 
     def calculate_totals(self, items=None):
         """items verilirse (yeni olusturulan/henuz self.items'a yuklenmemis

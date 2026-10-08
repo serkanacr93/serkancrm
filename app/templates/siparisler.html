@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Siparişler - CRM Sistemi{% endblock %}
+
+{% block content %}
+<style>
+.sp-hd { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
+.sp-tabs .btn { min-width:90px; }
+.sp-ay-selector { font-size:0.9rem; padding:4px 12px; border-radius:99px; background:#E6F1FB; color:#185FA5; }
+.sp-ay-selector a { color:#185FA5; text-decoration:none; font-weight:600; padding:0 6px; }
+.sp-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px; }
+.sp-kpi { background:#fff; border:1px solid #e4e4e4; border-radius:10px; padding:14px; border-top:3px solid #ccc; }
+.sp-kpi.sp-aylik { border-top-color:#D9481B; }
+.sp-kpi.sp-toplam { border-top-color:#1C1C1E; }
+.sp-kpi .t { font-size:0.78rem; color:#777; }
+.sp-kpi .v { font-size:1.5rem; font-weight:700; color:#222; }
+.sp-pill { display:inline-block; padding:3px 10px; border-radius:99px; font-size:0.78rem; font-weight:600; }
+.sp-pill-warning { background:#FFF3CD; color:#7A5B00; }
+.sp-pill-primary { background:#DCE9FB; color:#1A4E8A; }
+.sp-pill-info { background:#D7F1FB; color:#0C6B8A; }
+.sp-pill-success { background:#D9F2E3; color:#1C6B3F; }
+.sp-pill-danger { background:#FBE0E0; color:#A42020; }
+.sp-table-wrap { overflow-x:auto; }
+@media (max-width: 767.98px) {
+    .sp-kpis { grid-template-columns:repeat(2,1fr); }
+}
+</style>
+
+<div class="sp-hd">
+    <h2 class="mb-0"><i class="bi bi-bag-check"></i> Siparişler</h2>
+    <div class="btn-group sp-tabs">
+        <a href="{{ url_for('siparisler_sayfa', mod='aylik') }}" class="btn btn-sm {{ 'btn-primary' if mod == 'aylik' else 'btn-outline-primary' }}">Aylık</a>
+        <a href="{{ url_for('siparisler_sayfa', mod='toplam') }}" class="btn btn-sm {{ 'btn-primary' if mod == 'toplam' else 'btn-outline-primary' }}">Toplam</a>
+    </div>
+</div>
+
+{% if mod == 'aylik' %}
+<div class="mb-3">
+    <span class="sp-ay-selector">
+        <a href="{{ url_for('siparisler_sayfa', mod='aylik', ay=prev_ay) }}">◀</a>
+        {{ kpis.ay_baslik }}
+        <a href="{{ url_for('siparisler_sayfa', mod='aylik', ay=next_ay) }}">▶</a>
+    </span>
+</div>
+<div class="sp-kpis">
+    <div class="sp-kpi sp-aylik"><div class="t">Sipariş Sayısı</div><div class="v">{{ kpis.siparis_sayisi }}</div></div>
+    <div class="sp-kpi sp-aylik"><div class="t">Kg</div><div class="v">{{ "%.0f"|format(kpis.kg_toplam) }}{% if kpis.adet_toplam %}<small class="text-muted d-block" style="font-size:0.75rem;">+ {{ kpis.adet_toplam|round(0)|int }} adet</small>{% endif %}</div></div>
+    <div class="sp-kpi sp-aylik"><div class="t">Tutar</div><div class="v">{{ kpis.tutar_toplam|para_goster }}</div></div>
+    <div class="sp-kpi sp-aylik"><div class="t">Geçen Aya Göre</div><div class="v {{ 'text-success' if kpis.fark_sayi >= 0 else 'text-danger' }}">{{ '+' if kpis.fark_sayi >= 0 else '' }}{{ kpis.fark_sayi }}</div></div>
+</div>
+{% else %}
+<div class="sp-kpis">
+    <div class="sp-kpi sp-toplam"><div class="t">Toplam Sipariş</div><div class="v">{{ kpis.siparis_sayisi }}</div></div>
+    <div class="sp-kpi sp-toplam"><div class="t">Toplam Kg</div><div class="v">{{ "%.0f"|format(kpis.kg_toplam) }}{% if kpis.adet_toplam %}<small class="text-muted d-block" style="font-size:0.75rem;">+ {{ kpis.adet_toplam|round(0)|int }} adet</small>{% endif %}</div></div>
+    <div class="sp-kpi sp-toplam"><div class="t">Toplam Tutar</div><div class="v">{{ kpis.tutar_toplam|para_goster }}</div></div>
+    <div class="sp-kpi sp-toplam"><div class="t">Aylık Ortalama</div><div class="v">{{ "%.1f"|format(kpis.aylik_ortalama) }}</div></div>
+</div>
+{% endif %}
+
+<div class="card shadow-sm">
+    <div class="card-body sp-table-wrap">
+        <table class="table table-hover mb-0">
+            <thead class="table-dark">
+                <tr><th>Müşteri</th><th>Ürün</th><th>Miktar</th><th>Tutar</th><th>Tarih</th><th>Durum</th></tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr style="cursor:pointer;" onclick="window.location='{{ url_for('deal_detail', id=r.id) }}'">
+                    <td>{{ r.musteri_adi }}</td>
+                    <td>{{ r.urun }}</td>
+                    <td>{{ r.miktar|round(0)|int if r.miktar else '-' }} {{ r.birim or '' }}</td>
+                    <td>{{ r.tutar_tl|para_goster }}</td>
+                    <td>{{ r.tarih.strftime('%d.%m.%Y') if r.tarih else '-' }}</td>
+                    <td>{% if r.durum_label %}<span class="sp-pill sp-pill-{{ r.durum_renk }}">{{ r.durum_label }}</span>{% endif %}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-muted text-center py-4">Sipariş bulunmuyor.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination justify-content-center">
+        {% for p in range(1, pages + 1) %}
+        <li class="page-item {{ 'active' if p == page }}">
+            <a class="page-link" href="{{ url_for('siparisler_sayfa', mod=mod, ay=ay if mod == 'aylik' else None, page=p) }}">{{ p }}</a>
+        </li>
+        {% endfor %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

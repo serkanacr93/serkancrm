@@ -257,12 +257,25 @@ a:hover {
     z-index: 1550;
     pointer-events: none;
 }
-.crm-side-panel-tab {
-    position: absolute;
-    right: 0;
+/* 2026-10-08: tab'lar artik BU paylasilan, dikey flex kapta ustuste
+   dizilir (bkz. base.html) - bagimsiz top:50% ile ortalanan iki tab
+   ayni anda varken BIRBIRINE BINIYORDU (Playwright'ta yakalandi: Ozet
+   Panel tiklanamaz hale geliyordu, Siparisler tab'i ustune biniyordu).
+   Flex kap TEK BASINA ortalanir, icindeki tab sayisi/boyutu fark etmez. */
+.crm-side-tabs-stack {
+    position: fixed;
     top: 50%;
-    transform: translateY(-50%) rotate(180deg);
+    right: 0;
+    transform: translateY(-50%);
+    z-index: 1551;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+.crm-side-panel-tab {
     writing-mode: vertical-rl;
+    transform: rotate(180deg);
     background: linear-gradient(180deg, #1e1e1e, #333);
     color: #ffc107;
     padding: 18px 8px;
@@ -329,6 +342,30 @@ a:hover {
     .crm-side-panel { width: 85vw; }
     .crm-side-panel-tab { padding: 14px 7px; font-size: 0.76rem; }
 }
+
+/* ===== Komuta Merkezi (2026-10-08) - Siparisler yan sekmesi =====
+   Ozet Panel'in AYNI .crm-side-panel-tab tabanini kullanir, sadece renk
+   ve (varsa Ozet Panel de bu sayfadaysa) dikey konum farklilasir - bkz.
+   base.html'deki inline 'top: calc(50% + 74px)' stili. */
+.crm-side-panel-tab-siparis {
+    background: linear-gradient(180deg, #D9481B, #B23A14);
+    color: #fff;
+}
+.crm-side-panel-badge {
+    display: inline-block;
+    background: #F5B800;
+    color: #1C1C1E;
+    border-radius: 99px;
+    padding: 1px 7px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin-left: 4px;
+    letter-spacing: normal;
+}
+.crm-panel-title-siparis { border-bottom-color: #D9481B !important; }
+.crm-siparis-box { border-radius: 8px; padding: 10px 12px; }
+.crm-siparis-box-ay { background: #FBE4D8; border-top: 3px solid #D9481B; }
+.crm-siparis-box-toplam { background: #ECECEC; border-top: 3px solid #1C1C1E; }
 
 @media (max-width: 991.98px) {
     .crm-global-search { order: 3; flex-basis: 100%; max-width: 100%; margin-top: 8px; }

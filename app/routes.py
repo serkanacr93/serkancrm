@@ -1,9 +1,9 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, format_price_tr, TR_AYLAR
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
-from app import db, places_search, limiter, csrf
+from app import db, places_search, siparisler, limiter, csrf
 from app.tcmb import fetch_tcmb_rate
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -57,6 +57,11 @@ GUNLUK_HEDEF_ILETISIM = 40
 # davranisi degismesin.
 TAKIP_SIPARIS_VERMIS_GUN = 60
 TAKIP_TEKLIF_ALMIS_GUN = 30
+
+# 2026-10-08 (Komuta Merkezi): '0' ise TUM kullanicilar icin eski ana
+# sayfa (index.html) zorunlu kilinir - kod degisikligi gerekmeden acil
+# durumda geri donulebilsin diye. Varsayilan acik (yeni gorunum).
+ANASAYFA_YENI = os.environ.get('ANASAYFA_YENI', '1') != '0'
 
 def _increment_daily_outreach(user_id, amount=1):
     """Is 1 - Takip Modu: kullanici+bugun icin DailyOutreachCount satirini
@@ -636,6 +641,22 @@ def register_routes(app):
         summary['takip_gerekiyor_count'] = _takip_gerekiyor_query().count()
         return {'navbar_summary': summary, 'navbar_takip_gerekiyor_count': summary['takip_gerekiyor_count']}
 
+    @app.context_processor
+    def _inject_siparisler_sidebar():
+        """Is 2 (Komuta Merkezi, 2026-10-08): base.html'deki 'Siparişler'
+        yan sekmesini TUM sayfalarda besler. Gorunurluk kullaniciya gore
+        degistigi icin onbellek anahtari scope_user_id (bkz. app.siparisler.
+        sidebar_siparis_summary - kullanici basina 60sn). HATA olursa
+        (DB sorunu vb.) sekme SESSIZCE gorunmez - sayfayi BOZMAZ."""
+        if not current_user.is_authenticated:
+            return {'siparisler_sidebar': None}
+        try:
+            scope_user_id = _deal_visibility_user_id()
+            data = siparisler.sidebar_siparis_summary(scope_user_id)
+        except Exception:
+            data = None
+        return {'siparisler_sidebar': data}
+
     @app.errorhandler(429)
     def _rate_limit_exceeded(e):
         flash('Çok fazla giriş denemesi yaptınız. Lütfen bir dakika bekleyip tekrar deneyin.', 'danger')
@@ -710,6 +731,20 @@ def register_routes(app):
     @app.route('/')
     @login_required
     def index():
+        """2026-10-08 (Komuta Merkezi): varsayilan YENI gorunum
+        (index_komuta.html). ?gorunum=eski ile eski index.html'e gecilir,
+        tercih session'da (cerez) kalici hatirlanir; ?gorunum=yeni ile geri
+        donulur. ANASAYFA_YENI=0 ortam degiskeni TUM kullanicilar icin
+        eski gorunumu zorunlu kilar (acil durum anahtari - kod degisikligi
+        gerekmeden eski sayfaya donulebilsin diye)."""
+        if request.args.get('gorunum') in ('eski', 'yeni'):
+            session['anasayfa_gorunum'] = request.args.get('gorunum')
+        gorunum = session.get('anasayfa_gorunum', 'yeni')
+        if not ANASAYFA_YENI or gorunum == 'eski':
+            return _index_eski()
+        return _index_komuta()
+
+    def _index_eski():
         today = datetime.now().date()
 
         # Performans: asagidaki 10 bagimsiz COUNT/SUM sorgusu Neon'a (uzak,
@@ -895,6 +930,145 @@ def register_routes(app):
                              conversion_rate=conversion_rate,
                              avg_customer_days=avg_customer_days,
                              production_cycle_customers=production_cycle_customers)
+
+    def _index_komuta():
+        """2026-10-08 (Komuta Merkezi): YENI varsayilan ana sayfa. Eski
+        index.html'e (_index_eski) HIC DOKUNMADAN, tamamen EKLEMELI ayri
+        bir sablon+veri seti. Gorunurluk _apply_deal_visibility/owner_user_id
+        ile AYNEN eski sayfadaki kurallara uyar. Performans: tek scalar_
+        subquery sorgusu (mevcut _navbar_summary/_index_eski desenindeki
+        gibi) + birkac kucuk ek sorgu (N+1 yok - hepsi ya toplu ya da
+        zaten az sayida satir donduren sorgular)."""
+        today = date.today()
+        scope_user_id = _deal_visibility_user_id()
+
+        toplam_teklif, siparis_sayisi, donusum_pct = siparisler.teklif_siparis_sayilari(scope_user_id)
+        siparis_ozet = siparisler.siparis_summary(scope_user_id, limit=5)
+
+        bugun_tahsilat = db.session.query(db.func.coalesce(db.func.sum(Payment.amount), 0)).filter(
+            Payment.payment_date == today, Payment.status == 'odendi'
+        ).scalar() or 0
+
+        # ---- Bugun yapilacaklar (4 kaynaktan birlestirilmis, en fazla 4 satir) ----
+        todo_items = []
+
+        reminder_q = PaymentReminder.query.filter(PaymentReminder.status != 'odendi').options(joinedload(PaymentReminder.customer))
+        if not current_user.is_admin:
+            reminder_q = reminder_q.join(Customer, PaymentReminder.customer_id == Customer.id).filter(
+                Customer.owner_user_id == current_user.id)
+        for r in reminder_q.all():
+            is_due = (r.status == 'soz_verildi' and r.promised_date and r.promised_date <= today) or \
+                     (r.status != 'soz_verildi' and r.due_date <= today)
+            if is_due:
+                musteri_adi = r.customer.display_name if r.customer else '-'
+                todo_items.append({
+                    'renk': 'danger', 'oncelik': 0,
+                    'text': f'{musteri_adi}: {format_price_tr(r.amount)} ödeme bekleniyor',
+                    'link': url_for('takip_modu'),
+                })
+
+        expiring_today_soon = _apply_deal_visibility(Deal.query.filter(
+            Deal.valid_until <= today + timedelta(days=2), Deal.valid_until >= today,
+            Deal.stage.notin_(['kazanilan', 'kaybedilen', 'revize'])
+        )).options(joinedload(Deal.customer)).all()
+        for d in expiring_today_soon:
+            gun_kalan = (d.valid_until - today).days
+            todo_items.append({
+                'renk': 'warning', 'oncelik': 1,
+                'text': f'{d.customer.display_name if d.customer else d.title}: teklif süresi {"bugün" if gun_kalan == 0 else f"{gun_kalan} gün içinde"} doluyor',
+                'link': url_for('deal_detail', id=d.id),
+            })
+
+        pending_price = DailyReport.query.filter_by(status='fiyat_verilecek').order_by(DailyReport.report_date.asc()).limit(5).all()
+        for pr in pending_price:
+            todo_items.append({
+                'renk': 'warning', 'oncelik': 1,
+                'text': f'{pr.customer_name}: fiyat verilecek',
+                'link': url_for('daily_reports'),
+            })
+
+        outreach_today = DailyOutreachCount.query.filter_by(user_id=current_user.id, report_date=today).first()
+        outreach_count = outreach_today.count if outreach_today else 0
+        if outreach_count < GUNLUK_HEDEF_ILETISIM:
+            todo_items.append({
+                'renk': 'info', 'oncelik': 2,
+                'text': f'Takip Modu: bugün {outreach_count}/{GUNLUK_HEDEF_ILETISIM} iletişim yapıldı',
+                'link': url_for('takip_modu'),
+            })
+
+        todo_items.sort(key=lambda x: x['oncelik'])
+        todo_items = todo_items[:4]
+
+        # ---- Aylik teklif/siparis cubuklari + dunku/aylik uretim kg ----
+        aylik_ozet = siparisler.aylik_teklif_siparis_ozet(scope_user_id, ay_sayisi=6)
+        yesterday = today - timedelta(days=1)
+        month_start = date(today.year, today.month, 1)
+        uretim_row = db.session.query(
+            db.session.query(db.func.coalesce(db.func.sum(DailyProductionOutput.toplam_kg), 0)).filter(
+                DailyProductionOutput.tarih == yesterday
+            ).scalar_subquery().label('dun_kg'),
+            db.session.query(db.func.coalesce(db.func.sum(DailyProductionOutput.toplam_kg), 0)).filter(
+                DailyProductionOutput.tarih >= month_start
+            ).scalar_subquery().label('ay_kg'),
+        ).one()
+
+        # ---- Saga: Hizli Islemler sidebar (production_cycle + dusuk stok + komisyon) ----
+        last_order_subq = db.session.query(
+            Deal.customer_id, db.func.max(Deal.deal_date).label('last_order_date')
+        ).filter(Deal.stage == 'kazanilan').group_by(Deal.customer_id).subquery()
+        production_cycle_rows = db.session.query(Customer, last_order_subq.c.last_order_date).join(
+            last_order_subq, Customer.id == last_order_subq.c.customer_id
+        ).filter(Customer.status != 'musteri_degil').all()
+        production_cycle_customers = []
+        for cust, last_order_date in production_cycle_rows:
+            if not last_order_date:
+                continue
+            next_expected = last_order_date + timedelta(days=cust.siparis_dongusu_gun)
+            days_remaining = (next_expected - today).days
+            if days_remaining <= 30:
+                production_cycle_customers.append({'customer': cust, 'days_remaining': days_remaining})
+        production_cycle_customers.sort(key=lambda x: x['days_remaining'])
+        production_cycle_customers = production_cycle_customers[:5]
+
+        low_stock_products = Product.query.filter(Product.stock_quantity <= Product.min_stock).order_by(Product.stock_quantity).limit(5).all()
+
+        commission_query = Commission.query.filter_by(status='odenmedi')
+        if not current_user.is_admin:
+            commission_query = commission_query.filter_by(user_id=current_user.id)
+        pending_commission_total = sum(c.amount for c in commission_query.all())
+
+        greeting_hour = datetime.now().hour
+        if greeting_hour < 12:
+            greeting = 'Günaydın'
+        elif greeting_hour < 18:
+            greeting = 'İyi günler'
+        else:
+            greeting = 'İyi akşamlar'
+
+        return render_template('index_komuta.html',
+                                greeting=greeting, today=today,
+                                toplam_teklif=toplam_teklif, siparis_sayisi=siparis_sayisi, donusum_pct=donusum_pct,
+                                siparis_ozet=siparis_ozet, bugun_tahsilat=bugun_tahsilat,
+                                todo_items=todo_items, aylik_ozet=aylik_ozet,
+                                dun_kg=uretim_row.dun_kg, ay_kg=uretim_row.ay_kg,
+                                production_cycle_customers=production_cycle_customers,
+                                low_stock_products=low_stock_products,
+                                pending_commission_total=pending_commission_total)
+
+    @app.route('/siparisler')
+    @login_required
+    def siparisler_sayfa():
+        """Is 3 (2026-10-08, Komuta Merkezi): Aylik/Toplam iki sekme -
+        tum hesap/filtre mantigi app/siparisler.py'de (tek kaynak, Komuta
+        Merkezi + sidebar panel ile PAYLASILIR)."""
+        scope_user_id = _deal_visibility_user_id()
+        mod = request.args.get('mod', 'aylik')
+        if mod not in ('aylik', 'toplam'):
+            mod = 'aylik'
+        page = request.args.get('page', 1, type=int)
+        ay_param = request.args.get('ay', '')
+        data = siparisler.siparisler_sayfa_verisi(scope_user_id, mod, ay_param, page=page, per_page=50)
+        return render_template('siparisler.html', mod=mod, **data)
 
     @app.route('/reminders')
     @login_required
@@ -3961,8 +4135,6 @@ def register_routes(app):
         flash('Manuel kayıt silindi!', 'success')
         return redirect(url_for('tedarik_takip'))
 
-    _TR_AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
-                 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']
     # 2026-10-07 (gorsel is - Serkan'in onayladigi taslak): kagit cinsi
     # basina SABIT renk, sadece Aylik Ozet'teki dokum cubuklarinda kullanilir.
     KAGIT_RENKLERI = {
@@ -4045,8 +4217,8 @@ def register_routes(app):
             'diger_musteri_sayisi': diger_musteri_sayisi, 'diger_musteri_kg': diger_musteri_kg,
             'gunluk_bar': gunluk_bar, 'en_yogun': en_yogun, 'en_dusuk': en_dusuk,
             'esmer_pct': esmer_pct, 'top3_pct': top3_pct, 'kagitsiz_pct': kagitsiz_pct,
-            'kayit_sayisi': len(rows), 'ay_baslik': f'{_TR_AYLAR[ay_start.month - 1]} {ay_start.year}',
-            'prev_ay_baslik': _TR_AYLAR[prev_ay_start.month - 1],
+            'kayit_sayisi': len(rows), 'ay_baslik': f'{TR_AYLAR[ay_start.month - 1]} {ay_start.year}',
+            'prev_ay_baslik': TR_AYLAR[prev_ay_start.month - 1],
         }
         return monthly, ay_str, prev_ay_start.strftime('%Y-%m'), next_ay_start.strftime('%Y-%m')
 

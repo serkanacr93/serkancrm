@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Komuta Merkezi - CRM Sistemi{% endblock %}
+
+{% block content %}
+<style>
+/* 2026-10-08 - Komuta Merkezi: Serkan'in onayladigi taslagin duzeni/
+   renkleri, taslagin CSS degiskenleri YERINE sabit renk degerleriyle. */
+.km-hd { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:8px; }
+.km-greeting { font-size:1.4rem; font-weight:600; color:#222; }
+.km-date { color:#777; font-size:0.95rem; }
+.km-view-toggle { font-size:0.8rem; color:#888; }
+.km-view-toggle a { color:#185FA5; text-decoration:none; }
+.km-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px; }
+.km-kpi { background:#fff; border:1px solid #e4e4e4; border-radius:12px; padding:16px; }
+.km-kpi .t { font-size:0.8rem; color:#777; margin-bottom:4px; }
+.km-kpi .v { font-size:1.7rem; font-weight:700; color:#222; }
+.km-kpi .s { font-size:0.82rem; color:#3B6D11; margin-top:2px; }
+.km-layout { display:flex; gap:18px; align-items:flex-start; }
+.km-main { flex:1; min-width:0; }
+.km-side { width:190px; flex-shrink:0; background:#1C1C1E; border-radius:12px; padding:16px 14px; color:#fff; }
+.km-side h6 { color:#F5B800; font-size:0.78rem; letter-spacing:1px; font-weight:700; margin-bottom:12px; }
+.km-side .btn { width:100%; margin-bottom:8px; text-align:left; font-size:0.85rem; }
+.km-side-info { font-size:0.78rem; color:#ccc; margin-top:14px; padding-top:12px; border-top:1px solid #3a3a3c; }
+.km-side-info-row { display:flex; justify-content:space-between; margin-bottom:6px; }
+.km-two { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+.km-card { background:#fff; border:1px solid #e4e4e4; border-radius:12px; padding:16px; }
+.km-card-hd { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.km-card-hd strong { font-size:0.95rem; color:#222; }
+.km-card-hd a { font-size:0.82rem; color:#185FA5; text-decoration:none; }
+.km-siparis-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid #f0f0f0; font-size:0.85rem; }
+.km-siparis-row:last-child { border-bottom:0; }
+.km-todo-row { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:6px; margin-bottom:5px; font-size:0.84rem; border-left:4px solid; }
+.km-todo-row.km-danger { border-color:#dc3545; background:#fdeeee; }
+.km-todo-row.km-warning { border-color:#F5B800; background:#fff8e0; }
+.km-todo-row.km-info { border-color:#378ADD; background:#eaf3fc; }
+.km-todo-row a { color:inherit; text-decoration:none; flex:1; }
+.km-bars { display:flex; align-items:flex-end; gap:10px; height:100px; margin-top:8px; }
+.km-bar-group { flex:1; display:flex; gap:2px; align-items:flex-end; height:100%; }
+.km-bar { flex:1; border-radius:3px 3px 0 0; min-height:2px; }
+.km-bar-teklif { background:#cfd8e3; }
+.km-bar-siparis { background:#D9481B; }
+.km-bars-labels { display:flex; gap:10px; margin-top:4px; }
+.km-bars-labels > div { flex:1; text-align:center; font-size:0.72rem; color:#888; }
+.km-uretim-kg { display:flex; gap:20px; margin-top:12px; font-size:0.85rem; color:#555; }
+@media (max-width: 991.98px) {
+    .km-layout { flex-direction:column; }
+    .km-side { width:100%; }
+    .km-kpis { grid-template-columns:repeat(2,1fr); }
+    .km-two { grid-template-columns:1fr; }
+}
+</style>
+
+<div class="km-hd">
+    <div>
+        <div class="km-greeting">{{ greeting }} {{ current_user.full_name or current_user.username }}</div>
+        <div class="km-date">{{ today.strftime('%d.%m.%Y') }}</div>
+    </div>
+    <div class="km-view-toggle"><a href="{{ url_for('index', gorunum='eski') }}">Eski görünüm →</a></div>
+</div>
+
+<div class="km-kpis">
+    <div class="km-kpi">
+        <div class="t">Verilen Teklif</div>
+        <div class="v">{{ toplam_teklif }}</div>
+    </div>
+    <div class="km-kpi">
+        <div class="t">Siparişe Dönen</div>
+        <div class="v">{{ siparis_sayisi }}</div>
+        <div class="s">%{{ "%.0f"|format(donusum_pct) }} dönüşüm</div>
+    </div>
+    <div class="km-kpi">
+        <div class="t">Bu Ay Sipariş</div>
+        <div class="v">{{ siparis_ozet.bu_ay_sayisi }}</div>
+    </div>
+    <div class="km-kpi">
+        <div class="t">Bugün Tahsilat</div>
+        <div class="v">{{ bugun_tahsilat|para_goster }}</div>
+    </div>
+</div>
+
+<div class="km-layout">
+    <div class="km-main">
+        <div class="km-two">
+            <div class="km-card">
+                <div class="km-card-hd"><strong>Siparişler</strong><a href="{{ url_for('siparisler_sayfa') }}">Tümü →</a></div>
+                {% for r in siparis_ozet.son_n %}
+                <a href="{{ url_for('deal_detail', id=r.id) }}" class="km-siparis-row text-decoration-none text-dark">
+                    <span>{{ r.musteri_adi }} · {{ r.urun }}{% if r.miktar %} · {{ r.miktar|round(0)|int }} {{ r.birim }}{% endif %}</span>
+                    <span class="text-muted">{{ r.tarih.strftime('%d.%m.%Y') if r.tarih else '' }}</span>
+                </a>
+                {% else %}
+                <p class="text-muted small mb-0">Henüz sipariş yok.</p>
+                {% endfor %}
+            </div>
+            <div class="km-card">
+                <div class="km-card-hd"><strong>Bugün Yapılacaklar</strong></div>
+                {% for item in todo_items %}
+                <div class="km-todo-row km-{{ item.renk }}">
+                    <a href="{{ item.link }}">{{ item.text }}</a>
+                </div>
+                {% else %}
+                <p class="text-muted small mb-0">Bugün için bekleyen bir şey yok.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="km-card">
+            <div class="km-card-hd"><strong>Aylık Teklif / Sipariş</strong></div>
+            {% set max_val = (aylik_ozet | map(attribute='teklif') | list + aylik_ozet | map(attribute='siparis') | list) | max %}
+            <div class="km-bars">
+                {% for a in aylik_ozet %}
+                <div class="km-bar-group">
+                    <div class="km-bar km-bar-teklif" style="height: {{ (a.teklif / max_val * 100) if max_val else 0 }}%;" title="{{ a.ay_kisa }}: {{ a.teklif }} teklif"></div>
+                    <div class="km-bar km-bar-siparis" style="height: {{ (a.siparis / max_val * 100) if max_val else 0 }}%;" title="{{ a.ay_kisa }}: {{ a.siparis }} sipariş"></div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="km-bars-labels">
+                {% for a in aylik_ozet %}
+                <div>{{ a.ay_kisa }}</div>
+                {% endfor %}
+            </div>
+            <div class="km-uretim-kg">
+                <span><i class="bi bi-square-fill" style="color:#cfd8e3;"></i> Teklif &nbsp; <i class="bi bi-square-fill" style="color:#D9481B;"></i> Sipariş</span>
+                <span>Dün: <strong>{{ "%.0f"|format(dun_kg) }} kg</strong> üretim</span>
+                <span>Bu ay: <strong>{{ "%.0f"|format(ay_kg) }} kg</strong> üretim</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="km-side">
+        <h6>HIZLI İŞLEMLER</h6>
+        <a href="{{ url_for('add_deal') }}" class="btn btn-sm" style="background:#F5B800;color:#1C1C1E;font-weight:600;"><i class="bi bi-file-earmark-plus"></i> Yeni Teklif</a>
+        <a href="{{ url_for('add_customer') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-person-plus"></i> Yeni Müşteri</a>
+        <a href="{{ url_for('gunluk_uretim') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-journal-plus"></i> Üretim Gir</a>
+        <a href="{{ url_for('add_payment') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-cash"></i> Ödeme Gir</a>
+        <a href="{{ url_for('manual_irsaliye_add') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-truck"></i> İrsaliye Kes</a>
+
+        <div class="km-side-info">
+            {% if production_cycle_customers %}
+            <div class="fw-bold mb-1" style="color:#F5B800;">Sipariş Zamanı Gelen</div>
+            {% for p in production_cycle_customers[:3] %}
+            <div class="km-side-info-row"><span>{{ p.customer.display_name[:16] }}</span><span>{{ p.days_remaining }}g</span></div>
+            {% endfor %}
+            {% endif %}
+            {% if low_stock_products %}
+            <div class="fw-bold mb-1 mt-2" style="color:#F5B800;">Düşük Stok</div>
+            <div class="km-side-info-row"><span>{{ low_stock_products|length }} ürün</span></div>
+            {% endif %}
+            {% if pending_commission_total %}
+            <div class="fw-bold mb-1 mt-2" style="color:#F5B800;">Ödenmemiş Komisyon</div>
+            <div class="km-side-info-row"><span>{{ pending_commission_total|para_goster }}</span></div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

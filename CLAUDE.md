@@ -86,6 +86,14 @@ Kullanıcı net bir talimat vermediği bir tasarım/iş kuralı kararında (örn
 - Günlük Üretim "gün toplamı" HER ZAMAN `.day-total` elemanının `data-kg` attribute'undan okunur/yazılır - ekrandaki METİNDEN asla geri parse edilmez (format uyumsuzluğu = yanlış toplam, bkz. 02.10.2026 bug'ı).
 - Müşteri birleştirmede (`_merge_customers()`) `customer_id` (veya eşdeğeri) tutan YENİ bir tablo eklenirse `_CUSTOMER_FK_TABLES`'a da eklenmesi ZORUNLU - aksi halde kopya müşterinin o tablodaki kayıtları sessizce silinir (veya, benzersiz kısıtı olan tablolarda - örn. `TakipModuAtla` - FK ihlaliyle birleştirme tamamen çöker).
 
+## Komuta Merkezi / Siparişler (2026-10-08)
+
+- Ana sayfa artık **Komuta Merkezi** (`index_komuta.html`, `_index_komuta()` fonksiyonu). Eski ana sayfa SİLİNMEDİ: `_index_eski()` adıyla duruyor, `index.html`'i render ediyor. Görünüm seçimi: `?gorunum=eski` / `?gorunum=yeni` (oturumda `session['anasayfa_gorunum']` ile hatırlanır) veya ortam değişkeni `ANASAYFA_YENI=0` (herkese eski sayfayı zorlar).
+- Sipariş tanımı, TL çevrimi ve durum türetme TEK yerde: `app/siparisler.py` (`teklif_siparis_sayilari()`, `siparis_summary()`, `aylik_teklif_siparis_ozet()`, `siparisler_sayfa_verisi()`, `siparis_durumu()`) + `Deal.deger_tl` / `Deal.siparis_tarihi` property'leri (`app/models.py`). Sipariş = `Deal.stage=='kazanilan'`; sipariş tarihi = ilgili `Production.start_date` (approve_deal anındaki), `Deal.deal_date` DEĞİL. Yeni bir yerde sipariş sayısı/tutarı hesaplanacaksa buradaki fonksiyonlar kullanılır, ikinci bir hesaplama yolu açılmaz.
+- Her sayfadaki sağ "SİPARİŞLER" yan sekmesi (`_inject_siparisler_sidebar()`) kullanıcı başına (görünürlük kullanıcıya göre değiştiği için `user_id` anahtarlı) 60 saniyelik bellek-içi önbellek kullanır (`siparisler._sidebar_cache`). Önbellek/DB hatası sayfayı bozmaz (`None` döner, sekme gizlenir).
+- Yan sekme + Özet Panel sekmesi artık ortak `.crm-side-tabs-stack` flex-kolon içinde dururlar (ikisi de `position:static`, dışarıdaki `.crm-side-tabs-stack` tek başına `position:fixed;top:50%` ile ortalanır). Üçüncü bir yan sekme eklenecekse bu stack'e eklenir - eski `position:absolute;top:calc(50% + Npx)` deseni KULLANILMAZ (self-centering transform'dan önce uygulandığı için üst üste biner, bkz. 2026-10-08 bug'ı).
+- TEST verisi temizlenirken `Deal` silmeden önce `Commission.deal_id` de silinmeli (approve edilmiş TEST teklifinde komisyon kaydı otomatik oluşur) - `_CUSTOMER_FK_TABLES` listesi (routes.py) bunu kapsamaz çünkü o liste `customer_id` birleştirme/taşıma için, `Commission` ise `customer_id` değil `deal_id` tutuyor.
+
 ## Her işin sonunda
 
 1. `tests/smoke_test.py` canlıda (`--url https://serkancrm.onrender.com`) çalıştırılır; tablo temiz değilse "tamam" denmez.
