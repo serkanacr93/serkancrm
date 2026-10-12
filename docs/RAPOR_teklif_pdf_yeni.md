@@ -81,4 +81,6 @@
 
 ## 8. Commit ve Branch
 
-Tüm testler geçti → **master**'a commit + push edildi (bkz. commit mesajı: "Teklif PDF yeni tasarım (logo renkleri, KDV hariç tutar, peşinatsız, TCMB kur notu; Klasik seçeneği korunarak)"). Render deploy tamamlandıktan sonra canlıda `/login` ve giriş GEREKTİRMEYEN temel erişilebilirlik kontrol edildi (şifre istenmedi/kullanılmadı).
+Tüm testler geçti → **master**'a commit (`bf50de8`) + push edildi (bkz. commit mesajı: "Teklif PDF yeni tasarım (logo renkleri, KDV hariç tutar, peşinatsız, TCMB kur notu; Klasik seçeneği korunarak)"). Push sonrası ~4 dakika boyunca `/login` düzenli aralıklarla kontrol edildi, her seferinde 200 (hata/çökme yok) — Python-only bir değişiklik olduğu için (statik dosya değişmedi) genel erişilebilirlik dışında deploy'un KESİN olarak yeni kodu çalıştırdığını giriş yapmadan kanıtlayacak bağımsız bir işaret yoktu; "canlıda giriş gerektiren test yapma" kuralına uyularak bu sınırda bırakıldı.
+
+**Serkan'ın canlıda 2 dakikada kontrol edeceği tek şey**: Herhangi bir gerçek teklifin PDF'ini indirin — sarı/antrasit yeni tasarım geliyorsa deploy başarılı demektir. Eski görünümü istiyorsanız Ayarlar → Teklif PDF Tasarımı → "Klasik" seçip kaydedin.
