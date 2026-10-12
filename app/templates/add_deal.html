@@ -133,6 +133,19 @@
                             <input type="date" class="form-control" id="bakiye_tarihi" name="bakiye_tarihi">
                         </div>
                     </div>
+                    <div class="row">
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label">Ödeme Yöntemi <small class="text-muted">(isteğe bağlı, PDF'te gösterilir)</small></label>
+                            <div class="d-flex flex-wrap gap-3">
+                                {% for code, label in [('havale', 'Havale / EFT'), ('nakit', 'Nakit'), ('cek', 'Çek'), ('senet', 'Senet'), ('kredi_karti', 'Kredi Kartı')] %}
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="odeme_yontemi" value="{{ code }}" id="odeme_{{ code }}">
+                                    <label class="form-check-label" for="odeme_{{ code }}">{{ label }}</label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 

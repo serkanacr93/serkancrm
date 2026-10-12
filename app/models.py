@@ -34,6 +34,17 @@ def format_price_precise(value):
 
 CURRENCY_SYMBOLS = {'TRY': '₺', 'EUR': '€', 'USD': '$', 'GBP': '£'}
 
+# 2026-10-13 (Teklif PDF yeni tasarim): teklif formunda odeme yontemi secimi
+# hic yoktu (sadece Payment.payment_method - gercek tahsilat kaydinda - vardi).
+# Deal.odeme_yontemi bu kodlari virgulle ayrilmis tutar (orn. "havale,cek").
+PAYMENT_METHOD_LABELS = {
+    'havale': 'Havale / EFT',
+    'nakit': 'Nakit',
+    'cek': 'Çek',
+    'senet': 'Senet',
+    'kredi_karti': 'Kredi Kartı',
+}
+
 # 2026-10-08 (Komuta Merkezi + Siparisler): ay adi icin strftime('%B')
 # KULLANILMAZ - sunucu locale'i Turkce olmayabilir. Paylasilan TEK kaynak
 # (eskiden Gunluk Uretim route'u icinde yerel/duplike bir kopyasi vardi,
@@ -315,6 +326,10 @@ class Deal(db.Model):
     # gunlerde farkli kurla gelebilir) - Deal'de tek bir "kesin" kur YOKTUR.
     para_birimi = db.Column(db.String(3), default='TRY', nullable=False)  # TRY / EUR / USD
     kullanilan_kur = db.Column(db.Float, nullable=True)  # 1 birim para_birimi = ? TL (gosterge)
+    # 2026-10-13 (Teklif PDF yeni tasarim): secilen odeme yontemi kod(lar)i,
+    # virgulle ayrilmis (orn. "havale,cek") - bkz. PAYMENT_METHOD_LABELS.
+    # Eski tekliflerde NULL kalir (geriye donuk doldurma YOK).
+    odeme_yontemi = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -360,6 +375,16 @@ class Deal(db.Model):
         if self.kullanilan_kur:
             return self.value * self.kullanilan_kur
         return self.value
+
+    @property
+    def odeme_yontemi_listesi(self):
+        """odeme_yontemi'ndeki kodlari ("havale,cek") okunabilir etiket
+        listesine cevirir (["Havale / EFT", "Çek"]) - bilinmeyen/bos kod
+        sessizce atlanir. PDF'te " · " ile birlestirilir."""
+        if not self.odeme_yontemi:
+            return []
+        codes = [c.strip() for c in self.odeme_yontemi.split(',') if c.strip()]
+        return [PAYMENT_METHOD_LABELS[c] for c in codes if c in PAYMENT_METHOD_LABELS]
 
     @property
     def siparis_tarihi(self):
@@ -1144,6 +1169,15 @@ class CompanySettings(db.Model):
     # B5e (2026-10-06): Teklif PDF'inde genel toplamin diger 3 para
     # birimindeki (bilgi amacli) karsiligini gosterip gostermeme ayari.
     pdf_doviz_karsiligi_goster = db.Column(db.Boolean, default=True, nullable=False)
+    # 2026-10-13 (Teklif PDF yeni tasarim): 'yeni' / 'klasik' - NULL "yeni"
+    # kabul edilir (bkz. Deal.teklif_pdf_tasarim_aktif asagida, pdf_utils.py).
+    teklif_pdf_tasarim = db.Column(db.String(10), nullable=True)
+    # Serbest metin - doluysa YENI PDF tasariminin "TEKLİF ŞARTLARI"
+    # kutusunda bu kullanilir (NULL ise pdf_utils.py'deki varsayilan
+    # maddeler basilir). {gecerlilik} ve {kur_notu} yer tutucularini destekler.
+    teklif_sartlari = db.Column(db.Text, nullable=True)
+    banka_adi = db.Column(db.String(80), nullable=True)
+    iban = db.Column(db.String(40), nullable=True)
 
 class PlacesSearchConfig(db.Model):
     """Tekil satir (id=1) - Google Places otomatik arama ayarlari."""

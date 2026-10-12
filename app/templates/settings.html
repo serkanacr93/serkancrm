@@ -68,6 +68,33 @@
                             <small class="text-muted d-block">Yüklenmezse teklif PDF'inde sadece firma adı büyük/kalın gösterilir. Maks. 2 MB.</small>
                         </div>
                     </div>
+                    <hr>
+                    <h6 class="text-muted"><i class="bi bi-file-earmark-pdf"></i> Teklif PDF</h6>
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <label for="teklif_pdf_tasarim" class="form-label">Teklif PDF Tasarımı</label>
+                            <select class="form-select" id="teklif_pdf_tasarim" name="teklif_pdf_tasarim">
+                                <option value="yeni" {% if (company_settings.teklif_pdf_tasarim or 'yeni') == 'yeni' %}selected{% endif %}>Yeni</option>
+                                <option value="klasik" {% if company_settings.teklif_pdf_tasarim == 'klasik' %}selected{% endif %}>Klasik</option>
+                            </select>
+                            <small class="text-muted">Klasik seçilirse PDF eskisiyle birebir aynı çıkar.</small>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <label for="banka_adi" class="form-label">Banka Adı (opsiyonel)</label>
+                            <input type="text" class="form-control" id="banka_adi" name="banka_adi" value="{{ company_settings.banka_adi or '' }}">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="iban" class="form-label">IBAN (opsiyonel)</label>
+                            <input type="text" class="form-control" id="iban" name="iban" value="{{ company_settings.iban or '' }}">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12 mb-3">
+                            <label for="teklif_sartlari" class="form-label">Teklif Şartları (opsiyonel)</label>
+                            <textarea class="form-control" id="teklif_sartlari" name="teklif_sartlari" rows="3" placeholder="Boş bırakılırsa varsayılan maddeler kullanılır.">{{ company_settings.teklif_sartlari or '' }}</textarea>
+                            <small class="text-muted">Her satır bir madde olur. {gecerlilik} ve {kur_notu} yer tutucuları desteklenir.</small>
+                        </div>
+                    </div>
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-check-lg"></i> Kaydet
                     </button>

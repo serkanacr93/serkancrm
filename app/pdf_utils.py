@@ -5,6 +5,7 @@ from reportlab.lib.units import mm, cm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen.canvas import Canvas as _PDFCanvas
 from io import BytesIO
 import os
 import re
@@ -120,7 +121,187 @@ def _get_company_settings_for_pdf():
         company = CompanySettings(company_name='Lema Ambalaj')
     return company
 
+
+# ===== 2026-10-13: Teklif PDF yeni tasarim - yardimci fonksiyonlar =====
+
+_SAYI_BIRLER = ['', 'bir', 'iki', 'üç', 'dört', 'beş', 'altı', 'yedi', 'sekiz', 'dokuz']
+_SAYI_ONLAR = ['', 'on', 'yirmi', 'otuz', 'kırk', 'elli', 'altmış', 'yetmiş', 'seksen', 'doksan']
+_SAYI_GRUPLAR = ['', 'bin', 'milyon', 'milyar', 'trilyon']
+
+
+def _uc_hane_yaziyla(num):
+    """0-999 arasi bir sayiyi Turkce yaziyla - ic yardimci, disaridan
+    cagrilmaz (sifir icin bos string doner, ust fonksiyon 'bir' onekini
+    'bin' grubunda bastirmak icin boyle kurulmustur)."""
+    yuzler, kalan = divmod(num, 100)
+    onlar, birler = divmod(kalan, 10)
+    parts = []
+    if yuzler:
+        if yuzler > 1:
+            parts.append(_SAYI_BIRLER[yuzler])
+        parts.append('yüz')
+    if onlar:
+        parts.append(_SAYI_ONLAR[onlar])
+    if birler:
+        parts.append(_SAYI_BIRLER[birler])
+    return ' '.join(parts)
+
+
+def _sayi_yaziyla_tam(n):
+    """Negatif olmayan bir tam sayiyi Turkce yaziyla yazar (0 -> 'sıfır').
+    '1000' -> 'bin' ('bir bin' DEGIL), '1001' -> 'bin bir' - Turkce'de 'bin'
+    grubu 'bir' onekini almaz, diger gruplar (milyon/milyar) alir."""
+    n = int(n)
+    if n == 0:
+        return 'sıfır'
+    gruplar = []
+    temp = n
+    while temp > 0:
+        gruplar.append(temp % 1000)
+        temp //= 1000
+    words = []
+    for i in reversed(range(len(gruplar))):
+        g = gruplar[i]
+        if g == 0:
+            continue
+        scale = _SAYI_GRUPLAR[i]
+        if scale == 'bin' and g == 1:
+            words.append('bin')
+        else:
+            words.append(_uc_hane_yaziyla(g))
+            if scale:
+                words.append(scale)
+    return ' '.join(words)
+
+
+def tutar_yaziyla(value):
+    """87648.0 -> 'Seksen sekiz bin Türk Lirası' gibi tam tutarlar icin
+    kurus eklenmez; kurus varsa '... Türk Lirası ... Kuruş' seklinde
+    eklenir. Yalniz ilk harf buyutulur (mockup: 'Seksen yedi bin ...')."""
+    value = round(float(value), 2)
+    tl = int(value)
+    kurus = round((value - tl) * 100)
+    if kurus >= 100:
+        tl += 1
+        kurus = 0
+    text = _sayi_yaziyla_tam(tl) + ' Türk Lirası'
+    if kurus:
+        text += ' ' + _sayi_yaziyla_tam(kurus) + ' Kuruş'
+    return text[0].upper() + text[1:]
+
+
+def _money_tr(value):
+    """Yeni tasarimin GENEL para formati: Turkce ayrac (bin: nokta, ondalik:
+    virgul), DAIMA 2 ondalik (87648 -> '87.648,00') - klasigin
+    format_price_precise()'inden FARKLI olarak kirpma/yuvarlama yapar
+    (hesaplanan - kur carpimi gibi - degerlerde float gurultusunu
+    gizlemek icin; klasik tasarimi ETKILEMEZ, SADECE _generate_deal_pdf_yeni
+    icinde kullanilir)."""
+    value = round(float(value), 2)
+    sign = '-' if value < 0 else ''
+    value = abs(value)
+    s = f'{value:,.2f}'
+    s = s.replace(',', '§').replace('.', ',').replace('§', '.')
+    return sign + s
+
+
+def _logo_for_pdf_yeni(logo_data):
+    """Logonun neredeyse-beyaz pikselleri (R,G,B hepsi >= 244) seffaf yapar
+    ve bos kenarlari kirpar - SADECE bellekte, company.logo_data'daki
+    gercek veri hic degismez. Basarisiz olursa None doner (cagiran taraf
+    logoyu atlar, PDF kirilmaz)."""
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(BytesIO(logo_data)).convert('RGBA')
+        pixels = img.load()
+        w, h = img.size
+        for y in range(h):
+            for x in range(w):
+                r, g, b, a = pixels[x, y]
+                if r >= 244 and g >= 244 and b >= 244:
+                    pixels[x, y] = (r, g, b, 0)
+        bbox = img.getbbox()
+        if bbox:
+            img = img.crop(bbox)
+        out = BytesIO()
+        img.save(out, format='PNG')
+        out.seek(0)
+        return out
+    except Exception:
+        return None
+
+
+def _kur_adi_yeni():
+    """tcmb.py fetch_tcmb_rate() ForexSelling kullaniyor -> 'döviz satış'.
+    tcmb.py'nin kendi kaynagina bagli - elle ayri bir sabit TUTULMUYOR,
+    burada SADECE goruntuleme amacli ayni ad tekrarlanir."""
+    return 'döviz satış'
+
+
+def _kur_notu_yeni(deal, kur_tarihi_str):
+    """Dovizli kalem varsa kur notu metnini doner, yoksa None. Birden
+    fazla farkli para birimi (nadir - DealItem'larda ayri kur yok, Deal
+    tek para birimi tutuyor) olmadigi icin tek satir yeterli."""
+    if deal.para_birimi == 'TRY' or not deal.kullanilan_kur:
+        return None
+    return (
+        f"Döviz kuru {kur_tarihi_str} tarihli TCMB {_kur_adi_yeni()} kurudur "
+        f"(1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TL). Döviz kalemler "
+        f"ödeme günü TCMB kuruyla TL'ye çevrilir."
+    )
+
+
+_DEFAULT_TERMS_YENI = [
+    "Teklif {gecerlilik} tarihine kadar geçerlidir.",
+    "{kur_notu}",
+    "Üretim, numune / baskı provası onayından sonra başlar.",
+    "Miktarlarda ±%10 üretim toleransı vardır.",
+    "Teslim yeri: Konya fabrika teslim.",
+]
+
+
+def _build_terms_yeni(deal, company):
+    """Sirket ayarlarindaki teklif_sartlari (serbest metin, satir basina
+    bir madde) doluysa onu, yoksa _DEFAULT_TERMS_YENI'yi kullanir.
+    {gecerlilik}/{kur_notu} yer tutucularini doldurur; kur_notu yoksa
+    (TRY teklif) o satiri tamamen ATAR (numaralar kayar)."""
+    gecerlilik_str = deal.valid_until.strftime('%d.%m.%Y') if deal.valid_until else '-'
+    kur_tarihi = deal.deal_date or deal.created_at.date()
+    kur_tarihi_str = kur_tarihi.strftime('%d.%m.%Y') if kur_tarihi else '-'
+    kur_notu = _kur_notu_yeni(deal, kur_tarihi_str)
+
+    if company.teklif_sartlari and company.teklif_sartlari.strip():
+        raw_lines = [l.strip() for l in company.teklif_sartlari.splitlines() if l.strip()]
+        has_kur_placeholder = any('{kur_notu}' in l for l in raw_lines)
+        if kur_notu and not has_kur_placeholder:
+            raw_lines.append('{kur_notu}')
+    else:
+        raw_lines = list(_DEFAULT_TERMS_YENI)
+
+    result = []
+    for line in raw_lines:
+        if '{kur_notu}' in line:
+            if not kur_notu:
+                continue
+            line = line.replace('{kur_notu}', kur_notu)
+        line = line.replace('{gecerlilik}', gecerlilik_str)
+        result.append(line)
+    return result
+
+
 def generate_deal_pdf(deal):
+    """2026-10-13 (Teklif PDF yeni tasarim): CompanySettings.teklif_pdf_tasarim
+    ayarina gore 'yeni' (varsayilan, NULL dahil) veya 'klasik' tasarimi
+    cagiran dispatcher. Klasik secilirse eski PDF BIREBIR AYNI cikar -
+    _generate_deal_pdf_klasik() asagida, eski generate_deal_pdf() govdesinin
+    degistirilmemis halidir."""
+    company = _get_company_settings_for_pdf()
+    if company.teklif_pdf_tasarim == 'klasik':
+        return _generate_deal_pdf_klasik(deal)
+    return _generate_deal_pdf_yeni(deal)
+
+
+def _generate_deal_pdf_klasik(deal):
     """Siparis Sozlesmesi formatinda teklif PDF'i. Fiyat/urun kalemleri
     tekliften gelir. Vade/Pesinat/Bakiye Deal alanlarindan geliyor (bos ise
     noktali cizgi kalir). Kagit Cinsi/Boy/En/Renk/Teslim Tarihi sutunlari
@@ -570,6 +751,485 @@ def generate_deal_pdf(deal):
     doc.build(elements, onFirstPage=_watermark_cb, onLaterPages=_watermark_cb)
     buffer.seek(0)
     return buffer
+
+
+# ===== YENİ TASARIM (2026-10-13) renkleri - gercek logodan, KIRMIZI YOK =====
+_Y_SARI = colors.HexColor('#FBC213')
+_Y_ANTRASIT = colors.HexColor('#353639')
+_Y_CIZGI_GRI = colors.HexColor('#D6D6D6')
+_Y_IKINCIL = colors.HexColor('#666666')
+_Y_TOPLAM_BG = colors.HexColor('#FAFAF8')
+_Y_MIKRO = colors.HexColor('#D9C47A')
+_Y_BEJ = colors.HexColor('#F5EFDC')
+
+_URUN_TIPI_LABELS = {'uretim': 'Üretim', 'ticaret': 'Ticaret'}
+
+
+def _draw_watermark_yeni(canvas_obj, text):
+    """Yeni tasarimin filigrani - klasigin _draw_watermark'indan FARKLI
+    (renkler ve sag ust kose artik duz metin degil, antrasit bir serit
+    icinde sari yazi) - klasik tasarimi etkilememesi icin AYRI fonksiyon.
+    2026-10-13 duzeltme: serit, METNE GORE SIKI olculendirilir (sabit genis
+    bir kutu yerine) - cok sayfali bir teklifte tekrar eden tablo basligi
+    ('Teslim' sutunu) ile CAKISTIGI Playwright/PNG render'da gorulup
+    duzeltildi (bkz. Senaryo D testi)."""
+    if not text:
+        return
+    font_size = 7
+    canvas_obj.saveState()
+    text_w = canvas_obj.stringWidth(text, 'Vera-Bold', font_size)
+    pad_x, pad_y = 5, 2.5
+    canvas_obj.translate(A4[0] - 2.0*cm, A4[1] - 0.55*cm)
+    canvas_obj.rotate(35)
+    canvas_obj.setFillColor(_Y_ANTRASIT)
+    canvas_obj.roundRect(-text_w/2 - pad_x, -font_size/2 - pad_y, text_w + 2*pad_x, font_size + 2*pad_y, 2, fill=1, stroke=0)
+    canvas_obj.setFillColor(_Y_SARI)
+    canvas_obj.setFont('Vera-Bold', font_size)
+    canvas_obj.drawCentredString(0, -font_size/2 + 1.5, text)
+    canvas_obj.restoreState()
+
+
+def _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages):
+    """Sayfa dibinde SABIT alt bilgi bandi - antrasit zemin, ustunde sari
+    cizgi. doc.build() canvasmaker'i uzerinden her sayfada cagirilir."""
+    band_h = 0.9*cm
+    y0 = doc.bottomMargin - 0.35*cm
+    canvas_obj.saveState()
+    canvas_obj.setStrokeColor(_Y_SARI)
+    canvas_obj.setLineWidth(3)
+    canvas_obj.line(doc.leftMargin, y0 + band_h, A4[0] - doc.rightMargin, y0 + band_h)
+    canvas_obj.setFillColor(_Y_ANTRASIT)
+    canvas_obj.rect(doc.leftMargin, y0, A4[0] - doc.leftMargin - doc.rightMargin, band_h, fill=1, stroke=0)
+    canvas_obj.setFont('Vera-Bold', 9)
+    canvas_obj.setFillColor(_Y_SARI)
+    left_text = (company.company_name or 'LEMA AMBALAJ').upper()
+    canvas_obj.drawString(doc.leftMargin + 0.25*cm, y0 + band_h/2 - 3, left_text)
+    left_w = canvas_obj.stringWidth(left_text, 'Vera-Bold', 9)
+    canvas_obj.setFont('Vera', 8)
+    canvas_obj.setFillColor(colors.HexColor('#cccccc'))
+    unvan_bits = [b for b in [company.company_name, 'Karatay / KONYA'] if b]
+    canvas_obj.drawString(doc.leftMargin + 0.35*cm + left_w, y0 + band_h/2 - 3, '· ' + ' · '.join(unvan_bits))
+    right_text = f"{deal.display_no} · Sayfa {page_num}/{total_pages}"
+    canvas_obj.setFont('Vera-Bold', 9)
+    canvas_obj.setFillColor(colors.white)
+    canvas_obj.drawRightString(A4[0] - doc.rightMargin - 0.25*cm, y0 + band_h/2 - 3, right_text)
+    canvas_obj.restoreState()
+
+    # mikro metin seridi - alt bandin ALTINDA (en alt kenar bosluguna sigar)
+    canvas_obj.saveState()
+    canvas_obj.setFont('Vera', 5.5)
+    canvas_obj.setFillColor(_Y_MIKRO)
+    unit = f"{left_text} · ORİJİNAL BELGE · {deal.display_no} · "
+    unit_w = canvas_obj.stringWidth(unit, 'Vera', 5.5)
+    available_w = A4[0] - 1.0*cm
+    repeats = max(1, int(available_w // unit_w) + 1) if unit_w > 0 else 1
+    canvas_obj.drawString(0.5*cm, max(0.15*cm, y0 - 0.3*cm), unit * repeats)
+    canvas_obj.restoreState()
+
+    _draw_watermark_yeni(canvas_obj, left_text)
+
+
+class _DealPdfCanvasYeni(_PDFCanvas):
+    """2026-10-13: 'Sayfa x/y' icin standart ReportLab iki-gecisli canvas
+    deseni - once tum sayfalar uretilir (toplam sayi bilinmez), sonra
+    save() asamasinda gercek toplam sayi ile her sayfanin alt bilgisi
+    cizilir. Klasik tasarim bu canvas'i KULLANMAZ (SimpleDocTemplate'in
+    varsayilan canvas'i ile cagrilir), bu yuzden klasik cikti etkilenmez."""
+
+    def __init__(self, *args, **kwargs):
+        self._footer_cb = kwargs.pop('footer_cb', None)
+        _PDFCanvas.__init__(self, *args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        total_pages = len(self._saved_page_states)
+        for i, state in enumerate(self._saved_page_states, 1):
+            self.__dict__.update(state)
+            if self._footer_cb:
+                self._footer_cb(self, i, total_pages)
+            _PDFCanvas.showPage(self)
+        _PDFCanvas.save(self)
+
+
+def _generate_deal_pdf_yeni(deal):
+    """2026-10-13: Teklif PDF - YENİ tasarim (gercek logo renkleri: sari
+    #FBC213 + antrasit #353639, kirmizi YOK). CompanySettings.teklif_pdf_tasarim
+    'klasik' ise bu fonksiyon hic cagrilmaz (bkz. generate_deal_pdf
+    dispatcher) - klasik _generate_deal_pdf_klasik() TAMAMEN ayri ve
+    degismeden kalir. PEŞİNAT/BAKİYE/KALAN bu tasarimda HİÇ BASILMAZ."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.4*cm, leftMargin=1.4*cm, topMargin=1.6*cm, bottomMargin=2.0*cm)
+    content_w = A4[0] - doc.leftMargin - doc.rightMargin
+
+    company = _get_company_settings_for_pdf()
+
+    styles = getSampleStyleSheet()
+    normal = ParagraphStyle('YNormal', parent=styles['Normal'], fontName='Vera', fontSize=8.5, leading=11, textColor=_Y_ANTRASIT)
+    gray_small = ParagraphStyle('YGraySmall', parent=normal, fontSize=7, leading=9, textColor=_Y_IKINCIL)
+    bold = ParagraphStyle('YBold', parent=normal, fontName='Vera-Bold')
+    company_name_style = ParagraphStyle('YCompanyName', parent=normal, fontName='Vera-Bold', fontSize=13, leading=16)
+    title_style = ParagraphStyle('YTitle', parent=normal, fontName='Vera-Bold', fontSize=20, leading=23, alignment=2)
+    meta_style = ParagraphStyle('YMeta', parent=normal, fontSize=8.5, leading=12, alignment=2)
+    meta_bold_style = ParagraphStyle('YMetaBold', parent=meta_style, fontName='Vera-Bold')
+    box_title_style = ParagraphStyle('YBoxTitle', parent=normal, fontName='Vera-Bold', fontSize=8.5, textColor=colors.white)
+    table_header_style = ParagraphStyle('YTableHeader', parent=normal, fontName='Vera-Bold', fontSize=7.3, leading=8.5,
+                                         alignment=1)
+    table_cell_style = ParagraphStyle('YTableCell', parent=normal, fontSize=7.8, leading=9.5)
+    table_cell_bold_style = ParagraphStyle('YTableCellBold', parent=table_cell_style, fontName='Vera-Bold')
+    table_cell_gray_style = ParagraphStyle('YTableCellGray', parent=table_cell_style, fontSize=6.8, leading=8, textColor=_Y_IKINCIL)
+    table_cell_center_style = ParagraphStyle('YTableCellCenter', parent=table_cell_style, alignment=1)
+    terms_style = ParagraphStyle('YTerms', parent=normal, fontSize=7.3, leading=10)
+    italic_style = ParagraphStyle('YItalic', parent=normal, fontName='Vera-Italic', fontSize=8)
+
+    elements = []
+
+    # ===== 1) UST BLOK: logo | firma | TEKLİF basligi+meta =====
+    logo_img = None
+    if company.logo_data:
+        try:
+            cleaned = _logo_for_pdf_yeni(company.logo_data)
+            if cleaned:
+                logo_img = Image(cleaned, width=4.6*cm, height=4.6*cm, kind='proportional')
+        except Exception:
+            logo_img = None
+
+    company_block = [Paragraph(company.company_name or 'Lema Ambalaj', company_name_style)]
+    if company.address:
+        company_block.append(Paragraph(company.address.replace('\n', '<br/>'), gray_small))
+    contact1 = [b for b in [f"Tel: {company.phone}" if company.phone else None,
+                             f"Faks: {company.fax}" if company.fax else None] if b]
+    if contact1:
+        company_block.append(Paragraph(' · '.join(contact1), gray_small))
+    contact2 = [b for b in [company.email, company.website] if b]
+    if contact2:
+        company_block.append(Paragraph(' · '.join(contact2), gray_small))
+    if company.tax_office or company.tax_id:
+        company_block.append(Paragraph(f"V.D.: {company.tax_office or '-'} · V.No: {company.tax_id or '-'}", gray_small))
+
+    teklif_tarihi = deal.deal_date or deal.created_at.date()
+    seller_name = (deal.seller.full_name or deal.seller.username) if deal.seller else '-'
+    right_block = [
+        Paragraph(' '.join(list('TEKLİF')), title_style),
+        Spacer(1, 2*mm),
+        Paragraph(f"Teklif No: {deal.display_no}", meta_bold_style),
+        Paragraph(f"Tarih: {teklif_tarihi.strftime('%d.%m.%Y') if teklif_tarihi else '-'}", meta_style),
+        Paragraph(f"Geçerlilik: {deal.valid_until.strftime('%d.%m.%Y') if deal.valid_until else '-'}", meta_bold_style),
+        Paragraph(f"Hazırlayan: {seller_name}", meta_style),
+    ]
+
+    logo_w = 4.6*cm
+    right_w = 6.0*cm
+    middle_w = content_w - logo_w - right_w
+    header_table = Table([[logo_img or '', company_block, right_block]], colWidths=[logo_w, middle_w, right_w])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (1, 0), (1, 0), 8),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 3*mm))
+
+    # ===== 2) 4pt sari + 0.8pt antrasit cizgi =====
+    elements.append(Table([['']], colWidths=[content_w], rowHeights=[4], style=[('BACKGROUND', (0, 0), (-1, -1), _Y_SARI)]))
+    elements.append(Table([['']], colWidths=[content_w], style=[('LINEBELOW', (0, 0), (-1, -1), 0.8, _Y_ANTRASIT)]))
+    elements.append(Spacer(1, 4*mm))
+
+    # ===== 3) MÜŞTERİYE AİT BİLGİLER + ÖDEME ŞEKLİ kutulari =====
+    def _box(title_text, lines, box_w):
+        stripe = Table([['']], colWidths=[0.16*cm], rowHeights=[0.62*cm], style=[('BACKGROUND', (0, 0), (-1, -1), _Y_SARI)])
+        title_cell = Table([[stripe, Paragraph(title_text, box_title_style)]], colWidths=[0.16*cm, box_w - 0.16*cm])
+        title_cell.setStyle(TableStyle([
+            ('BACKGROUND', (1, 0), (1, 0), _Y_ANTRASIT),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (1, 0), (1, 0), 8), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        if lines:
+            content_rows = [[Paragraph(l, normal)] for l in lines]
+            content_table = Table(content_rows, colWidths=[box_w - 12])
+            c_style = [
+                ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ]
+            for r in range(len(lines) - 1):
+                c_style.append(('LINEBELOW', (0, r), (0, r), 0.4, _Y_CIZGI_GRI))
+            content_table.setStyle(TableStyle(c_style))
+        else:
+            content_table = Table([[Paragraph('-', gray_small)]], colWidths=[box_w - 12])
+            content_table.setStyle(TableStyle([('TOPPADDING', (0, 0), (-1, -1), 3)]))
+        box = Table([[title_cell], [content_table]], colWidths=[box_w])
+        box.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 0.75, _Y_ANTRASIT),
+            ('LEFTPADDING', (0, 1), (0, 1), 6), ('RIGHTPADDING', (0, 1), (0, 1), 6),
+            ('TOPPADDING', (0, 1), (0, 1), 5), ('BOTTOMPADDING', (0, 1), (0, 1), 6),
+            ('LEFTPADDING', (0, 0), (0, 0), 0), ('RIGHTPADDING', (0, 0), (0, 0), 0),
+            ('TOPPADDING', (0, 0), (0, 0), 0), ('BOTTOMPADDING', (0, 0), (0, 0), 0),
+        ]))
+        return box
+
+    customer = deal.customer
+    customer_person_name = f"{_clean_for_pdf(customer.first_name) or ''} {_clean_for_pdf(customer.last_name) or ''}".strip()
+    customer_lines = []
+    if customer.company_name:
+        customer_lines.append(f"<b>{_clean_for_pdf(customer.company_name)}</b>")
+    if customer_person_name:
+        customer_lines.append(f"Yetkili: {customer_person_name}")
+    if customer.phone:
+        customer_lines.append(f"Telefon: {customer.phone}")
+    if customer.tax_office or customer.tax_id:
+        customer_lines.append(f"V.D.: {customer.tax_office or '-'} · V.No: {customer.tax_id or '-'}")
+    adres = customer.company_address or customer.address
+    if adres:
+        customer_lines.append(f"Adres: {adres}")
+
+    kur_tarihi = deal.deal_date or deal.created_at.date()
+    kur_tarihi_str = kur_tarihi.strftime('%d.%m.%Y') if kur_tarihi else '-'
+    payment_lines = [f"Vade: {deal.vade_gun or 'Peşin'}"]
+    odeme_labels = deal.odeme_yontemi_listesi
+    if odeme_labels:
+        payment_lines.append(f"Ödeme: {' · '.join(odeme_labels)}")
+    if deal.para_birimi != 'TRY' and deal.kullanilan_kur:
+        payment_lines.append(f"Döviz kuru: 1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TL · TCMB {kur_tarihi_str}")
+
+    customer_w = content_w * 0.54
+    payment_w = content_w - customer_w
+    customer_box = _box('MÜŞTERİYE AİT BİLGİLER', customer_lines, customer_w)
+    payment_box = _box('ÖDEME ŞEKLİ', payment_lines, payment_w)
+    boxes_table = Table([[customer_box, payment_box]], colWidths=[customer_w, payment_w])
+    boxes_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (0, 0), 6),
+    ]))
+    elements.append(boxes_table)
+    elements.append(Spacer(1, 4*mm))
+
+    # ===== 4) ÜRÜN VE FİYAT BİLGİLERİ basligi =====
+    heading_row = Table([[Paragraph('ÜRÜN VE FİYAT BİLGİLERİ', ParagraphStyle('YProdHead', parent=bold, fontSize=9.5)),
+                           Paragraph('Fiyatlar KDV hariçtir', ParagraphStyle('YProdNote', parent=gray_small, alignment=2))]],
+                         colWidths=[content_w * 0.6, content_w * 0.4])
+    heading_row.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'BOTTOM'), ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
+    elements.append(heading_row)
+    elements.append(Spacer(1, 2*mm))
+
+    # ===== 5) ÜRÜN TABLOSU =====
+    para_sym = 'TL' if deal.para_birimi == 'TRY' else deal.para_birimi_sembol
+    deal_delivery_fallback = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
+
+    def _escape(v):
+        from xml.sax.saxutils import escape
+        cleaned = _sanitize_pdf_free_text(v)
+        return escape(cleaned) if cleaned else ''
+
+    if deal.items:
+        col_widths = [0.9*cm, 1.8*cm, 6.3*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
+        headers = ['#', 'Numune', 'Ürün ve teknik özellikler', 'Miktar', 'Birim fiyat', 'Teslim', 'Tutar\n(KDV hariç)']
+        data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style) for h in headers]]
+
+        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+        for idx, item in enumerate(deal.items, 1):
+            # # hucresi - antrasit kare icinde sari numara
+            num_cell = Table([[str(idx)]], colWidths=[0.55*cm], rowHeights=[0.55*cm])
+            num_cell.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), _Y_ANTRASIT),
+                ('TEXTCOLOR', (0, 0), (-1, -1), _Y_SARI),
+                ('FONTNAME', (0, 0), (-1, -1), 'Vera-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+
+            # Numune hucresi
+            numune_flowable = None
+            if item.numune_gorseli:
+                try:
+                    img_path = os.path.join(static_dir, item.numune_gorseli)
+                    if os.path.isfile(img_path):
+                        numune_flowable = Image(img_path, width=1.6*cm, height=1.6*cm, kind='proportional')
+                except Exception:
+                    numune_flowable = None
+            if numune_flowable is None:
+                numune_flowable = Table([['']], colWidths=[1.6*cm], rowHeights=[1.6*cm], style=[('BACKGROUND', (0, 0), (-1, -1), _Y_BEJ)])
+
+            # Urun ve teknik ozellikler hucresi
+            urun_lines = [f"<b>{_escape(item.description)}</b>"]
+            if item.urun_tipi:
+                urun_lines.append(f"<font color='#666666' size=6.8>Ürün tipi: {_URUN_TIPI_LABELS.get(item.urun_tipi, item.urun_tipi)}</font>")
+            if item.kagit_cinsi:
+                urun_lines.append(f"<font color='#666666' size=6.8>Kağıt cinsi: {_escape(item.kagit_cinsi)}</font>")
+            olcu_bits = []
+            if item.en:
+                olcu_bits.append(f"En {_escape(item.en)}")
+            if item.boy:
+                olcu_bits.append(f"Boy {_escape(item.boy)}")
+            if item.korugu:
+                olcu_bits.append(f"Körük {_escape(item.korugu)}")
+            if olcu_bits:
+                urun_lines.append(f"<font color='#666666' size=6.8>Ölçü: {' · '.join(olcu_bits)} cm</font>")
+            if item.renk:
+                urun_lines.append(f"<font color='#666666' size=6.8>Baskı: {_escape(item.renk)}</font>")
+            is_doviz = deal.para_birimi != 'TRY' and deal.kullanilan_kur
+            if is_doviz and item.unit == 'adet':
+                adet_basi_tl = item.unit_price * deal.kullanilan_kur
+                urun_lines.append(f"<b>Adet başı ≈ {_money_tr(adet_basi_tl)} TL</b>")
+            urun_cell = Paragraph('<br/>'.join(urun_lines), table_cell_style)
+
+            # Birim fiyat hucresi
+            if deal.para_birimi == 'TRY':
+                fiyat_text = f"{_money_tr(item.unit_price)} TL/{item.unit}"
+            else:
+                fiyat_text = f"{_money_tr(item.unit_price)} {para_sym}"
+                if deal.kullanilan_kur:
+                    tl_karsilik = item.unit_price * deal.kullanilan_kur
+                    fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {_money_tr(tl_karsilik)} TL</font>"
+            fiyat_cell = Paragraph(fiyat_text, table_cell_center_style)
+
+            # Teslim hucresi
+            item_delivery_str = item.teslim_tarihi.strftime('%d.%m.%Y') if item.teslim_tarihi else deal_delivery_fallback
+
+            # Tutar (KDV haric) hucresi - TL'ye cevrilebiliyorsa TL, degilse
+            # kendi para biriminde (bkz. Deal.deger_tl ile AYNI mantik -
+            # Komuta Merkezi'nde de bu yaklasim kullaniliyor).
+            if deal.para_birimi == 'TRY':
+                tutar_text = f"{_money_tr(item.total_price)} TL"
+            elif deal.kullanilan_kur:
+                tutar_text = f"{_money_tr(item.total_price * deal.kullanilan_kur)} TL"
+            else:
+                tutar_text = f"{_money_tr(item.total_price)} {para_sym}"
+            tutar_cell = Paragraph(f"<b>{tutar_text}</b>", table_cell_center_style)
+
+            data.append([
+                num_cell, numune_flowable, urun_cell,
+                Paragraph(f"{item.quantity:.2f} {item.unit}", table_cell_center_style),
+                fiyat_cell, Paragraph(item_delivery_str, table_cell_center_style), tutar_cell,
+            ])
+
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), _Y_SARI),
+            ('TEXTCOLOR', (0, 0), (-1, 0), _Y_ANTRASIT),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, _Y_CIZGI_GRI),
+            ('BOX', (0, 0), (-1, -1), 0.75, _Y_ANTRASIT),
+            ('TOPPADDING', (0, 0), (-1, 0), 5), ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+            ('TOPPADDING', (0, 1), (-1, -1), 5), ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+            ('LEFTPADDING', (2, 1), (2, -1), 6), ('RIGHTPADDING', (2, 1), (2, -1), 6),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 4*mm))
+
+        # ===== 6) ALT BÖLÜM: TEKLİF ŞARTLARI (sol) + TOPLAM (sag) =====
+        terms = _build_terms_yeni(deal, company)
+        terms_stripe_w = 0.16*cm
+        terms_w = content_w * 0.55
+        terms_lines = [Paragraph(f"{i}. {t}", terms_style) for i, t in enumerate(terms, 1)]
+        if company.banka_adi or company.iban:
+            banka_bits = [b for b in [
+                f"BANKA · {company.banka_adi}" if company.banka_adi else None,
+                f"IBAN: {company.iban}" if company.iban else None,
+            ] if b]
+            terms_lines.append(Spacer(1, 1.5*mm))
+            terms_lines.append(Paragraph(' · '.join(banka_bits), gray_small))
+        terms_content = Table([[l] for l in terms_lines], colWidths=[terms_w - terms_stripe_w - 10])
+        terms_content.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 1), ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+        ]))
+        terms_title = Paragraph('TEKLİF ŞARTLARI', ParagraphStyle('YTermsTitle', parent=bold, fontSize=8.5))
+        terms_box_inner = Table([[terms_title], [terms_content]], colWidths=[terms_w - terms_stripe_w - 10])
+        terms_box_inner.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (0, 0), 3),
+        ]))
+        terms_box = Table([['', terms_box_inner]], colWidths=[terms_stripe_w, terms_w - terms_stripe_w])
+        terms_box.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BACKGROUND', (0, 0), (0, 0), _Y_SARI),
+            ('LEFTPADDING', (1, 0), (1, 0), 10), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+
+        # Toplam kutusu - SADECE 3 satir
+        if deal.para_birimi == 'TRY':
+            toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal, deal.vat_amount, deal.value, 'TL'
+            tl_for_words = genel_toplam
+        elif deal.kullanilan_kur:
+            k = deal.kullanilan_kur
+            toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal * k, deal.vat_amount * k, deal.value * k, 'TL'
+            tl_for_words = genel_toplam
+        else:
+            toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal, deal.vat_amount, deal.value, para_sym
+            tl_for_words = None
+
+        totals_data = [
+            [Paragraph('Toplam (KDV hariç)', ParagraphStyle('YTotLabel', parent=normal, fontSize=8)),
+             Paragraph(f"{_money_tr(toplam_haric)} {toplam_sym}", ParagraphStyle('YTotVal', parent=normal, fontSize=8, alignment=2))],
+            [Paragraph(f"KDV (%{deal.vat_rate:.0f})", ParagraphStyle('YVatLabel', parent=normal, fontSize=8)),
+             Paragraph(f"{_money_tr(kdv)} {toplam_sym}", ParagraphStyle('YVatVal', parent=normal, fontSize=8, alignment=2))],
+            [Paragraph('GENEL TOPLAM', ParagraphStyle('YGrandLabel', parent=normal, fontName='Vera-Bold', fontSize=9.5, textColor=colors.white)),
+             Paragraph(f"{_money_tr(genel_toplam)} {toplam_sym}", ParagraphStyle('YGrandVal', parent=normal, fontName='Vera-Bold', fontSize=10, alignment=2, textColor=_Y_SARI))],
+        ]
+        toplam_w = content_w - terms_w - 6*mm
+        totals_table = Table(totals_data, colWidths=[toplam_w * 0.5, toplam_w * 0.5])
+        totals_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (-1, 1), _Y_TOPLAM_BG),
+            ('BACKGROUND', (0, 2), (-1, 2), _Y_ANTRASIT),
+            ('GRID', (0, 0), (-1, -1), 0.5, _Y_CIZGI_GRI),
+            ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6), ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        totals_wrapper = [totals_table]
+        if tl_for_words is not None:
+            totals_wrapper.append(Spacer(1, 2*mm))
+            totals_wrapper.append(Paragraph(f"Yalnız: {tutar_yaziyla(tl_for_words)}", italic_style))
+
+        bottom_table = Table([[terms_box, totals_wrapper]], colWidths=[terms_w, toplam_w])
+        bottom_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('LEFTPADDING', (1, 0), (1, 0), 6*mm),
+        ]))
+        elements.append(bottom_table)
+    else:
+        elements.append(Paragraph("<i>Henüz ürün eklenmemiş.</i>", normal))
+
+    elements.append(Spacer(1, 7*mm))
+
+    # ===== 7) İMZA KUTULARI =====
+    elements.append(Table([['']], colWidths=[content_w], rowHeights=[3], style=[('BACKGROUND', (0, 0), (-1, -1), _Y_SARI)]))
+    elements.append(Spacer(1, 4*mm))
+    seller_company = company.company_name or 'Lema Ambalaj'
+    signature_data = [
+        ['Teklifi veren', '', 'Müşteri onayı'],
+        [f'{seller_name} · {seller_company}', '', ' '],
+        ['', '', ''],
+        ['Kaşe / İmza:', '', 'Ad Soyad:'],
+        ['', '', 'Kaşe / İmza:'],
+        ['', '', 'Tarih:'],
+    ]
+    sig_table = Table(signature_data, colWidths=[(content_w - 2.2*cm) / 2, 2.2*cm, (content_w - 2.2*cm) / 2])
+    sig_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Vera'),
+        ('FONTNAME', (0, 0), (0, 0), 'Vera-Bold'), ('FONTNAME', (2, 0), (2, 0), 'Vera-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('TEXTCOLOR', (0, 0), (-1, -1), _Y_ANTRASIT),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+    ]))
+    elements.append(sig_table)
+
+    def _footer_cb(canvas_obj, page_num, total_pages):
+        _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages)
+
+    doc.build(elements, canvasmaker=lambda *a, **kw: _DealPdfCanvasYeni(*a, footer_cb=_footer_cb, **kw))
+    buffer.seek(0)
+    return buffer
+
 
 def generate_invoice_pdf(invoice):
     """Fatura (type='fatura') veya Irsaliye (type='irsaliye') kaydi icin PDF.

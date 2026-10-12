@@ -2815,6 +2815,7 @@ def register_routes(app):
                 para_birimi = 'TRY'
             kullanilan_kur_raw = request.form.get('kullanilan_kur', '').strip()
             kullanilan_kur = float(kullanilan_kur_raw) if kullanilan_kur_raw and para_birimi != 'TRY' else None
+            odeme_yontemi = ','.join(request.form.getlist('odeme_yontemi')) or None
 
             try:
                 deal = Deal(
@@ -2830,6 +2831,7 @@ def register_routes(app):
                     vade_gun=request.form.get('vade_gun', '').strip() or None,
                     pesinat=request.form.get('pesinat', '').strip() or None,
                     bakiye_odemesi=request.form.get('bakiye_odemesi', '').strip() or None,
+                    odeme_yontemi=odeme_yontemi,
                     pesinat_tarihi=datetime.strptime(request.form['pesinat_tarihi'], '%Y-%m-%d').date() if request.form.get('pesinat_tarihi') else None,
                     bakiye_tarihi=datetime.strptime(request.form['bakiye_tarihi'], '%Y-%m-%d').date() if request.form.get('bakiye_tarihi') else None,
                     para_birimi=para_birimi,
@@ -2939,6 +2941,7 @@ def register_routes(app):
             deal.vade_gun = request.form.get('vade_gun', '').strip() or None
             deal.pesinat = request.form.get('pesinat', '').strip() or None
             deal.bakiye_odemesi = request.form.get('bakiye_odemesi', '').strip() or None
+            deal.odeme_yontemi = ','.join(request.form.getlist('odeme_yontemi')) or None
             # B7: isteğe bağlı Peşinat/Bakiye tarihi - mevcut pesinat_tarihi/
             # bakiye_tarihi kolonlari (İş D'de eklenmişti) teklif asamasinda
             # da doldurulabilsin diye - approve_deal() zaten zorunlu kiliyor,
@@ -5409,6 +5412,11 @@ def register_routes(app):
         company_settings.website = request.form.get('website', '').strip() or None
         company_settings.tax_office = request.form.get('tax_office', '').strip() or None
         company_settings.tax_id = request.form.get('tax_id', '').strip() or None
+        teklif_pdf_tasarim = request.form.get('teklif_pdf_tasarim', 'yeni').strip()
+        company_settings.teklif_pdf_tasarim = teklif_pdf_tasarim if teklif_pdf_tasarim == 'klasik' else None
+        company_settings.teklif_sartlari = request.form.get('teklif_sartlari', '').strip() or None
+        company_settings.banka_adi = request.form.get('banka_adi', '').strip() or None
+        company_settings.iban = request.form.get('iban', '').strip() or None
 
         logo = request.files.get('logo')
         if logo and logo.filename:
