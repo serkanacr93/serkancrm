@@ -2828,6 +2828,7 @@ def register_routes(app):
                     valid_until=today + timedelta(days=7),
                     vat_rate=float(request.form.get('vat_rate', 20)),
                     notes=request.form.get('notes'),
+                    ic_not=request.form.get('ic_not', '').strip() or None,
                     vade_gun=request.form.get('vade_gun', '').strip() or None,
                     pesinat=request.form.get('pesinat', '').strip() or None,
                     bakiye_odemesi=request.form.get('bakiye_odemesi', '').strip() or None,
@@ -2938,6 +2939,7 @@ def register_routes(app):
             deal.expected_close = datetime.strptime(request.form['expected_close'], '%Y-%m-%d').date() if request.form.get('expected_close') else None
             deal.valid_until = datetime.strptime(request.form['valid_until'], '%Y-%m-%d').date() if request.form.get('valid_until') else None
             deal.notes = request.form.get('notes')
+            deal.ic_not = request.form.get('ic_not', '').strip() or None
             deal.vade_gun = request.form.get('vade_gun', '').strip() or None
             deal.pesinat = request.form.get('pesinat', '').strip() or None
             deal.bakiye_odemesi = request.form.get('bakiye_odemesi', '').strip() or None

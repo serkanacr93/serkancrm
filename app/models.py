@@ -307,6 +307,9 @@ class Deal(db.Model):
     expected_close = db.Column(db.Date)
     valid_until = db.Column(db.Date)
     notes = db.Column(db.Text)
+    # 2026-10-13 (Teklif PDF Is 1): notes'tan FARKLI olarak hicbir PDF'e/
+    # e-postaya/musteriye giden ciktiya BASILMAZ - sadece CRM ici gorunur.
+    ic_not = db.Column(db.Text, nullable=True)
     # Odeme sekli - serbest metin, teklif PDF'indeki "ODEME SEKLI" kutusuna yansir
     vade_gun = db.Column(db.String(50))
     pesinat = db.Column(db.String(100))

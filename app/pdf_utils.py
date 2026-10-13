@@ -1123,6 +1123,40 @@ def _generate_deal_pdf_yeni(deal):
         elements.append(table)
         elements.append(Spacer(1, 4*mm))
 
+        # ===== 5b) AÇIKLAMA (Is 1, 2026-10-13) - deal.notes doluysa, urun
+        # tablosu ile sartlar/toplam arasinda tam genislik kutu. Klasik
+        # tasarimdaki (zaten var olan, deal.notes'u basan) AÇIKLAMA kutusuna
+        # HIC DOKUNULMADI - bu SADECE yeni tasarima ekleniyordu (bkz. rapor:
+        # kok sebep, klasik zaten calisiyordu). Coklu satir/sayfa tasmasi icin
+        # TEK buyuk hucre DEGIL, SATIR BASINA bir tablo satiri kullanilir -
+        # Platypus Table sadece SATIRLAR ARASINDA sayfa bolebilir, tek devasa
+        # bir hucre icinde BOLEMEZ (60 satirlik uzun not testiyle dogrulandi).
+        if deal.notes and deal.notes.strip():
+            aciklama_title_style = ParagraphStyle(
+                'YAciklamaTitle', parent=normal, fontName='Vera-Bold', fontSize=8.5, textColor=_Y_ANTRASIT)
+            aciklama_text_style = ParagraphStyle(
+                'YAciklamaText', parent=normal, fontSize=8, leading=11)
+            aciklama_stripe_w = 0.14*cm
+            aciklama_content_w = content_w - aciklama_stripe_w
+            aciklama_rows = [['', Paragraph('A Ç I K L A M A', aciklama_title_style)]]
+            for line in _sanitize_pdf_free_text(deal.notes).split('\n'):
+                line_text = _escape(line) if line.strip() else '&nbsp;'
+                aciklama_rows.append(['', Paragraph(line_text, aciklama_text_style)])
+            aciklama_table = Table(aciklama_rows, colWidths=[aciklama_stripe_w, aciklama_content_w])
+            aciklama_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (0, -1), _Y_ANTRASIT),
+                ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#FFFCF2')),
+                ('BOX', (0, 0), (-1, -1), 0.75, _Y_CIZGI_GRI),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (0, -1), 0), ('RIGHTPADDING', (0, 0), (0, -1), 0),
+                ('LEFTPADDING', (1, 0), (1, -1), 10), ('RIGHTPADDING', (1, 0), (1, -1), 10),
+                ('TOPPADDING', (1, 0), (1, 0), 6), ('BOTTOMPADDING', (1, 0), (1, 0), 3),
+                ('TOPPADDING', (1, 1), (1, -1), 1.5), ('BOTTOMPADDING', (1, 1), (1, -1), 1.5),
+                ('BOTTOMPADDING', (1, -1), (1, -1), 6),
+            ]))
+            elements.append(aciklama_table)
+            elements.append(Spacer(1, 4*mm))
+
         # ===== 6) ALT BÖLÜM: TEKLİF ŞARTLARI (sol) + TOPLAM (sag) =====
         terms = _build_terms_yeni(deal, company)
         terms_stripe_w = 0.16*cm
