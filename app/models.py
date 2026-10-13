@@ -311,9 +311,24 @@ class Deal(db.Model):
     # e-postaya/musteriye giden ciktiya BASILMAZ - sadece CRM ici gorunur.
     ic_not = db.Column(db.Text, nullable=True)
     # Odeme sekli - serbest metin, teklif PDF'indeki "ODEME SEKLI" kutusuna yansir
+    # 2026-10-14 (Is 3) itibariyle add_deal/edit_deal formunda GOSTERILMIYOR
+    # (yerini asagidaki yapisal alanlar aldi) ama kolon SILINMEDI - eski
+    # kayitlarda dolu kalir, Klasik PDF hala bunlari basar (geriye donuk).
     vade_gun = db.Column(db.String(50))
     pesinat = db.Column(db.String(100))
     bakiye_odemesi = db.Column(db.String(100))
+    # 2026-10-14 (Is 3 - Odeme Sekli yeniden tasarim): TEKLIF asamasinda
+    # (onaydan ONCE) girilen yapisal odeme sekli - yukaridaki serbest metin
+    # alanlarin YERINE add_deal/edit_deal formunda kullanilir. approve_deal()
+    # route'undaki pesinat_orani/pesinat_tarihi/bakiye_tarihi (yukarida,
+    # "Odeme takvimi (Is D)") AYRI ve DEGISMEDI - o onay aninda hala ayrica
+    # zorunlu sorulur. Bu alanlar doluysa pesinat_orani'ye SENKRONIZE YAZILIR
+    # (bkz. routes.py _sync_pesinat_orani) ki pesinat_tutari/Takip Modu/
+    # otomatik odeme hatirlatmasi onay ONCESINDE de dogru calissin.
+    odeme_vade_gun = db.Column(db.Integer, nullable=True)  # gun sayisi, 0 = Pesin
+    pesinat_tipi = db.Column(db.String(10), nullable=True)  # 'yok' | 'yuzde' | 'tutar'
+    pesinat_deger = db.Column(db.Numeric(14, 2), nullable=True)  # yuzde ise oran (0-100), tutar ise TL
+    bakiye_zamani = db.Column(db.String(30), nullable=True)  # 'yukleme_oncesi' | 'teslimde' | 'vade_sonunda'
     # Odeme takvimi (Is D) - teklif onaylanip uretime aktarilirken (approve_deal)
     # zorunlu olarak istenir, yukaridaki serbest metin alanlarindan farkli
     # olarak yapisal ve zorunludur - musteriyle kesinlesmis odeme planini temsil eder.
@@ -441,6 +456,37 @@ class Deal(db.Model):
         if self.pesinat_orani is None:
             return None
         return self.value - self.pesinat_tutari
+
+    @property
+    def vade_gun_metni(self):
+        """2026-10-14 (Is 3): PDF'teki Vade satiri icin - odeme_vade_gun
+        (yeni, sayisal) doluysa ondan ('0' -> 'Peşin', digeri -> 'X gün'),
+        yoksa eski serbest metin vade_gun'dan."""
+        if self.odeme_vade_gun is not None:
+            return 'Peşin' if self.odeme_vade_gun == 0 else f'{self.odeme_vade_gun} gün'
+        return self.vade_gun
+
+    @property
+    def yeni_pesinat_tutari(self):
+        """2026-10-14 (Is 3): pesinat_tipi/pesinat_deger'den (TEKLIF
+        asamasinda girilen yapisal odeme sekli) hesaplanan pesinat tutari
+        (deal.value - KDV DAHIL genel toplam - uzerinden). pesinat_tipi
+        yoksa/'yok' ise None doner (eski pesinat_tutari ile AYNI 'henuz
+        belirlenmedi' semantigi - routes.py bunu pesinat_orani=0'a senkronlar,
+        0 ile None FARKLI anlam tasir, bkz. _sync_pesinat_orani)."""
+        if not self.pesinat_tipi or self.pesinat_tipi == 'yok':
+            return 0.0 if self.pesinat_tipi == 'yok' else None
+        deger = float(self.pesinat_deger) if self.pesinat_deger is not None else 0.0
+        if self.pesinat_tipi == 'yuzde':
+            return self.value * (deger / 100)
+        return deger  # 'tutar'
+
+    @property
+    def yeni_bakiye_tutari(self):
+        tutar = self.yeni_pesinat_tutari
+        if tutar is None:
+            return None
+        return self.value - tutar
 
     @property
     def paid_amount(self):

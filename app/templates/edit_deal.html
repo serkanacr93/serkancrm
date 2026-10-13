@@ -77,19 +77,75 @@
                 </div>
             </div>
 
-            <h6 class="text-muted mt-2"><i class="bi bi-cash-coin"></i> Ödeme Şekli</h6>
+            <h6 class="text-muted mt-2">💳 Ödeme Şekli</h6>
+            {% if (deal.vade_gun or deal.pesinat or deal.bakiye_odemesi) and not deal.odeme_vade_gun and not deal.pesinat_tipi %}
+            <div class="alert alert-secondary py-2 small mb-3">
+                Eski kayıt: Vade: {{ deal.vade_gun or '-' }} · Peşinat: {{ deal.pesinat or '-' }} · Bakiye: {{ deal.bakiye_odemesi or '-' }}
+            </div>
+            {% endif %}
             <div class="row">
                 <div class="col-md-4 mb-3">
-                    <label for="vade_gun" class="form-label">Vade (Gün)</label>
-                    <input type="text" class="form-control" id="vade_gun" name="vade_gun" value="{{ deal.vade_gun or '' }}" placeholder="Örn: 30 gün">
+                    <label for="odeme_vade_gun" class="form-label">Vade (Gün)</label>
+                    <input type="number" min="0" step="1" class="form-control" id="odeme_vade_gun" name="odeme_vade_gun" value="{{ deal.odeme_vade_gun if deal.odeme_vade_gun is not none else '' }}" placeholder="Örn: 30">
+                    <div class="d-flex gap-1 mt-1">
+                        <button type="button" class="btn btn-sm btn-outline-secondary vade-hizli" data-val="0">Peşin</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary vade-hizli" data-val="15">15</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary vade-hizli" data-val="30">30</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary vade-hizli" data-val="60">60</button>
+                    </div>
                 </div>
                 <div class="col-md-4 mb-3">
-                    <label for="pesinat" class="form-label">Peşinat</label>
-                    <input type="text" class="form-control" id="pesinat" name="pesinat" value="{{ deal.pesinat or '' }}" placeholder="Örn: %30 peşin">
+                    <label class="form-label">Peşinat</label>
+                    <div class="btn-group w-100 mb-1" role="group">
+                        <input type="radio" class="btn-check" name="pesinat_tipi" id="pesinat_tipi_yok" value="yok" {{ 'checked' if not deal.pesinat_tipi or deal.pesinat_tipi == 'yok' }}>
+                        <label class="btn btn-outline-secondary btn-sm" for="pesinat_tipi_yok">Yok</label>
+                        <input type="radio" class="btn-check" name="pesinat_tipi" id="pesinat_tipi_yuzde" value="yuzde" {{ 'checked' if deal.pesinat_tipi == 'yuzde' }}>
+                        <label class="btn btn-outline-secondary btn-sm" for="pesinat_tipi_yuzde">%</label>
+                        <input type="radio" class="btn-check" name="pesinat_tipi" id="pesinat_tipi_tutar" value="tutar" {{ 'checked' if deal.pesinat_tipi == 'tutar' }}>
+                        <label class="btn btn-outline-secondary btn-sm" for="pesinat_tipi_tutar">TL</label>
+                    </div>
+                    <input type="number" min="0" step="0.01" class="form-control" id="pesinat_deger" name="pesinat_deger"
+                           value="{{ deal.pesinat_deger if deal.pesinat_deger is not none else '' }}"
+                           style="{{ '' if deal.pesinat_tipi in ('yuzde', 'tutar') else 'display:none;' }}">
+                    <div class="small mt-1" id="pesinat_hesap_satiri"></div>
+                    <div class="d-flex gap-1 mt-1" id="pesinat_hizli_box" style="{{ 'display:flex;' if deal.pesinat_tipi == 'yuzde' else 'display:none;' }}">
+                        <button type="button" class="btn btn-sm btn-outline-success pesinat-hizli" data-val="30">%30</button>
+                        <button type="button" class="btn btn-sm btn-outline-success pesinat-hizli" data-val="50">%50</button>
+                        <button type="button" class="btn btn-sm btn-outline-success pesinat-hizli" data-val="100">%100</button>
+                    </div>
+                    <div class="small text-danger mt-1" id="pesinat_hata" style="display:none;"></div>
                 </div>
                 <div class="col-md-4 mb-3">
-                    <label for="bakiye_odemesi" class="form-label">Bakiye Ödemesi</label>
-                    <input type="text" class="form-control" id="bakiye_odemesi" name="bakiye_odemesi" value="{{ deal.bakiye_odemesi or '' }}" placeholder="Örn: Teslimde nakit">
+                    <label class="form-label">Bakiye <small class="text-muted">(otomatik)</small></label>
+                    <input type="text" class="form-control bg-light" id="bakiye_gosterim" readonly>
+                    <div class="d-flex flex-wrap gap-1 mt-1">
+                        <input type="radio" class="btn-check" name="bakiye_zamani" id="bakiye_yukleme" value="yukleme_oncesi" {{ 'checked' if deal.bakiye_zamani == 'yukleme_oncesi' }}>
+                        <label class="btn btn-outline-secondary btn-sm" for="bakiye_yukleme">Yükleme öncesi</label>
+                        <input type="radio" class="btn-check" name="bakiye_zamani" id="bakiye_teslim" value="teslimde" {{ 'checked' if deal.bakiye_zamani == 'teslimde' }}>
+                        <label class="btn btn-outline-secondary btn-sm" for="bakiye_teslim">Teslimde</label>
+                        <input type="radio" class="btn-check" name="bakiye_zamani" id="bakiye_vade" value="vade_sonunda" {{ 'checked' if deal.bakiye_zamani == 'vade_sonunda' }}>
+                        <label class="btn btn-outline-secondary btn-sm" for="bakiye_vade">Vade sonunda</label>
+                    </div>
+                </div>
+            </div>
+            <div class="row mb-2">
+                <div class="col-md-4">
+                    <div class="p-2 rounded text-center" style="background:#E8F0FB;">
+                        <div class="small text-muted">Genel toplam</div>
+                        <div class="fw-bold" id="odeme_ozet_genel">0,00 ₺</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="p-2 rounded text-center" style="background:#EEF6EF;">
+                        <div class="small text-muted">Peşinat</div>
+                        <div class="fw-bold" id="odeme_ozet_pesinat">0,00 ₺</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="p-2 rounded text-center" style="background:#FFF6DA;">
+                        <div class="small text-muted">Bakiye</div>
+                        <div class="fw-bold" id="odeme_ozet_bakiye">0,00 ₺</div>
+                    </div>
                 </div>
             </div>
             <div class="row">
@@ -240,6 +296,111 @@ function fetchTcmbRate(currency) {
 document.getElementById('tcmb_fetch_btn').addEventListener('click', function () {
     fetchTcmbRate(document.getElementById('para_birimi').value);
 });
+
+// Is 3 (2026-10-14): Odeme Sekli canli hesabi - edit_deal.html'de add_deal
+// gibi hazir bir calculateTotals() yoktu, bu yuzden kalem miktar/fiyat
+// alanlarindan (event delegation ile - dinamik eklenen satirlar dahil)
+// grandTotal kendi hesaplanir.
+function currentCurrencySymbolEdit() {
+    var map = {TRY: '₺', EUR: '€', USD: '$', GBP: '£'};
+    return map[document.getElementById('para_birimi').value] || '₺';
+}
+
+function calculateGrandTotal() {
+    var subtotal = 0;
+    document.querySelectorAll('#items-container input[name^="qty_"]').forEach(function (qtyInput) {
+        var name = qtyInput.name; // "qty_3" -> "price_3"
+        var idx = name.split('_')[1];
+        var priceInput = document.querySelector('input[name="price_' + idx + '"]');
+        var qty = parseFloat(qtyInput.value) || 0;
+        var price = priceInput ? (parseFloat(priceInput.value) || 0) : 0;
+        subtotal += qty * price;
+    });
+    var vatRate = parseFloat(document.getElementById('vat_rate').value) || 0;
+    var grandTotal = subtotal * (1 + vatRate / 100);
+    updateOdemeSekli(grandTotal, currentCurrencySymbolEdit());
+}
+
+document.getElementById('items-container').addEventListener('input', function (e) {
+    if (e.target.matches('input[name^="qty_"], input[name^="price_"]')) calculateGrandTotal();
+});
+document.getElementById('vat_rate').addEventListener('change', calculateGrandTotal);
+
+document.querySelectorAll('.vade-hizli').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        document.getElementById('odeme_vade_gun').value = btn.dataset.val;
+    });
+});
+
+document.querySelectorAll('input[name="pesinat_tipi"]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+        var tipi = document.querySelector('input[name="pesinat_tipi"]:checked').value;
+        var degerInput = document.getElementById('pesinat_deger');
+        var hizliBox = document.getElementById('pesinat_hizli_box');
+        if (tipi === 'yok') {
+            degerInput.style.display = 'none';
+            degerInput.value = '';
+            hizliBox.style.display = 'none';
+        } else {
+            degerInput.style.display = '';
+            hizliBox.style.display = tipi === 'yuzde' ? 'flex' : 'none';
+        }
+        calculateGrandTotal();
+    });
+});
+document.getElementById('pesinat_deger').addEventListener('input', calculateGrandTotal);
+document.querySelectorAll('.pesinat-hizli').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        document.getElementById('pesinat_deger').value = btn.dataset.val;
+        calculateGrandTotal();
+    });
+});
+
+function updateOdemeSekli(grandTotal, sym) {
+    var tipiEl = document.querySelector('input[name="pesinat_tipi"]:checked');
+    var tipi = tipiEl ? tipiEl.value : 'yok';
+    var deger = parseFloat(document.getElementById('pesinat_deger').value) || 0;
+    var pesinatTutar = 0;
+    var hesapEl = document.getElementById('pesinat_hesap_satiri');
+    var hataEl = document.getElementById('pesinat_hata');
+    var hata = '';
+    var fmt = function (v) { return v.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym; };
+
+    if (tipi === 'yuzde') {
+        if (deger > 100) hata = "Peşinat oranı %100'ü aşamaz.";
+        pesinatTutar = grandTotal * (deger / 100);
+        hesapEl.textContent = deger ? ('= ' + fmt(pesinatTutar) + ' (genel toplamın %' + deger + "'i)") : '';
+        hesapEl.className = 'small mt-1 text-success';
+    } else if (tipi === 'tutar') {
+        if (deger > grandTotal + 0.01) hata = 'Peşinat tutarı genel toplamdan büyük olamaz.';
+        pesinatTutar = deger;
+        var pct = grandTotal ? (deger / grandTotal * 100) : 0;
+        hesapEl.textContent = deger ? ('= genel toplamın %' + pct.toLocaleString('tr-TR', {maximumFractionDigits: 1}) + "'i · Bakiye " + fmt(grandTotal - deger)) : '';
+        hesapEl.className = 'small mt-1 text-success';
+    } else {
+        pesinatTutar = 0;
+        hesapEl.textContent = 'Tamamı vadede · Bakiye ' + fmt(grandTotal);
+        hesapEl.className = 'small mt-1 text-muted';
+    }
+
+    var bakiye = grandTotal - pesinatTutar;
+    document.getElementById('bakiye_gosterim').value = fmt(bakiye);
+    document.getElementById('odeme_ozet_genel').textContent = fmt(grandTotal);
+    document.getElementById('odeme_ozet_pesinat').textContent = fmt(pesinatTutar);
+    document.getElementById('odeme_ozet_bakiye').textContent = fmt(bakiye);
+
+    var submitBtn = document.querySelector('button[type="submit"]');
+    if (hata) {
+        hataEl.textContent = hata;
+        hataEl.style.display = '';
+        if (submitBtn) submitBtn.disabled = true;
+    } else {
+        hataEl.style.display = 'none';
+        if (submitBtn) submitBtn.disabled = false;
+    }
+}
+
+calculateGrandTotal();
 
 let itemCount = {{ deal.items|length }};
 document.getElementById('add-item').addEventListener('click', function() {

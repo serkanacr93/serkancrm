@@ -446,7 +446,7 @@ def _generate_deal_pdf_klasik(deal):
     payment_box = [
         Paragraph("ÖDEME ŞEKLİ", box_heading),
         Spacer(1, 1.5*mm),
-        Paragraph(f"<b>Vade (Gün):</b> {deal.vade_gun or dots}", normal),
+        Paragraph(f"<b>Vade (Gün):</b> {deal.vade_gun_metni or dots}", normal),
         Paragraph(f"<b>Peşinat:</b> {deal.pesinat or dots}", normal),
         Paragraph(f"<b>Bakiye Ödemesi:</b> {deal.bakiye_odemesi or dots}", normal),
         Spacer(1, 2*mm),
@@ -1025,7 +1025,7 @@ def _generate_deal_pdf_yeni(deal):
 
     kur_tarihi = deal.deal_date or deal.created_at.date()
     kur_tarihi_str = kur_tarihi.strftime('%d.%m.%Y') if kur_tarihi else '-'
-    payment_lines = [f"Vade: {deal.vade_gun or 'Peşin'}"]
+    payment_lines = [f"Vade: {deal.vade_gun_metni or 'Peşin'}"]
     odeme_labels = deal.odeme_yontemi_listesi
     if odeme_labels:
         payment_lines.append(f"Ödeme: {' · '.join(odeme_labels)}")

@@ -486,6 +486,70 @@ def _apply_customer_updates_from_form(customer, form):
     if address:
         customer.address = address
 
+def _parse_odeme_sekli_form(form, deal_value):
+    """2026-10-14 (Is 3): add_deal/edit_deal'deki yapisal 'Odeme Sekli'
+    alanlarini (Vade/Pesinat tipi+deger/Bakiye zamani) form'dan okur,
+    dogrular. Donus: (values_dict, errors_list). errors_list doluysa
+    values_dict KULLANILMAMALI - cagiran taraf kaydetmeden flash+geri donmeli.
+    deal_value: KDV DAHIL genel toplam (pesinat tutar/yuzde sinirlari icin)."""
+    errors = []
+    values = {}
+
+    vade_raw = form.get('odeme_vade_gun', '').strip()
+    if vade_raw:
+        try:
+            vade = int(vade_raw)
+            if vade < 0:
+                errors.append('Vade (gün) negatif olamaz.')
+            values['odeme_vade_gun'] = vade
+        except ValueError:
+            errors.append('Vade (gün) geçerli bir sayı olmalıdır.')
+    else:
+        values['odeme_vade_gun'] = None
+
+    pesinat_tipi = form.get('pesinat_tipi', 'yok').strip()
+    if pesinat_tipi not in ('yok', 'yuzde', 'tutar'):
+        pesinat_tipi = 'yok'
+    values['pesinat_tipi'] = pesinat_tipi
+
+    pesinat_deger_raw = form.get('pesinat_deger', '').strip()
+    pesinat_deger = None
+    if pesinat_tipi != 'yok':
+        if not pesinat_deger_raw:
+            errors.append('Peşinat değeri girilmelidir.')
+        else:
+            try:
+                pesinat_deger = float(pesinat_deger_raw)
+                if pesinat_deger < 0:
+                    errors.append('Peşinat değeri negatif olamaz.')
+                elif pesinat_tipi == 'yuzde' and pesinat_deger > 100:
+                    errors.append('Peşinat oranı %100\'ü aşamaz.')
+                elif pesinat_tipi == 'tutar' and deal_value is not None and pesinat_deger > deal_value + 0.01:
+                    errors.append('Peşinat tutarı genel toplamdan büyük olamaz.')
+            except ValueError:
+                errors.append('Peşinat değeri geçerli bir sayı olmalıdır.')
+    values['pesinat_deger'] = pesinat_deger
+
+    bakiye_zamani = form.get('bakiye_zamani', '').strip()
+    values['bakiye_zamani'] = bakiye_zamani if bakiye_zamani in ('yukleme_oncesi', 'teslimde', 'vade_sonunda') else None
+
+    # Senkron: pesinat_orani (Is D'nin ONAY-ZAMANI zorunlu alani) - yeni
+    # yapisal alanlar TEKLIF asamasinda doluysa, pesinat_tutari/Takip Modu/
+    # otomatik odeme hatirlatmasi onaydan ONCE de dogru calissin diye
+    # buradan BESLENIR. approve_deal() kendi zorunlu formuyla bunu HER
+    # ZAMAN yeniden yazar - bu sadece bir ON-DOLDURMA/erken-besleme.
+    if pesinat_tipi == 'yok':
+        values['pesinat_orani_sync'] = 0.0
+    elif pesinat_tipi == 'yuzde' and pesinat_deger is not None:
+        values['pesinat_orani_sync'] = pesinat_deger
+    elif pesinat_tipi == 'tutar' and pesinat_deger is not None and deal_value:
+        values['pesinat_orani_sync'] = (pesinat_deger / deal_value) * 100
+    else:
+        values['pesinat_orani_sync'] = None
+
+    return values, errors
+
+
 def _next_deal_no():
     """Bir sonraki teklif numarasini dondurur. MAX() SQL agregasyonu NULL
     degerleri otomatik yok sayar - Deal.query.order_by(deal_no.desc())
@@ -2884,6 +2948,20 @@ def register_routes(app):
                 # SELECT round-trip'i (~300-450ms) daha acardi.
                 deal.calculate_totals(items=new_items)
 
+                # Is 3: yapisal Odeme Sekli - deal.value hesaplandiktan SONRA
+                # dogrulanir (tutar tipi pesinat, genel toplami asamaz).
+                odeme_values, odeme_errors = _parse_odeme_sekli_form(request.form, deal.value)
+                if odeme_errors:
+                    db.session.rollback()
+                    for err in odeme_errors:
+                        flash(err, 'danger')
+                    return redirect(url_for('add_deal'))
+                deal.odeme_vade_gun = odeme_values['odeme_vade_gun']
+                deal.pesinat_tipi = odeme_values['pesinat_tipi']
+                deal.pesinat_deger = odeme_values['pesinat_deger']
+                deal.bakiye_zamani = odeme_values['bakiye_zamani']
+                deal.pesinat_orani = odeme_values['pesinat_orani_sync']
+
                 reminder = Reminder(
                     customer_id=deal.customer_id,
                     deal_id=deal.id,
@@ -3001,6 +3079,20 @@ def register_routes(app):
             # new_items explicit veriliyor - performans denetimi (bkz. add_deal,
             # commit 153bc85): self.items okumak gereksiz bir SELECT daha acardi.
             deal.calculate_totals(items=new_items)
+
+            # Is 3: yapisal Odeme Sekli - bkz. add_deal'daki ayni mantik.
+            odeme_values, odeme_errors = _parse_odeme_sekli_form(request.form, deal.value)
+            if odeme_errors:
+                db.session.rollback()
+                for err in odeme_errors:
+                    flash(err, 'danger')
+                return redirect(url_for('edit_deal', id=id))
+            deal.odeme_vade_gun = odeme_values['odeme_vade_gun']
+            deal.pesinat_tipi = odeme_values['pesinat_tipi']
+            deal.pesinat_deger = odeme_values['pesinat_deger']
+            deal.bakiye_zamani = odeme_values['bakiye_zamani']
+            deal.pesinat_orani = odeme_values['pesinat_orani_sync']
+
             db.session.commit()
             flash('Teklif güncellendi!', 'success')
             if numune_errors:
