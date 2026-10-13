@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, format_price_tr, TR_AYLAR
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, IrsaliyeDegisiklikLog, format_price_tr, TR_AYLAR
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, siparisler, limiter, csrf
@@ -10,6 +10,7 @@ from functools import wraps
 from io import BytesIO
 from werkzeug.utils import secure_filename
 import hashlib
+import json
 import openpyxl
 import os
 import re
@@ -568,6 +569,33 @@ def _next_invoice_no():
     bir numarayla cakisabiliyordu (bkz. deal_no / revise_deal bug'i)."""
     max_no = db.session.query(db.func.max(Invoice.invoice_no)).scalar()
     return (max_no or 0) + 1
+
+def _irsaliye_items_snapshot(items):
+    """2026-10-14 (Paket B - Is B2): irsaliye/fatura kalemlerini karsilastirma
+    ve log icin AYNI sekle (duz dict listesi) indirger."""
+    return [{'description': i.description, 'quantity': i.quantity, 'unit': i.unit,
+             'unit_price': round(i.unit_price or 0, 2)} for i in items]
+
+def _invoice_items_snapshot(items):
+    return [{'description': i.description, 'quantity': i.quantity, 'unit': i.unit,
+             'unit_price': round(i.unit_price or 0, 2)} for i in items]
+
+def _irsaliye_fatura_farkli_mi(irsaliye, invoice):
+    """Bagli fatura yoksa 'farkli' sayilmaz - karsilastiralacak bir sey yok."""
+    if not invoice:
+        return False
+    return _irsaliye_items_snapshot(irsaliye.items) != _invoice_items_snapshot(invoice.items)
+
+def _invoice_locked(invoice):
+    return bool(invoice and invoice.muhasebeye_gonderildi)
+
+def _log_irsaliye_degisiklik(irsaliye, invoice, aciklama, onceki, sonraki):
+    db.session.add(IrsaliyeDegisiklikLog(
+        irsaliye_id=irsaliye.id, invoice_id=invoice.id if invoice else None,
+        user_id=current_user.id, aciklama=aciklama,
+        onceki_json=json.dumps(onceki, ensure_ascii=False, default=str),
+        sonraki_json=json.dumps(sonraki, ensure_ascii=False, default=str),
+    ))
 
 def _create_prepayment_if_requested(invoice, form, user_id):
     """Is 2: fatura olusturma formunda 'On Odeme Alindi' isaretlenmisse,
@@ -4971,7 +4999,150 @@ def register_routes(app):
     @login_required
     def manual_irsaliye_detail(id):
         manual_irsaliye = ManualIrsaliye.query.get_or_404(id)
-        return render_template('manual_irsaliye_detail.html', manual_irsaliye=manual_irsaliye)
+        fark_var_mi = _irsaliye_fatura_farkli_mi(manual_irsaliye, manual_irsaliye.invoice)
+        loglar = IrsaliyeDegisiklikLog.query.filter_by(irsaliye_id=id).order_by(IrsaliyeDegisiklikLog.tarih.desc()).all()
+        return render_template('manual_irsaliye_detail.html', manual_irsaliye=manual_irsaliye,
+                                fark_var_mi=fark_var_mi, loglar=loglar,
+                                kilitli=_invoice_locked(manual_irsaliye.invoice))
+
+    @app.route('/irsaliye/manuel/<int:id>/edit', methods=['GET', 'POST'])
+    @login_required
+    def manual_irsaliye_edit(id):
+        """Paket B - Is B2: manuel irsaliye duzenleme + (istege bagli) bagli
+        faturayi da esitleme. Muhasebeye gonderilmis bir faturaya bagliysa
+        KILITLI - duzenlemeye izin verilmez."""
+        manual_irsaliye = ManualIrsaliye.query.get_or_404(id)
+        if _invoice_locked(manual_irsaliye.invoice):
+            flash(f'🔒 {manual_irsaliye.invoice.display_no} muhasebeye gönderildi, düzenleme kapalı. Önce işareti kaldırın.', 'danger')
+            return redirect(url_for('manual_irsaliye_detail', id=id))
+
+        if request.method == 'POST':
+            onceki_irs = _irsaliye_items_snapshot(manual_irsaliye.items)
+            try:
+                manual_irsaliye.ship_date = datetime.strptime(request.form['ship_date'], '%Y-%m-%d').date() if request.form.get('ship_date') else manual_irsaliye.ship_date
+                manual_irsaliye.estimated_delivery_date = datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None
+                manual_irsaliye.carrier = request.form.get('carrier') or None
+                manual_irsaliye.tracking_number = request.form.get('tracking_number') or None
+                manual_irsaliye.notes = request.form.get('notes', '')
+                manual_irsaliye.vat_rate = float(request.form.get('vat_rate', 20))
+
+                ManualIrsaliyeItem.query.filter_by(manual_irsaliye_id=id).delete()
+                new_irs_items = []
+                i = 0
+                while f'desc_{i}' in request.form:
+                    desc = request.form.get(f'desc_{i}', '').strip()
+                    qty = request.form.get(f'qty_{i}', '').strip()
+                    price_raw = request.form.get(f'price_{i}', '').strip()
+                    if desc and qty:
+                        new_item = ManualIrsaliyeItem(
+                            manual_irsaliye_id=id, description=desc, quantity=float(qty),
+                            unit=request.form.get(f'unit_{i}', 'adet'),
+                            unit_price=float(price_raw) if price_raw else 0
+                        )
+                        db.session.add(new_item)
+                        new_irs_items.append(new_item)
+                    i += 1
+                db.session.flush()
+
+                sync_requested = request.form.get('esitle_fatura') == 'on'
+                synced = False
+                if sync_requested and manual_irsaliye.invoice_id:
+                    invoice = manual_irsaliye.invoice
+                    onceki_fat = _invoice_items_snapshot(invoice.items)
+                    InvoiceItem.query.filter_by(invoice_id=invoice.id).delete()
+                    db.session.flush()
+                    for item in new_irs_items:
+                        db.session.add(InvoiceItem(
+                            invoice_id=invoice.id, description=item.description, quantity=item.quantity,
+                            unit=item.unit, unit_price=item.unit_price or 0, total_price=item.total_price
+                        ))
+                    db.session.flush()
+                    invoice.vat_rate = manual_irsaliye.vat_rate
+                    invoice.calculate_totals()
+                    invoice.updated_by_user_id = current_user.id
+                    invoice.updated_at = datetime.utcnow()
+                    _log_irsaliye_degisiklik(
+                        manual_irsaliye, invoice,
+                        f'İrsaliye düzenlendi, bağlı fatura {invoice.display_no} eşitlendi.',
+                        {'irsaliye': onceki_irs, 'fatura': onceki_fat},
+                        {'irsaliye': _irsaliye_items_snapshot(new_irs_items), 'fatura': _invoice_items_snapshot(invoice.items)},
+                    )
+                    synced = True
+                else:
+                    _log_irsaliye_degisiklik(
+                        manual_irsaliye, manual_irsaliye.invoice, 'İrsaliye düzenlendi (fatura eşitlenmedi).',
+                        {'irsaliye': onceki_irs}, {'irsaliye': _irsaliye_items_snapshot(new_irs_items)},
+                    )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash('İrsaliye düzenlenirken bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+                return redirect(url_for('manual_irsaliye_edit', id=id))
+
+            flash(f'{manual_irsaliye.display_no} güncellendi!' + (' Bağlı fatura da eşitlendi.' if synced else ''), 'success')
+            return redirect(url_for('manual_irsaliye_detail', id=id))
+
+        return render_template('manual_irsaliye_edit.html', manual_irsaliye=manual_irsaliye, carriers=CARRIER_OPTIONS)
+
+    @app.route('/irsaliye/manuel/<int:id>/esitle/<yon>', methods=['GET', 'POST'])
+    @login_required
+    def manual_irsaliye_esitle(id, yon):
+        """Paket B - Is B2: fark uyarisi kutusundaki iki esitleme dugmesi.
+        GET: 'ara onay' sayfasi (ne degisecek). POST: onayli uygulama.
+        yon: 'faturadan_irsaliyeye' veya 'irsaliyeden_faturaya'."""
+        if yon not in ('faturadan_irsaliyeye', 'irsaliyeden_faturaya'):
+            flash('Geçersiz yön.', 'danger')
+            return redirect(url_for('manual_irsaliye_detail', id=id))
+        manual_irsaliye = ManualIrsaliye.query.get_or_404(id)
+        invoice = manual_irsaliye.invoice
+        if not invoice:
+            flash('Bu irsaliyeye bağlı fatura yok.', 'danger')
+            return redirect(url_for('manual_irsaliye_detail', id=id))
+        if _invoice_locked(invoice):
+            flash(f'🔒 {invoice.display_no} muhasebeye gönderildi, eşitleme kapalı. Önce işareti kaldırın.', 'danger')
+            return redirect(url_for('manual_irsaliye_detail', id=id))
+
+        if request.method == 'POST':
+            onceki_irs = _irsaliye_items_snapshot(manual_irsaliye.items)
+            onceki_fat = _invoice_items_snapshot(invoice.items)
+            if yon == 'faturadan_irsaliyeye':
+                ManualIrsaliyeItem.query.filter_by(manual_irsaliye_id=id).delete()
+                db.session.flush()
+                for item in invoice.items:
+                    db.session.add(ManualIrsaliyeItem(
+                        manual_irsaliye_id=id, description=item.description, quantity=item.quantity,
+                        unit=item.unit, unit_price=item.unit_price
+                    ))
+                manual_irsaliye.vat_rate = invoice.vat_rate
+                aciklama = f'Faturaya ({invoice.display_no}) göre irsaliye güncellendi.'
+            else:
+                InvoiceItem.query.filter_by(invoice_id=invoice.id).delete()
+                db.session.flush()
+                for item in manual_irsaliye.items:
+                    db.session.add(InvoiceItem(
+                        invoice_id=invoice.id, description=item.description, quantity=item.quantity,
+                        unit=item.unit, unit_price=item.unit_price or 0, total_price=item.total_price
+                    ))
+                invoice.vat_rate = manual_irsaliye.vat_rate
+                invoice.updated_by_user_id = current_user.id
+                invoice.updated_at = datetime.utcnow()
+                aciklama = f'İrsaliyeye göre fatura ({invoice.display_no}) güncellendi.'
+            db.session.flush()
+            invoice.calculate_totals()
+            _log_irsaliye_degisiklik(
+                manual_irsaliye, invoice, aciklama,
+                {'irsaliye': onceki_irs, 'fatura': onceki_fat},
+                {'irsaliye': _irsaliye_items_snapshot(manual_irsaliye.items), 'fatura': _invoice_items_snapshot(invoice.items)},
+            )
+            db.session.commit()
+            flash('Eşitleme tamamlandı.', 'success')
+            return redirect(url_for('manual_irsaliye_detail', id=id))
+
+        # GET: ara onay sayfasi
+        kaynak = invoice.items if yon == 'faturadan_irsaliyeye' else manual_irsaliye.items
+        hedef_once = manual_irsaliye.items if yon == 'faturadan_irsaliyeye' else invoice.items
+        return render_template('irsaliye_esitle_onay.html', manual_irsaliye=manual_irsaliye, invoice=invoice,
+                                yon=yon, kaynak_kalemler=kaynak, hedef_kalemler_once=hedef_once)
 
     @app.route('/irsaliye/manuel/<int:id>/pdf')
     @login_required
@@ -5202,6 +5373,19 @@ def register_routes(app):
             cal_deals[day].append(d)
         
         return render_template('calendar.html', year=year, month=month, tasks=cal_tasks, deals=cal_deals, first_day=first_day, last_day=last_day, today=datetime.now().date())
+
+    @app.route('/raporlar/irsaliye-fatura-farklari')
+    @login_required
+    def irsaliye_fatura_farklari_raporu():
+        """Paket B - Is B2: SADECE OKUMA - bagli faturasi olan tum manuel
+        irsaliyeler arasindan kalemleri UYUSMAYANLARI listeler. Duzeltme
+        dugmesi YOK (otomatik duzeltme bilerek yapilmaz) - her satir ilgili
+        irsaliyeye linklidir, duzeltme oradan (fark uyarisi kutusu) yapilir."""
+        adaylar = ManualIrsaliye.query.filter(ManualIrsaliye.invoice_id.isnot(None)).options(
+            joinedload(ManualIrsaliye.invoice), joinedload(ManualIrsaliye.customer)
+        ).all()
+        farkli_olanlar = [m for m in adaylar if _irsaliye_fatura_farkli_mi(m, m.invoice)]
+        return render_template('irsaliye_fatura_farklari.html', farkli_olanlar=farkli_olanlar)
 
     @app.route('/reports')
     @login_required
@@ -5602,6 +5786,9 @@ def register_routes(app):
             flash('Bu faturayı görüntüleme yetkiniz yok.', 'danger')
             return redirect(url_for('invoices'))
 
+        bagli_irsaliye = ManualIrsaliye.query.filter_by(invoice_id=invoice.id).first()
+        fark_var_mi = _irsaliye_fatura_farkli_mi(bagli_irsaliye, invoice) if bagli_irsaliye else False
+
         # Is 3: satir satir kumulatif kalan bakiye tablosu. Ayri bir hesaplama
         # kaynagi ACILMIYOR - dogrudan invoice.total (Cari Hesap Ozeti'nin de
         # kullandigi ayni Invoice.total) ve invoice.payments'daki (status=
@@ -5633,7 +5820,8 @@ def register_routes(app):
                     'balance': running_balance
                 })
 
-        return render_template('invoice_detail.html', invoice=invoice, ledger_rows=ledger_rows)
+        return render_template('invoice_detail.html', invoice=invoice, ledger_rows=ledger_rows,
+                                bagli_irsaliye=bagli_irsaliye, fark_var_mi=fark_var_mi)
 
     @app.route('/invoices/<int:id>/edit', methods=['GET', 'POST'])
     @login_required
@@ -5650,13 +5838,21 @@ def register_routes(app):
         if owner_id is not None and not current_user.is_admin and owner_id != current_user.id:
             flash('Bu faturayı düzenleme yetkiniz yok.', 'danger')
             return redirect(url_for('invoice_detail', id=id))
+        if _invoice_locked(invoice):
+            flash(f'🔒 {invoice.display_no} muhasebeye gönderildi, düzenleme kapalı. Önce işareti kaldırın.', 'danger')
+            return redirect(url_for('invoice_detail', id=id))
+        # Paket B - Is B2: bu faturaya bagli manuel irsaliye var mi (ters
+        # bakis - ManualIrsaliye.invoice_id bu faturaya isaret ediyor mu)
+        bagli_irsaliye = ManualIrsaliye.query.filter_by(invoice_id=invoice.id).first()
 
         if request.method == 'POST':
             if 'desc_0' not in request.form:
                 flash('Fatura en az bir kalem içermelidir.', 'danger')
                 return redirect(url_for('edit_invoice', id=id))
             try:
+                onceki_fat = _invoice_items_snapshot(invoice.items)
                 InvoiceItem.query.filter_by(invoice_id=invoice.id).delete()
+                new_inv_items = []
                 i = 0
                 while f'desc_{i}' in request.form:
                     qty = float(request.form.get(f'qty_{i}', 0))
@@ -5670,21 +5866,69 @@ def register_routes(app):
                         total_price=qty * price
                     )
                     db.session.add(item)
+                    new_inv_items.append(item)
                     i += 1
                 db.session.flush()
                 invoice.calculate_totals()
                 invoice.updated_by_user_id = current_user.id
                 invoice.updated_at = datetime.utcnow()
+
+                sync_requested = request.form.get('esitle_irsaliye') == 'on'
+                synced = False
+                if sync_requested and bagli_irsaliye:
+                    onceki_irs = _irsaliye_items_snapshot(bagli_irsaliye.items)
+                    ManualIrsaliyeItem.query.filter_by(manual_irsaliye_id=bagli_irsaliye.id).delete()
+                    db.session.flush()
+                    new_irs_items = []
+                    for item in new_inv_items:
+                        new_item = ManualIrsaliyeItem(
+                            manual_irsaliye_id=bagli_irsaliye.id, description=item.description,
+                            quantity=item.quantity, unit=item.unit, unit_price=item.unit_price
+                        )
+                        db.session.add(new_item)
+                        new_irs_items.append(new_item)
+                    bagli_irsaliye.vat_rate = invoice.vat_rate
+                    db.session.flush()
+                    _log_irsaliye_degisiklik(
+                        bagli_irsaliye, invoice,
+                        f'Fatura düzenlendi, bağlı irsaliye {bagli_irsaliye.display_no} eşitlendi.',
+                        {'irsaliye': onceki_irs, 'fatura': onceki_fat},
+                        {'irsaliye': _irsaliye_items_snapshot(new_irs_items), 'fatura': _invoice_items_snapshot(new_inv_items)},
+                    )
+                    synced = True
+                elif bagli_irsaliye:
+                    _log_irsaliye_degisiklik(
+                        bagli_irsaliye, invoice, 'Bağlı fatura düzenlendi (irsaliye eşitlenmedi).',
+                        {'fatura': onceki_fat}, {'fatura': _invoice_items_snapshot(new_inv_items)},
+                    )
                 db.session.commit()
             except Exception:
                 db.session.rollback()
                 flash('Fatura düzenlenirken bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
                 return redirect(url_for('edit_invoice', id=id))
 
-            flash(f'{invoice.display_no} güncellendi!', 'success')
+            flash(f'{invoice.display_no} güncellendi!' + (' Bağlı irsaliye de eşitlendi.' if synced else ''), 'success')
             return redirect(url_for('invoice_detail', id=id))
 
-        return render_template('edit_invoice.html', invoice=invoice)
+        return render_template('edit_invoice.html', invoice=invoice, bagli_irsaliye=bagli_irsaliye)
+
+    @app.route('/invoices/<int:id>/muhasebeye-toggle', methods=['POST'])
+    @login_required
+    def toggle_invoice_muhasebe(id):
+        """Paket B - Is B2: 'kesildi/muhasebeye gonderildi' kilidi - acarsa
+        bagli irsaliye ve bu fatura duzenleme/esitleme kapanir."""
+        invoice = Invoice.query.get_or_404(id)
+        bagli_irsaliye = ManualIrsaliye.query.filter_by(invoice_id=invoice.id).first()
+        yeni_durum = not invoice.muhasebeye_gonderildi
+        invoice.muhasebeye_gonderildi = yeni_durum
+        invoice.muhasebeye_gonderilme_tarihi = datetime.utcnow() if yeni_durum else None
+        if bagli_irsaliye:
+            aciklama = 'Muhasebeye gönderildi olarak işaretlendi (düzenleme kilitlendi).' if yeni_durum \
+                else 'Muhasebeye gönderildi işareti kaldırıldı (düzenleme açıldı).'
+            _log_irsaliye_degisiklik(bagli_irsaliye, invoice, aciklama, {}, {})
+        db.session.commit()
+        flash('Fatura muhasebeye gönderildi olarak işaretlendi.' if yeni_durum else 'İşaret kaldırıldı.', 'success')
+        return redirect(url_for('invoice_detail', id=id))
 
     @app.route('/invoices/<int:id>/pdf')
     @login_required

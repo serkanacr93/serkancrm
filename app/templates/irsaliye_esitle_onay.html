@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Eşitleme Onayı - {{ manual_irsaliye.display_no }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-arrow-left-right"></i> Eşitleme Onayı</h2>
+    <a href="{{ url_for('manual_irsaliye_detail', id=manual_irsaliye.id) }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Geri</a>
+</div>
+
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    {% if yon == 'faturadan_irsaliyeye' %}
+    <strong>{{ invoice.display_no }}</strong> faturasındaki kalemler, <strong>{{ manual_irsaliye.display_no }}</strong> irsaliyesine kopyalanacak. İrsaliyenin mevcut kalemleri silinip faturanınkiyle değiştirilecek.
+    {% else %}
+    <strong>{{ manual_irsaliye.display_no }}</strong> irsaliyesindeki kalemler, bağlı <strong>{{ invoice.display_no }}</strong> faturasına kopyalanacak. Faturanın mevcut kalemleri silinip irsaliyeninkiyle değiştirilecek.
+    {% endif %}
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-dark text-white">Şunlar değişecek:</div>
+    <div class="card-body">
+        <h6 class="text-muted">Kaynak (kopyalanacak) kalemler</h6>
+        <table class="table table-bordered table-sm mb-4">
+            <thead class="table-light"><tr><th>Açıklama</th><th>Miktar</th><th>Birim</th><th>Birim Fiyat</th></tr></thead>
+            <tbody>
+                {% for item in kaynak_kalemler %}
+                <tr><td>{{ item.description }}</td><td>{{ item.quantity }}</td><td>{{ item.unit }}</td><td>{{ "%.2f"|format(item.unit_price or 0) }} ₺</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <h6 class="text-muted">Hedefin ŞU ANKİ (değişecek olan) kalemleri</h6>
+        <table class="table table-bordered table-sm">
+            <thead class="table-light"><tr><th>Açıklama</th><th>Miktar</th><th>Birim</th><th>Birim Fiyat</th></tr></thead>
+            <tbody>
+                {% for item in hedef_kalemler_once %}
+                <tr class="table-danger"><td>{{ item.description }}</td><td>{{ item.quantity }}</td><td>{{ item.unit }}</td><td>{{ "%.2f"|format(item.unit_price or 0) }} ₺</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-check-lg"></i> Onayla ve Eşitle</button>
+    <a href="{{ url_for('manual_irsaliye_detail', id=manual_irsaliye.id) }}" class="btn btn-secondary btn-lg">İptal</a>
+</form>
+{% endblock %}

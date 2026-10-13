@@ -15,9 +15,17 @@
         <a href="{{ url_for('invoice_pdf', id=invoice.id) }}" class="btn btn-info">
             <i class="bi bi-file-pdf"></i> PDF İndir
         </a>
+        {% if not invoice.muhasebeye_gonderildi %}
         <a href="{{ url_for('edit_invoice', id=invoice.id) }}" class="btn btn-warning">
             <i class="bi bi-pencil"></i> Düzenle
         </a>
+        {% endif %}
+        <form method="POST" action="{{ url_for('toggle_invoice_muhasebe', id=invoice.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-{{ 'secondary' if invoice.muhasebeye_gonderildi else 'dark' }}">
+                {% if invoice.muhasebeye_gonderildi %}<i class="bi bi-unlock"></i> Muhasebe İşaretini Kaldır{% else %}<i class="bi bi-lock"></i> Muhasebeye Gönderildi Olarak İşaretle{% endif %}
+            </button>
+        </form>
         {% if invoice.deal %}
         <a href="{{ url_for('deal_detail', id=invoice.deal.id) }}" class="btn btn-outline-info">
             <i class="bi bi-file-earmark-text"></i> Teklif Detayı
@@ -28,6 +36,22 @@
         </a>
     </div>
 </div>
+
+{% if invoice.muhasebeye_gonderildi %}
+<div class="alert alert-secondary"><i class="bi bi-lock-fill"></i> 🔒 Muhasebeye gönderildi{{ ' (' + invoice.muhasebeye_gonderilme_tarihi.strftime('%d.%m.%Y %H:%M') + ')' if invoice.muhasebeye_gonderilme_tarihi else '' }}, düzenleme kapalı.</div>
+{% endif %}
+
+{% if fark_var_mi %}
+<div class="mb-4" style="border-left: 4px solid #E08A00; background: #FFF4E5; padding: 12px 16px; border-radius: 4px;">
+    <strong>⚠ İrsaliye ile fatura farklı.</strong> Bağlı irsaliye: <a href="{{ url_for('manual_irsaliye_detail', id=bagli_irsaliye.id) }}">{{ bagli_irsaliye.display_no }}</a>
+    {% if not invoice.muhasebeye_gonderildi %}
+    <div class="mt-2">
+        <a href="{{ url_for('manual_irsaliye_esitle', id=bagli_irsaliye.id, yon='faturadan_irsaliyeye') }}" class="btn btn-sm btn-outline-dark">Faturaya göre irsaliyeyi güncelle</a>
+        <a href="{{ url_for('manual_irsaliye_esitle', id=bagli_irsaliye.id, yon='irsaliyeden_faturaya') }}" class="btn btn-sm btn-outline-dark">İrsaliyeye göre faturayı güncelle</a>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
 
 <div class="row">
     <div class="col-md-8">

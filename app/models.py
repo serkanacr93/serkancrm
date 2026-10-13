@@ -875,6 +875,24 @@ class ManualIrsaliyeItem(db.Model):
     def total_price(self):
         return (self.unit_price or 0) * self.quantity
 
+class IrsaliyeDegisiklikLog(db.Model):
+    """2026-10-14 (Paket B - Is B2): Manuel irsaliye duzenleme/esitleme
+    gecmisi - irsaliye detayinda 'Gecmis' bolumunde listelenir. onceki_json/
+    sonraki_json sadece kalem listesinin (aciklama/miktar/birim/fiyat)
+    JSON dokumu, tam model dump DEGIL - buyumesin ve hassas veri tasimasin diye."""
+    id = db.Column(db.Integer, primary_key=True)
+    irsaliye_id = db.Column(db.Integer, db.ForeignKey('manual_irsaliye.id'), nullable=False, index=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    tarih = db.Column(db.DateTime, default=datetime.utcnow)
+    aciklama = db.Column(db.Text)
+    onceki_json = db.Column(db.Text)
+    sonraki_json = db.Column(db.Text)
+
+    irsaliye = db.relationship('ManualIrsaliye', backref='degisiklik_loglari')
+    user = db.relationship('User')
+
+
 class CustomerStatement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
@@ -922,6 +940,10 @@ class Invoice(db.Model):
     # SADECE etiket yanlisti). YENI, nullable kolon - eski faturalarda
     # NULL kalir ve TRY gibi davranilir (geriye donuk davranis degismez).
     para_birimi = db.Column(db.String(3), nullable=True)
+    # 2026-10-14 (Paket B - Is B2): "kesildi/muhasebeye gonderildi" kilidi -
+    # isaretliyse bagli manuel irsaliye VE bu fatura duzenlenemez/esitlenemez.
+    muhasebeye_gonderildi = db.Column(db.Boolean, nullable=True, default=False)
+    muhasebeye_gonderilme_tarihi = db.Column(db.DateTime, nullable=True)
 
     customer = db.relationship('Customer', backref='invoices')
     items = db.relationship('InvoiceItem', backref='invoice', lazy=True, cascade='all, delete-orphan')

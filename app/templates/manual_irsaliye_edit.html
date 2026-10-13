@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}İrsaliye Düzenle - {{ manual_irsaliye.display_no }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-pencil"></i> İrsaliye Düzenle - {{ manual_irsaliye.display_no }}</h2>
+    <a href="{{ url_for('manual_irsaliye_detail', id=manual_irsaliye.id) }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Geri</a>
+</div>
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <i class="bi bi-info-circle"></i> İrsaliye Bilgileri
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label">Müşteri</label>
+                            <input type="text" class="form-control" value="{{ manual_irsaliye.customer.display_name }}" disabled>
+                            <small class="text-muted">Müşteri değiştirilemez.</small>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="ship_date" class="form-label">Gönderim Tarihi</label>
+                            <input type="date" class="form-control" id="ship_date" name="ship_date" value="{{ manual_irsaliye.ship_date.strftime('%Y-%m-%d') if manual_irsaliye.ship_date else '' }}">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="estimated_delivery_date" class="form-label">Tahmini Teslim Tarihi</label>
+                            <input type="date" class="form-control" id="estimated_delivery_date" name="estimated_delivery_date" value="{{ manual_irsaliye.estimated_delivery_date.strftime('%Y-%m-%d') if manual_irsaliye.estimated_delivery_date else '' }}">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="carrier" class="form-label">Kargo Firması</label>
+                            <select class="form-select" id="carrier" name="carrier">
+                                <option value="">Seçiniz (opsiyonel)</option>
+                                {% for c in carriers %}
+                                <option value="{{ c }}" {{ 'selected' if manual_irsaliye.carrier == c }}>{{ c }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="tracking_number" class="form-label">Takip No</label>
+                            <input type="text" class="form-control" id="tracking_number" name="tracking_number" value="{{ manual_irsaliye.tracking_number or '' }}" placeholder="Opsiyonel">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="vat_rate" class="form-label">KDV Oranı (%)</label>
+                            <select class="form-select" id="vat_rate" name="vat_rate">
+                                {% for v in [0, 1, 10, 20] %}
+                                <option value="{{ v }}" {{ 'selected' if manual_irsaliye.vat_rate == v }}>%{{ v }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    {% if manual_irsaliye.invoice_id %}
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" name="esitle_fatura" id="esitle_fatura" checked>
+                        <label class="form-check-label" for="esitle_fatura">
+                            ☑ Bağlı faturayı da güncelle (<strong>{{ manual_irsaliye.invoice.display_no }}</strong>)
+                        </label>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-box"></i> Ürün Kalemleri</span>
+                    <button type="button" class="btn btn-sm btn-light" id="add-item">
+                        <i class="bi bi-plus"></i> Kalem Ekle
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="items-table">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th style="width: 32%">Açıklama</th>
+                                    <th style="width: 13%">Miktar</th>
+                                    <th style="width: 13%">Birim</th>
+                                    <th style="width: 17%">Birim Fiyat</th>
+                                    <th style="width: 17%">Toplam</th>
+                                    <th style="width: 8%"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in manual_irsaliye.items %}
+                                <tr class="item-row">
+                                    <td><input type="text" class="form-control form-control-sm" name="desc_{{ loop.index0 }}" value="{{ item.description }}" required></td>
+                                    <td><input type="number" class="form-control form-control-sm item-qty" name="qty_{{ loop.index0 }}" value="{{ item.quantity }}" min="0" step="0.01" required></td>
+                                    <td>
+                                        <select class="form-select form-select-sm" name="unit_{{ loop.index0 }}">
+                                            {% for u in ['adet', 'kg', 'mt', 'lt', 'm2', 'set'] %}
+                                            <option value="{{ u }}" {{ 'selected' if item.unit == u }}>{{ u|capitalize }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td><input type="number" class="form-control form-control-sm item-price" name="price_{{ loop.index0 }}" value="{{ item.unit_price or '' }}" min="0" step="any" placeholder="Opsiyonel"></td>
+                                    <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
+                                    <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end"><strong>Ara Toplam:</strong></td>
+                                    <td colspan="2"><strong id="subtotal">0,00 ₺</strong></td>
+                                </tr>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end"><strong>KDV (<span id="vat-rate-display">20</span>%):</strong></td>
+                                    <td colspan="2"><strong id="vat-amount">0,00 ₺</strong></td>
+                                </tr>
+                                <tr class="table-success">
+                                    <td colspan="4" class="text-end"><strong>GENEL TOPLAM:</strong></td>
+                                    <td colspan="2"><strong id="grand-total">0,00 ₺</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header bg-secondary text-white">
+                    <i class="bi bi-journal-text"></i> Notlar
+                </div>
+                <div class="card-body">
+                    <textarea class="form-control" id="notes" name="notes" rows="3">{{ manual_irsaliye.notes or '' }}</textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-end gap-2 mb-4">
+        <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-check-lg"></i> Kaydet</button>
+        <a href="{{ url_for('manual_irsaliye_detail', id=manual_irsaliye.id) }}" class="btn btn-secondary btn-lg"><i class="bi bi-x-lg"></i> İptal</a>
+    </div>
+</form>
+
+<script>
+let itemCount = {{ manual_irsaliye.items|length }};
+
+document.getElementById('add-item').addEventListener('click', function() {
+    const tbody = document.querySelector('#items-table tbody');
+    const row = document.createElement('tr');
+    row.className = 'item-row';
+    row.innerHTML = `
+        <td><input type="text" class="form-control form-control-sm" name="desc_${itemCount}" required></td>
+        <td><input type="number" class="form-control form-control-sm item-qty" name="qty_${itemCount}" min="0" step="0.01" required></td>
+        <td>
+            <select class="form-select form-select-sm" name="unit_${itemCount}">
+                <option value="adet">Adet</option>
+                <option value="kg">Kg</option>
+                <option value="mt">Metre</option>
+                <option value="lt">Litre</option>
+                <option value="m2">m²</option>
+                <option value="set">Set</option>
+            </select>
+        </td>
+        <td><input type="number" class="form-control form-control-sm item-price" name="price_${itemCount}" min="0" step="any" placeholder="Opsiyonel"></td>
+        <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
+        <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
+    `;
+    tbody.appendChild(row);
+    itemCount++;
+    attachItemEvents();
+    calculateIrsaliyeTotals();
+});
+
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
+        const row = e.target.closest('.item-row');
+        if (document.querySelectorAll('.item-row').length > 1) {
+            row.remove();
+            calculateIrsaliyeTotals();
+        }
+    }
+});
+
+function fmtIrs(n) { return n.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺'; }
+
+function attachItemEvents() {
+    document.querySelectorAll('.item-qty, .item-price').forEach(function (input) {
+        input.removeEventListener('input', calculateIrsaliyeTotals);
+        input.addEventListener('input', calculateIrsaliyeTotals);
+    });
+    document.getElementById('vat_rate').removeEventListener('change', calculateIrsaliyeTotals);
+    document.getElementById('vat_rate').addEventListener('change', calculateIrsaliyeTotals);
+}
+
+function calculateIrsaliyeTotals() {
+    var subtotal = 0;
+    document.querySelectorAll('.item-row').forEach(function (row) {
+        var qty = parseFloat(row.querySelector('.item-qty')?.value) || 0;
+        var price = parseFloat(row.querySelector('.item-price')?.value) || 0;
+        var total = qty * price;
+        var totalInput = row.querySelector('.item-total');
+        if (totalInput) totalInput.value = price ? fmtIrs(total) : '';
+        subtotal += total;
+    });
+    var vatRate = parseFloat(document.getElementById('vat_rate').value) || 0;
+    var vatAmount = subtotal * (vatRate / 100);
+    var grandTotal = subtotal + vatAmount;
+    document.getElementById('subtotal').textContent = fmtIrs(subtotal);
+    document.getElementById('vat-amount').textContent = fmtIrs(vatAmount);
+    document.getElementById('grand-total').textContent = fmtIrs(grandTotal);
+    document.getElementById('vat-rate-display').textContent = vatRate;
+}
+
+attachItemEvents();
+calculateIrsaliyeTotals();
+</script>
+{% endblock %}
