@@ -2987,7 +2987,8 @@ def register_routes(app):
         return render_template('add_deal.html', today=datetime.now().date(),
                              expire_date=datetime.now().date() + timedelta(days=7),
                              teklif_yardimci_enabled=teklif_yardimci.enabled,
-                             teklif_yardimci_katalog=_teklif_yardimci_catalog_json())
+                             teklif_yardimci_katalog=_teklif_yardimci_catalog_json(),
+                             company_settings=_get_company_settings())
 
     @app.route('/deals/<int:id>')
     @login_required
@@ -3101,7 +3102,8 @@ def register_routes(app):
         teklif_yardimci = _get_teklif_yardimci_config()
         return render_template('edit_deal.html', deal=deal,
                              teklif_yardimci_enabled=teklif_yardimci.enabled,
-                             teklif_yardimci_katalog=_teklif_yardimci_catalog_json())
+                             teklif_yardimci_katalog=_teklif_yardimci_catalog_json(),
+                             company_settings=_get_company_settings())
 
     @app.route('/deals/<int:id>/delete', methods=['POST'])
     @login_required
@@ -5511,6 +5513,8 @@ def register_routes(app):
         company_settings.teklif_sartlari = request.form.get('teklif_sartlari', '').strip() or None
         company_settings.banka_adi = request.form.get('banka_adi', '').strip() or None
         company_settings.iban = request.form.get('iban', '').strip() or None
+        company_settings.iban_usd = request.form.get('iban_usd', '').strip() or None
+        company_settings.iban_eur = request.form.get('iban_eur', '').strip() or None
 
         logo = request.files.get('logo')
         if logo and logo.filename:

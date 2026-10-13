@@ -1227,6 +1227,10 @@ class CompanySettings(db.Model):
     teklif_sartlari = db.Column(db.Text, nullable=True)
     banka_adi = db.Column(db.String(80), nullable=True)
     iban = db.Column(db.String(40), nullable=True)
+    # 2026-10-14 (Paket B - Is B1): dovizli (USD/EUR) tekliflerde ayrica
+    # gosterilecek IBAN'lar - TRY icin yukaridaki 'iban' kullanilir.
+    iban_usd = db.Column(db.String(40), nullable=True)
+    iban_eur = db.Column(db.String(40), nullable=True)
 
 class PlacesSearchConfig(db.Model):
     """Tekil satir (id=1) - Google Places otomatik arama ayarlari."""

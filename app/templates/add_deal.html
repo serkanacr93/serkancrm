@@ -193,6 +193,10 @@
                                 </div>
                                 {% endfor %}
                             </div>
+                            <div id="havale_onizleme" class="p-2 rounded mt-2" style="background:#E8F0FB; display:none;">
+                                <div id="havale_onizleme_metin"></div>
+                                <small class="text-muted">Hesap sahibi: {{ company_settings.company_name or '-' }} · IBAN Şirket Ayarları'ndan gelir.</small>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -350,6 +354,23 @@
 
 <script>
 let itemCount = 1;
+
+// Is B1 (2026-10-14): Havale / EFT isaretlenince IBAN on izleme kutusu
+var COMPANY_BANKA = {{ (company_settings.banka_adi or '')|tojson }};
+var COMPANY_IBAN = {{ (company_settings.iban or '')|tojson }};
+function updateHavaleOnizleme() {
+    var checked = document.getElementById('odeme_havale') && document.getElementById('odeme_havale').checked;
+    var box = document.getElementById('havale_onizleme');
+    var metin = document.getElementById('havale_onizleme_metin');
+    if (!checked) { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    if (COMPANY_IBAN) {
+        metin.innerHTML = '🏦 PDF\'e eklenecek: <strong>' + (COMPANY_BANKA || '-') + ' · ' + COMPANY_IBAN + '</strong>';
+    } else {
+        metin.innerHTML = '⚠ IBAN Şirket Ayarları\'nda tanımlı değil. <a href="{{ url_for('settings') }}" target="_blank">Ayarlar\'a git →</a>';
+    }
+}
+document.getElementById('odeme_havale').addEventListener('change', updateHavaleOnizleme);
 
 // Musteri arama (merkezi bilesen - Is 1) + secince eksik bilgi kontrolu (Is 4)
 initCustomerSearch({

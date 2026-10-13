@@ -84,8 +84,18 @@
                             <input type="text" class="form-control" id="banka_adi" name="banka_adi" value="{{ company_settings.banka_adi or '' }}">
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label for="iban" class="form-label">IBAN (opsiyonel)</label>
+                            <label for="iban" class="form-label">IBAN - TL (opsiyonel)</label>
                             <input type="text" class="form-control" id="iban" name="iban" value="{{ company_settings.iban or '' }}">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="iban_usd" class="form-label">IBAN - USD (opsiyonel)</label>
+                            <input type="text" class="form-control" id="iban_usd" name="iban_usd" value="{{ company_settings.iban_usd or '' }}">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="iban_eur" class="form-label">IBAN - EUR (opsiyonel)</label>
+                            <input type="text" class="form-control" id="iban_eur" name="iban_eur" value="{{ company_settings.iban_eur or '' }}">
                         </div>
                     </div>
                     <div class="row">

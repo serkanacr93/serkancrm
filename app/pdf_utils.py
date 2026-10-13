@@ -240,6 +240,15 @@ def _kagit_cinsi_farkli_mi(description, kagit_cinsi):
     return norm(description) != norm(kagit_cinsi)
 
 
+def _iban_grupla(iban):
+    """Is B1 (2026-10-14): IBAN'i 4'erli gruplar halinde gosterir
+    ('TR330006...' -> 'TR33 0006 1005 1978 ...') - saklanan deger
+    DEGISMEZ, sadece PDF gorunumu icin bosluklar normalize edilip
+    yeniden gruplanir."""
+    compact = (iban or '').replace(' ', '').upper()
+    return ' '.join(compact[i:i+4] for i in range(0, len(compact), 4))
+
+
 def _logo_for_pdf_yeni(logo_data):
     """Logonun neredeyse-beyaz pikselleri (R,G,B hepsi >= 244) seffaf yapar
     ve bos kenarlari kirpar - SADECE bellekte, company.logo_data'daki
@@ -986,7 +995,9 @@ def _generate_deal_pdf_yeni(deal):
             ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
         if lines:
-            content_rows = [[Paragraph(l, normal)] for l in lines]
+            # Is B1 (2026-10-14): 'lines' icinde duz metin (Paragraph'a
+            # sarilir) VEYA hazir bir flowable (ör. IBAN alt-kutusu) olabilir.
+            content_rows = [[l if hasattr(l, 'wrap') else Paragraph(l, normal)] for l in lines]
             content_table = Table(content_rows, colWidths=[box_w - 12])
             c_style = [
                 ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
@@ -1007,6 +1018,11 @@ def _generate_deal_pdf_yeni(deal):
             ('TOPPADDING', (0, 0), (0, 0), 0), ('BOTTOMPADDING', (0, 0), (0, 0), 0),
         ]))
         return box
+
+    def _escape(v):
+        from xml.sax.saxutils import escape
+        cleaned = _sanitize_pdf_free_text(v)
+        return escape(cleaned) if cleaned else ''
 
     customer = deal.customer
     customer_person_name = f"{_clean_for_pdf(customer.first_name) or ''} {_clean_for_pdf(customer.last_name) or ''}".strip()
@@ -1034,6 +1050,31 @@ def _generate_deal_pdf_yeni(deal):
 
     customer_w = content_w * 0.54
     payment_w = content_w - customer_w
+
+    # Is B1 (2026-10-14): Havale / EFT secili ise ÖDEME ŞEKLİ kutusuna acik
+    # sari zeminli IBAN alt-blogu eklenir - teklif sartlarindaki eski tek
+    # satirlik "BANKA · IBAN" KALDIRILDI, IBAN artik SADECE burada.
+    if 'havale' in (deal.odeme_yontemi or '').split(','):
+        iban_rows = []
+        if company.banka_adi:
+            iban_rows.append(Paragraph(f"Banka: {_escape(company.banka_adi)}", table_cell_style))
+        if company.iban:
+            iban_rows.append(Paragraph(f"IBAN: <font face='Courier'>{_iban_grupla(company.iban)}</font>", table_cell_style))
+        if deal.para_birimi == 'USD' and company.iban_usd:
+            iban_rows.append(Paragraph(f"IBAN (USD): <font face='Courier'>{_iban_grupla(company.iban_usd)}</font>", table_cell_style))
+        if deal.para_birimi == 'EUR' and company.iban_eur:
+            iban_rows.append(Paragraph(f"IBAN (EUR): <font face='Courier'>{_iban_grupla(company.iban_eur)}</font>", table_cell_style))
+        if company.company_name:
+            iban_rows.append(Paragraph(f"Alıcı: {_escape(company.company_name)}", table_cell_style))
+        if iban_rows:
+            iban_box = Table([[r] for r in iban_rows], colWidths=[payment_w - 24])
+            iban_box.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFF6DA')),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6), ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 2.5), ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+            ]))
+            payment_lines.append(iban_box)
+
     customer_box = _box('MÜŞTERİYE AİT BİLGİLER', customer_lines, customer_w)
     payment_box = _box('ÖDEME ŞEKLİ', payment_lines, payment_w)
     boxes_table = Table([[customer_box, payment_box]], colWidths=[customer_w, payment_w])
@@ -1056,11 +1097,6 @@ def _generate_deal_pdf_yeni(deal):
     # ===== 5) ÜRÜN TABLOSU =====
     para_sym = 'TL' if deal.para_birimi == 'TRY' else deal.para_birimi_sembol
     deal_delivery_fallback = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
-
-    def _escape(v):
-        from xml.sax.saxutils import escape
-        cleaned = _sanitize_pdf_free_text(v)
-        return escape(cleaned) if cleaned else ''
 
     if deal.items:
         # Is 2b (2026-10-14): hicbir kalemde numune_gorseli yoksa Numune
@@ -1211,13 +1247,8 @@ def _generate_deal_pdf_yeni(deal):
         terms_stripe_w = 0.16*cm
         terms_w = content_w * 0.55
         terms_lines = [Paragraph(f"{i}. {t}", terms_style) for i, t in enumerate(terms, 1)]
-        if company.banka_adi or company.iban:
-            banka_bits = [b for b in [
-                f"BANKA · {company.banka_adi}" if company.banka_adi else None,
-                f"IBAN: {company.iban}" if company.iban else None,
-            ] if b]
-            terms_lines.append(Spacer(1, 1.5*mm))
-            terms_lines.append(Paragraph(' · '.join(banka_bits), gray_small))
+        # Is B1 (2026-10-14): eski "BANKA · IBAN" satiri BURADAN KALDIRILDI -
+        # IBAN artik SADECE ÖDEME ŞEKLİ kutusunda (Havale/EFT seciliyse) basiliyor.
         terms_content = Table([[l] for l in terms_lines], colWidths=[terms_w - terms_stripe_w - 10])
         terms_content.setStyle(TableStyle([
             ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
