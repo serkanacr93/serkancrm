@@ -94,6 +94,14 @@ Kullanıcı net bir talimat vermediği bir tasarım/iş kuralı kararında (örn
 - Yan sekme + Özet Panel sekmesi artık ortak `.crm-side-tabs-stack` flex-kolon içinde dururlar (ikisi de `position:static`, dışarıdaki `.crm-side-tabs-stack` tek başına `position:fixed;top:50%` ile ortalanır). Üçüncü bir yan sekme eklenecekse bu stack'e eklenir - eski `position:absolute;top:calc(50% + Npx)` deseni KULLANILMAZ (self-centering transform'dan önce uygulandığı için üst üste biner, bkz. 2026-10-08 bug'ı).
 - TEST verisi temizlenirken `Deal` silmeden önce `Commission.deal_id` de silinmeli (approve edilmiş TEST teklifinde komisyon kaydı otomatik oluşur) - `_CUSTOMER_FK_TABLES` listesi (routes.py) bunu kapsamaz çünkü o liste `customer_id` birleştirme/taşıma için, `Commission` ise `customer_id` değil `deal_id` tutuyor.
 
+## Teslim Kuralı (2026-10-13 denetimi sonrası eklendi)
+
+- Her görevin sonunda bir TESLİM TABLOSU verilir. Görev metnindeki HER madde ayrı satır olur: Madde | Yapıldı mı (✅/⚠️/❌) | Commit hash | Canlıda doğrulandı mı | Kanıt.
+- Bir madde yapılamadıysa veya test geçmediyse "bitti" denmez. Tabloda ❌ ve sebebi yazılır.
+- Push edilmemiş commit, yerel branch veya stash kaldıysa raporun EN ÜSTÜNDE büyük harflerle "YAYINA ALINMAMIŞ İŞ VAR" yazılır. (Henüz commit bile edilmemiş, sadece çalışma kopyasında değişen dosyalar da aynı şekilde en üstte açıkça belirtilir - bunlar da "yayına alınmamış iş" sayılır.)
+- Push sonrası Render deploy'u bitene kadar beklenir ve canlıda en az bir ekran görüntüsüyle doğrulanır. Doğrulanamazsa "CANLIDA DOĞRULANMADI" yazılır. (2026-10-13 bulgusu: bu ortamda canlıya GİRİŞ YAPARAK test etmek - imzalı çerez dahil - Claude Code'un otomatik izin sınıflandırıcısı tarafından "Production Reads" gerekçesiyle ENGELLENİYOR; bu durumda yerel sunucuda aynı testler yapılır ve rapor "canlı doğrulanamadı, yerelde doğrulandı" diye açıkça işaretlenir.)
+- Her görev `docs/GOREV_KAYDI.md` dosyasına bir satır olarak eklenir: tarih | görev adı | commit | durum (canlıda / branch'te / yarım).
+
 ## Her işin sonunda
 
 1. `tests/smoke_test.py` canlıda (`--url https://serkancrm.onrender.com`) çalıştırılır; tablo temiz değilse "tamam" denmez.
