@@ -205,6 +205,41 @@ def _money_tr(value):
     return sign + s
 
 
+def _miktar_tr(value):
+    """Is 2c (2026-10-14): miktar - tam sayiysa ondalik YOK + Turkce bin
+    ayraci ('1.500 kg'), kusuratliysa virgullu + gereksiz sifirlar
+    KIRPILIR ('12,5 kg' - '12,50' DEGIL)."""
+    value = float(value)
+    if value == int(value):
+        return f'{int(value):,}'.replace(',', '.')
+    s = f'{value:,.2f}'
+    int_part, dec_part = s.split('.')
+    dec_part = dec_part.rstrip('0') or '0'
+    result = f'{int_part}.{dec_part}'
+    return result.replace(',', '§').replace('.', ',').replace('§', '.')
+
+
+def _birim_fiyat_tr(value):
+    """Is 2c: birim fiyat - en az 2, gerekirse (yuvarlama kaybi olmadan
+    tam temsil icin) en fazla 4 ondalik; fazlalik sifirlar KIRPILIR."""
+    value = float(value)
+    s = f'{value:.4f}'
+    int_part, dec_part = s.split('.')
+    while len(dec_part) > 2 and dec_part.endswith('0'):
+        dec_part = dec_part[:-1]
+    int_part_fmt = f'{int(int_part):,}'.replace(',', '.')
+    return f'{int_part_fmt},{dec_part}'
+
+
+def _kagit_cinsi_farkli_mi(description, kagit_cinsi):
+    """Is 2a: kagit cinsi degeri urun adiyla AYNIYSA (buyuk/kucuk harf ve
+    bosluk farki haric) o satir basilmaz - tekrar olmasin diye."""
+    if not kagit_cinsi:
+        return False
+    norm = lambda s: ' '.join((s or '').split()).casefold()
+    return norm(description) != norm(kagit_cinsi)
+
+
 def _logo_for_pdf_yeni(logo_data):
     """Logonun neredeyse-beyaz pikselleri (R,G,B hepsi >= 244) seffaf yapar
     ve bos kenarlari kirpar - SADECE bellekte, company.logo_data'daki
@@ -1028,8 +1063,15 @@ def _generate_deal_pdf_yeni(deal):
         return escape(cleaned) if cleaned else ''
 
     if deal.items:
-        col_widths = [0.9*cm, 1.8*cm, 6.3*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
-        headers = ['#', 'Numune', 'Ürün ve teknik özellikler', 'Miktar', 'Birim fiyat', 'Teslim', 'Tutar\n(KDV hariç)']
+        # Is 2b (2026-10-14): hicbir kalemde numune_gorseli yoksa Numune
+        # sutunu TAMAMEN gizlenir, genisligi urun sutununa eklenir.
+        has_any_numune = any(item.numune_gorseli for item in deal.items)
+        if has_any_numune:
+            col_widths = [0.9*cm, 1.8*cm, 6.3*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
+            headers = ['#', 'Numune', 'Ürün ve teknik özellikler', 'Miktar', 'Birim fiyat', 'Teslim', 'Tutar\n(KDV hariç)']
+        else:
+            col_widths = [0.9*cm, 8.1*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
+            headers = ['#', 'Ürün ve teknik özellikler', 'Miktar', 'Birim fiyat', 'Teslim', 'Tutar\n(KDV hariç)']
         data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style) for h in headers]]
 
         static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
@@ -1043,23 +1085,24 @@ def _generate_deal_pdf_yeni(deal):
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
 
-            # Numune hucresi
+            # Numune hucresi (sutun gizliyse hic olusturulmaz)
             numune_flowable = None
-            if item.numune_gorseli:
-                try:
-                    img_path = os.path.join(static_dir, item.numune_gorseli)
-                    if os.path.isfile(img_path):
-                        numune_flowable = Image(img_path, width=1.6*cm, height=1.6*cm, kind='proportional')
-                except Exception:
-                    numune_flowable = None
-            if numune_flowable is None:
-                numune_flowable = Table([['']], colWidths=[1.6*cm], rowHeights=[1.6*cm], style=[('BACKGROUND', (0, 0), (-1, -1), _Y_BEJ)])
+            if has_any_numune:
+                if item.numune_gorseli:
+                    try:
+                        img_path = os.path.join(static_dir, item.numune_gorseli)
+                        if os.path.isfile(img_path):
+                            numune_flowable = Image(img_path, width=1.6*cm, height=1.6*cm, kind='proportional')
+                    except Exception:
+                        numune_flowable = None
+                if numune_flowable is None:
+                    numune_flowable = Table([['']], colWidths=[1.6*cm], rowHeights=[1.6*cm], style=[('BACKGROUND', (0, 0), (-1, -1), _Y_BEJ)])
 
-            # Urun ve teknik ozellikler hucresi
+            # Urun ve teknik ozellikler hucresi - Is 2a: "Urun tipi" satiri
+            # KALDIRILDI (ic bilgi, musteriyi ilgilendirmez). Kagit cinsi,
+            # urun adiyla (harf/bosluk farki haric) AYNIYSA basilmaz.
             urun_lines = [f"<b>{_escape(item.description)}</b>"]
-            if item.urun_tipi:
-                urun_lines.append(f"<font color='#666666' size=6.8>Ürün tipi: {_URUN_TIPI_LABELS.get(item.urun_tipi, item.urun_tipi)}</font>")
-            if item.kagit_cinsi:
+            if _kagit_cinsi_farkli_mi(item.description, item.kagit_cinsi):
                 urun_lines.append(f"<font color='#666666' size=6.8>Kağıt cinsi: {_escape(item.kagit_cinsi)}</font>")
             olcu_bits = []
             if item.en:
@@ -1078,11 +1121,11 @@ def _generate_deal_pdf_yeni(deal):
                 urun_lines.append(f"<b>Adet başı ≈ {_money_tr(adet_basi_tl)} TL</b>")
             urun_cell = Paragraph('<br/>'.join(urun_lines), table_cell_style)
 
-            # Birim fiyat hucresi
+            # Birim fiyat hucresi - Is 2c: en az 2, en fazla 4 ondalik
             if deal.para_birimi == 'TRY':
-                fiyat_text = f"{_money_tr(item.unit_price)} TL/{item.unit}"
+                fiyat_text = f"{_birim_fiyat_tr(item.unit_price)} TL/{item.unit}"
             else:
-                fiyat_text = f"{_money_tr(item.unit_price)} {para_sym}"
+                fiyat_text = f"{_birim_fiyat_tr(item.unit_price)} {para_sym}"
                 if deal.kullanilan_kur:
                     tl_karsilik = item.unit_price * deal.kullanilan_kur
                     fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {_money_tr(tl_karsilik)} TL</font>"
@@ -1102,12 +1145,17 @@ def _generate_deal_pdf_yeni(deal):
                 tutar_text = f"{_money_tr(item.total_price)} {para_sym}"
             tutar_cell = Paragraph(f"<b>{tutar_text}</b>", table_cell_center_style)
 
-            data.append([
-                num_cell, numune_flowable, urun_cell,
-                Paragraph(f"{item.quantity:.2f} {item.unit}", table_cell_center_style),
-                fiyat_cell, Paragraph(item_delivery_str, table_cell_center_style), tutar_cell,
-            ])
+            row = [num_cell]
+            if has_any_numune:
+                row.append(numune_flowable)
+            row.append(urun_cell)
+            row.append(Paragraph(f"{_miktar_tr(item.quantity)} {item.unit}", table_cell_center_style))
+            row.append(fiyat_cell)
+            row.append(Paragraph(item_delivery_str, table_cell_center_style))
+            row.append(tutar_cell)
+            data.append(row)
 
+        _urun_col_idx = 2 if has_any_numune else 1
         table = Table(data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), _Y_SARI),
@@ -1118,7 +1166,8 @@ def _generate_deal_pdf_yeni(deal):
             ('BOX', (0, 0), (-1, -1), 0.75, _Y_ANTRASIT),
             ('TOPPADDING', (0, 0), (-1, 0), 5), ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
             ('TOPPADDING', (0, 1), (-1, -1), 5), ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
-            ('LEFTPADDING', (2, 1), (2, -1), 6), ('RIGHTPADDING', (2, 1), (2, -1), 6),
+            ('LEFTPADDING', (_urun_col_idx, 1), (_urun_col_idx, -1), 6),
+            ('RIGHTPADDING', (_urun_col_idx, 1), (_urun_col_idx, -1), 6),
         ]))
         elements.append(table)
         elements.append(Spacer(1, 4*mm))
