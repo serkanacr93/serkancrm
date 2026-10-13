@@ -1,0 +1,61 @@
+=== Customer 1862 ===
+  company_name = 'MİSS KURUYEMİŞ'
+  first_name = 'ÖMER'
+  last_name = 'BEY'
+  phone = '05326363012'
+  tax_id = ''
+  owner_user_id = 1
+  status = 'aktif'
+  bilgi_eksik = None
+  created_at = datetime.datetime(2026, 9, 15, 12, 48, 48, 873957)
+  DEAL: 210 TKL-00090 title='MİSS KURUYEMİŞ - ÖMER BEY' stage=kazanilan user_id=1 created_at=2026-09-15 12:51:22.773279
+=== Customer 1825 ===
+  company_name = 'MİSSS KURUYEMİŞ - HÜSEYİN İN'
+  first_name = 'ÖMER '
+  last_name = 'BEY'
+  phone = ''
+  tax_id = '37018939896'
+  owner_user_id = 2
+  status = 'aktif'
+  bilgi_eksik = None
+  created_at = datetime.datetime(2026, 8, 14, 13, 24, 44, 69064)
+  DEAL: 173 TKL-00067 title='MİSSS KURUYEMİŞ - HÜSEYİN İN - ÖMER BEY' stage=kaybedilen user_id=2 created_at=2026-08-14 13:28:33.784024
+
+--- _normalize_tr test ---
+'miss' -> 'miss'
+'MİSS' -> 'miss'
+'Miss' -> 'miss'
+'MISS' -> 'miss'
+customer1862 haystack -> 'miss kuruyemis omer bey'
+customer1825 haystack -> 'misss kuruyemis - huseyin in omer  bey'
+
+customer_id NULL olan teklif sayisi: 0
+var olmayan musteriye bagli (orphan FK) teklif sayisi: 0
+toplam teklif sayisi: 118
+
+formdaki/musteri adi BELIRGIN farkli teklif sayisi: 24
+bunlarin siparise donmus (kazanilan) sayisi: 14
+  Deal 188 TKL-00076 stage=kazanilan title='ZÜMRÜT  PERAKENDE - Bekir Zümrüt Niğde' vs musteri='ZÜMRÜT PERAKENDE - Bekir Zümrüt Niğde'
+  Deal 13 TKL-00013 stage=kaybedilen title='SOLAKLAR AMBALJ-02.07-1' vs musteri='Abdullah Solak Ambalaj'
+  Deal 17 TKL-00017 stage=kazanilan title='TADIM-ENES UNLU M. -06.07-1' vs musteri='Tadım Simit Mahmut Abi'
+  Deal 38 TKL-00023 stage=kazanilan title='ÇEREZBAHÇEM -13.07-1' vs musteri='Çerez Bahçem Mahmut'
+  Deal 3 TKL-00003 stage=kaybedilen title='PREMIU-29.06-1' vs musteri='Premium Inlu Mamülleri Mehmet Abi'
+  Deal 63 TKL-00041 stage=kazanilan title='KEBABU-27.07-1' vs musteri='Kebabuz Bodrum Cankurt Aksan'
+  Deal 2 TKL-00002 stage=kaybedilen title='AVANTAJAVM-29.06-1' vs musteri='Avantaj Acm Ömer Abi Cihanbeyli'
+  Deal 18 TKL-00018 stage=kazanilan title='EREĞLI-06.07-1' vs musteri='Ereğli Simit Sarayı Emrah Dumlu'
+  Deal 6 TKL-00006 stage=kazanilan title='ŞAROĞL-30.06-1' vs musteri='Şaroğlu Baharat Mehmet Abi'
+  Deal 41 TKL-00026 stage=kaybedilen title='ŞAROĞL-13.07-1' vs musteri='Şaroğlu Baharat Mehmet Abi'
+  Deal 14 TKL-00014 stage=kaybedilen title='İBRAHI-05.07-1' vs musteri='İbrahim Abi Lema Ambalaj'
+  Deal 9 TKL-00009 stage=kazanilan title='SEZER -01.07-1' vs musteri='Sezer Kuruyemiş Tavşanlı 2'
+  Deal 8 TKL-00008 stage=revize title='MEHMET-01.07-1' vs musteri='Mehmet Yıldırım Edirne'
+  Deal 27 TKL-00022 stage=kaybedilen title='MEHMET-01.07-1 (Revize 1)' vs musteri='Mehmet Yıldırım Edirne'
+  Deal 44 TKL-00029 stage=kazanilan title='KURAŞ KURUYEMİŞ -13.07-1' vs musteri='Kuraş Engin Köse İstanbul'
+  Deal 7 TKL-00007 stage=kazanilan title='KURAŞ -30.06-1' vs musteri='Kuraş Engin Köse İstanbul'
+  Deal 40 TKL-00025 stage=kazanilan title='ÖZEN KURUYEMİŞ -13.07-1' vs musteri='Özen Erzincan Devir'
+  Deal 22 TKL-00021 stage=kazanilan title='SULTAN-07.07-1' vs musteri='Sultan Döner Talha Abi'
+  Deal 62 TKL-00040 stage=kazanilan title='KONEVI-27.07-1' vs musteri='Konevi Etliekmek Hakan Abi'
+  Deal 5 TKL-00005 stage=kazanilan title='ELAZIĞ-29.06-1' vs musteri='Elazığ Kuruyemiş Emrah Elazıg'
+  Deal 10 TKL-00010 stage=kaybedilen title='ÇEREZC-01.07-1' vs musteri='ÇEREZCİ MEHMET - MEHMET YAMAN'
+  Deal 52 TKL-00030 stage=kaybedilen title='ERCAN -15.07-1' vs musteri='ERCAN ŞAVARMA - KEMAL'
+  Deal 42 TKL-00027 stage=kazanilan title='CEYLAN-13.07-1' vs musteri='CEYLAN TİCARET - AHMET CEYLAN'
+  Deal 19 TKL-00019 stage=kaybedilen title='DÖNER -06.07-1' vs musteri='DÖNER 42 - MUHAMMED BEY'
