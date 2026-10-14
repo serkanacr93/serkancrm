@@ -9,12 +9,14 @@ from datetime import datetime, timedelta, date
 from functools import wraps
 from io import BytesIO
 from werkzeug.utils import secure_filename
+import difflib
 import hashlib
 import json
 import openpyxl
 import os
 import re
 import time
+import unicodedata
 import uuid
 from urllib.parse import quote as _url_quote
 from sqlalchemy.exc import IntegrityError
@@ -348,6 +350,134 @@ def _duplicate_phone_groups():
     duplicate_groups.sort(key=lambda g: -len(g['customers']))
     suspicious_groups.sort(key=lambda g: -len(g['customers']))
     return duplicate_groups, suspicious_groups
+
+# PAKET B Is B6 (2026-10-14): Isimden mukerrer musteri tespiti - telefon
+# bazli _duplicate_phone_groups()'tan AYRI/EK bir kaynak ('İsim benzerliği').
+# SADECE TESPIT - otomatik birlestirme YAPMAZ, ayni merge akisi (bkz.
+# merge_duplicate_customers()) kullanilir.
+
+_NAME_DUP_TR_MAP = str.maketrans({
+    'İ': 'i', 'I': 'i', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g',
+    'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c',
+})
+
+def _normalize_name_for_dup(name):
+    """Turkce'ye duyarli normalize - 'MİSS'/'MISS', 'KURUYEMİŞ'/'KURUYEMIS'
+    gibi varyantlar AYNI sonuca duser. Dilbilimsel dogruluk degil, benzerlik
+    karsilastirmasi icin tutarlilik hedeflenir: Turkce harfler ASCII'ye
+    yakinsatilir (elle harita - Python'un str.lower()'i 'İ'yi 'i̇' (2
+    karakter) yapar, bu karsilastirmayi bozardi), NFKD ile aksan/noktalama
+    isaretleri ayristirilip atilir, sonra casefold. Firma eki/noktalama
+    SILINMEZ - sadece bosluk/harf-disi karakterler tek bosluga indirgenir."""
+    if not name:
+        return ''
+    s = name.strip().translate(_NAME_DUP_TR_MAP)
+    s = unicodedata.normalize('NFKD', s)
+    s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.casefold()
+    s = re.sub(r'[^a-z0-9]+', ' ', s).strip()
+    return s
+
+def _name_similarity_score(n1, n2):
+    """İki normalize isim arasindaki benzerlik - TAM dizi orani (difflib
+    ratio) ile 'kismi' oran (fuzzywuzzy'nin partial_ratio algoritmasinin
+    difflib uzerine portu - rapidfuzz kurulu degil, bkz. arastirma)
+    ikisinden BUYUK OLANI kullanir. Kismi oran, bir ismin digerinin
+    BASINA/ICINE ek kelime eklenmis hali oldugu durumlari yakalar (orn.
+    'MİSSS KURUYEMİŞ - HÜSEYİN İN' ile 'MİSS KURUYEMİŞ' - tam oran 0.70
+    (dusuk), kismi oran 0.93 (dogru tespit) - bkz. B6 gorev tanimindaki
+    zorunlu MİSS Kuruyemiş ciftinin yakalanmasi gerekliligi)."""
+    if n1 == n2:
+        return 1.0
+    full = difflib.SequenceMatcher(None, n1, n2).ratio()
+    if len(n1) <= len(n2):
+        shorter, longer = n1, n2
+    else:
+        shorter, longer = n2, n1
+    matcher = difflib.SequenceMatcher(None, longer, shorter)
+    partial = 0.0
+    for block in matcher.get_matching_blocks():
+        start = max(0, block.a - block.b)
+        substr = longer[start:start + len(shorter)]
+        partial = max(partial, difflib.SequenceMatcher(None, substr, shorter).ratio())
+    return max(full, partial)
+
+def _customer_display_name_for_dup(c):
+    """Karsilastirmada kullanilacak 'ad' - company_name varsa o, yoksa
+    ad+soyad. Musteriler listesi/arama ile AYNI oncelik (bkz. Customer'in
+    kendi display_name property'si de ayni mantigi kullanir)."""
+    if c.company_name and c.company_name.strip():
+        return c.company_name.strip()
+    full = f"{c.first_name or ''} {c.last_name or ''}".strip()
+    return full
+
+def _similar_name_pairs(threshold=0.90, min_len=4):
+    """Tum musteriler arasinda isim benzerligi >= threshold olan ciftleri
+    bulur. Performans icin normalize edilmis ismin ilk 3 karakteriyle
+    'bloklanir' - SADECE ayni blok icindeki ciftler karsilastirilir (1750+
+    musteride tam O(n^2) yerine). min_len'den kisa normalize isimler
+    (bos/tek harf gibi anlamsiz) karsilastirmaya hic girmez."""
+    customers = Customer.query.all()
+    entries = []
+    for c in customers:
+        norm = _normalize_name_for_dup(_customer_display_name_for_dup(c))
+        if len(norm) < min_len:
+            continue
+        entries.append((c, norm))
+
+    buckets = {}
+    for c, norm in entries:
+        buckets.setdefault(norm[:3], []).append((c, norm))
+
+    pairs = []
+    for bucket in buckets.values():
+        if len(bucket) < 2:
+            continue
+        for i in range(len(bucket)):
+            c1, n1 = bucket[i]
+            for j in range(i + 1, len(bucket)):
+                c2, n2 = bucket[j]
+                score = _name_similarity_score(n1, n2)
+                if score < threshold:
+                    continue
+                # Daha KISA olan ismin en az 2 kelimesi (ad+soyad, unvan vb.)
+                # olmali - SADECE tek kelimelik bir ad ('Ahmet', 'Murat' gibi
+                # cok yaygin Turkce isimler) baska kayitlarla "eslesmesi"
+                # guvenilir bir mukerrer sinyali DEGIL (binlerce farkli
+                # musteri ayni ilk adi tasiyabilir) - hem BIREBIR AYNI tek
+                # kelimelik eslesmeleri hem de kismi-oran (partial_ratio)
+                # uzerinden bir tek kelimenin uzun bir isme "icerilmis"
+                # gorunmesini (orn. 'Ahmet' <-> 'Ahmet Korkmaz') eler.
+                shorter_word_count = min(n1.count(' ') + 1, n2.count(' ') + 1)
+                if shorter_word_count < 2:
+                    continue
+                pairs.append({'customer1': c1, 'customer2': c2, 'score': score})
+    pairs.sort(key=lambda p: -p['score'])
+    return pairs
+
+def _similar_name_matches_for(display_name, exclude_id=None, threshold=0.90, limit=3):
+    """Tek bir (henuz kaydedilmemis/yeni) isim icin mevcut musteriler
+    arasinda benzer olanlari bulur - add_customer/quick_add_customer'daki
+    NON-BLOCKING uyari icin kullanilir (KARAR: bu bir UYARIDIR, kayit
+    engellenmez - kullanici bilerek ayni isimde iki musteri tutabilir,
+    orn. ayni isimli farkli sube/kisi)."""
+    norm_new = _normalize_name_for_dup(display_name)
+    if len(norm_new) < 4:
+        return []
+    matches = []
+    for c in Customer.query.all():
+        if exclude_id and c.id == exclude_id:
+            continue
+        norm_existing = _normalize_name_for_dup(_customer_display_name_for_dup(c))
+        if len(norm_existing) < 4:
+            continue
+        if min(norm_new.count(' ') + 1, norm_existing.count(' ') + 1) < 2:
+            continue
+        score = _name_similarity_score(norm_new, norm_existing)
+        if score >= threshold:
+            matches.append((c, score))
+    matches.sort(key=lambda m: -m[1])
+    return matches[:limit]
 
 # Is 8: customer_id (veya esdegeri) tutan TUM tablolar - musteri birlestirme
 # sirasinda bu tablolardaki satirlar silinen musteriden ana musteriye
@@ -1511,9 +1641,17 @@ def register_routes(app):
         birlestirme yapilmaz (kullanici her grubu kendisi, modal'dan
         secerek birlestirir - bkz. merge_duplicate_customers()). Her
         kayit yaninda teklif sayisi + son irtibat tarihi TOPLU sorguyla
-        (N+1 yok) gosterilir."""
+        (N+1 yok) gosterilir.
+
+        PAKET B Is B6 (2026-10-14): asagiya AYRI/EK bir kaynak olarak
+        isim benzerligiyle tespit edilen ciftler (name_groups) eklendi -
+        telefon bazli tespitin YERINE DEGIL, YANINA. Ayni merge modal'i/
+        merge_duplicate_customers() route'u kullanilir (MERGE_GROUPS JS
+        dizisi iki kaynagi da ardisik indeksler ile tasir)."""
         duplicate_groups, suspicious_groups = _duplicate_phone_groups()
-        all_ids = [c.id for g in duplicate_groups for c in g['customers']]
+        name_pairs = _similar_name_pairs()
+        all_ids = list({c.id for g in duplicate_groups for c in g['customers']} |
+                        {p['customer1'].id for p in name_pairs} | {p['customer2'].id for p in name_pairs})
 
         deal_counts = dict(db.session.query(
             Deal.customer_id, db.func.count(Deal.id)
@@ -1527,19 +1665,22 @@ def register_routes(app):
         ).all() if all_ids else []
         last_contact_map = dict(last_contact_rows)
 
+        def _row_for(c):
+            return {'customer': c, 'deal_count': deal_counts.get(c.id, 0), 'last_contact': last_contact_map.get(c.id)}
+
         groups = []
         for g in duplicate_groups:
-            items = []
-            for c in g['customers']:
-                items.append({
-                    'customer': c,
-                    'deal_count': deal_counts.get(c.id, 0),
-                    'last_contact': last_contact_map.get(c.id),
-                })
-            groups.append({'phone': g['phone'], 'rows': items})
+            groups.append({'phone': g['phone'], 'rows': [_row_for(c) for c in g['customers']]})
+
+        name_groups = []
+        for p in name_pairs:
+            name_groups.append({
+                'score': p['score'],
+                'rows': [_row_for(p['customer1']), _row_for(p['customer2'])],
+            })
 
         return render_template('customers_duplicate.html', groups=groups,
-                                suspicious_groups=suspicious_groups)
+                                suspicious_groups=suspicious_groups, name_groups=name_groups)
 
     @app.route('/customers/mukerrer/birlestir', methods=['POST'])
     @login_required
@@ -2392,9 +2533,22 @@ def register_routes(app):
                 notes=request.form.get('notes'),
                 owner_user_id=current_user.id
             )
+            # PAKET B Is B6 (2026-10-14): isim benzerligi - NON-BLOCKING
+            # uyari. Yukaridaki first_name+last_name TAM esleme kontrolunden
+            # FARKLI - burada company_name de dahil, YAZIM FARKLI/benzer
+            # isimler de yakalanir ama kayit OLUSTURULMAYA DEVAM EDER,
+            # sadece sarı (warning) flash ile bildirilir.
+            new_display_name = _customer_display_name_for_dup(Customer(
+                first_name=first_name or None, last_name=last_name or None,
+                company_name=request.form.get('company_name')))
+            similar = _similar_name_matches_for(new_display_name) if new_display_name else []
+
             db.session.add(customer)
             db.session.commit()
             flash('Müşteri eklendi!', 'success')
+            if similar:
+                names = ', '.join(f"{c.display_name} (#{c.id})" for c, _ in similar)
+                flash(f'⚠ Benzer isimli kayıt(lar) zaten var, mükerrer olabilir: {names}', 'warning')
             return redirect(url_for('customers'))
         return render_template('add_customer.html')
 
@@ -3638,6 +3792,17 @@ def register_routes(app):
             first_name = parts[0]
             last_name = parts[1] if len(parts) > 1 else None
 
+        # PAKET B Is B6 (2026-10-14): isim benzerligi - NON-BLOCKING uyari.
+        # Kayit OLUSTURULMAYA/kullanilmaya devam eder (quick-add akisinin
+        # amaci hiz - engellemek yanlis olur), sadece JSON cevaba eklenen
+        # bu alanla cagiran tarafa (customer-search.js) "dikkat, benzer bir
+        # kayit zaten var" bilgisi verilir.
+        possible_dup = None
+        if name:
+            similar = _similar_name_matches_for(name, limit=1)
+            if similar:
+                possible_dup = {'id': similar[0][0].id, 'name': similar[0][0].display_name}
+
         customer = Customer(musteri_no=_next_musteri_no(), first_name=first_name, last_name=last_name, phone=phone or None, status='aktif', owner_user_id=current_user.id,
                              bilgi_eksik=True if source == 'gunluk_uretim' else None)
         db.session.add(customer)
@@ -3659,6 +3824,7 @@ def register_routes(app):
             'id': customer.id, 'name': customer.display_name, 'phone': customer.phone or '',
             'email': '', 'company_name': '', 'tax_id': '', 'address': '',
             'reused_existing': False,
+            'possible_duplicate': possible_dup,
         }), 201
 
     @app.route('/api/daily-reports/quick-add', methods=['POST'])

@@ -69,6 +69,55 @@
 </div>
 {% endif %}
 
+{# PAKET B Is B6 (2026-10-14): isim benzerligiyle tespit edilen ciftler -
+   telefon bazli listenin YANINA eklendi, AYRI bir kaynak olarak. #}
+<h4 class="mt-5 mb-3"><i class="bi bi-person-lines-fill"></i> İsim Benzerliği ile Tespit Edilenler <span class="badge bg-secondary">{{ name_groups|length }}</span></h4>
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Telefon numarası farklı/eksik olsa da ismi (unvan veya ad soyad) birbirine çok benzeyen müşteri çiftleri
+    (yazım farkı, fazladan kelime vb. - örn. "MİSS KURUYEMİŞ" / "MİSSS KURUYEMİŞ - HÜSEYİN İN").
+    Bu bir <strong>uyarı/öneri listesidir</strong>, hiçbiri otomatik birleştirilmez - gerçekten aynı müşteri
+    olduğundan emin olmadan "Birleştir" kullanmayın.
+</div>
+{% if name_groups %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Benzerlik</th>
+                        <th>Müşteriler</th>
+                        <th>İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for g in name_groups %}
+                    <tr>
+                        <td><span class="badge bg-info text-dark">%{{ (g.score * 100)|round(0, 'floor')|int }}</span></td>
+                        <td>
+                            {% for item in g.rows %}
+                            <a href="{{ url_for('customer_detail', id=item.customer.id) }}">{{ item.customer.display_name }}</a>{{ ', ' if not loop.last }}
+                            {% endfor %}
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-warning merge-open-btn" data-bs-toggle="modal" data-bs-target="#mergeModal" data-group-idx="{{ groups|length + loop.index0 }}">
+                                <i class="bi bi-arrow-down-up"></i> Birleştir
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-success">
+    <i class="bi bi-check-circle"></i> İsim benzerliğiyle tespit edilen kayıt bulunmuyor.
+</div>
+{% endif %}
+
 <!-- Birlestirme modali - icerigi JS ile ilgili grubun verisinden doldurulur -->
 <div class="modal fade" id="mergeModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -100,6 +149,22 @@
 <script>
 var MERGE_GROUPS = [
     {% for g in groups %}
+    [
+        {% for item in g.rows %}
+        {
+            id: {{ item.customer.id }},
+            name: {{ item.customer.display_name|tojson }},
+            musteri_no: {{ (item.customer.musteri_no or '-')|tojson }},
+            deal_count: {{ item.deal_count }},
+            last_contact: {{ (item.last_contact.strftime('%d.%m.%Y') if item.last_contact else 'Hiç irtibat yok')|tojson }}
+        }{{ ',' if not loop.last }}
+        {% endfor %}
+    ],
+    {% endfor %}
+    {# PAKET B Is B6: name_groups AYNI diziye, groups'tan SONRA eklenir -
+       template'teki data-group-idx="{{ groups|length + loop.index0 }}" ile
+       dogru index'e isaret eder (bkz. yukaridaki buton). #}
+    {% for g in name_groups %}
     [
         {% for item in g.rows %}
         {

@@ -305,6 +305,13 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
                     return;
                 }
                 CRM_SEARCH.load(true); // yeni musteri eklendi - onbellegi tazele
+                // PAKET B Is B6 (2026-10-14): isim benzerligi - NON-BLOCKING
+                // sari uyari. selectCustomer() sonucu listeyi/formu kapatir,
+                // bu yuzden uyari input'un YANINA (resultsEl disina) eklenir
+                // ki kapanista kaybolmasin.
+                if (r.body.possible_duplicate) {
+                    _showQuickAddDuplicateWarning(input, r.body.possible_duplicate);
+                }
                 selectCustomer(r.body);
                 if (typeof opts.onQuickAdd === 'function') opts.onQuickAdd(r.body);
             })
@@ -314,6 +321,33 @@ function _customerSearchCore(input, hiddenInput, resultsEl, opts) {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = '<i class="bi bi-check-lg"></i> Ekle ve Seç';
             });
+    }
+
+    // PAKET B Is B6 (2026-10-14): quick-add sonrasi isim benzerligi uyarisi -
+    // musteri kaydi OLUSTURULMUS/SECILMIS durumda, bu sadece bilgilendirme.
+    // .textContent kullanilir (innerHTML DEGIL) - musteri adi kullanici
+    // girdisi oldugu icin XSS riski olmasin diye.
+    function _showQuickAddDuplicateWarning(inputEl, dup) {
+        var existingWarn = inputEl.parentNode.querySelector('.qa-dup-warning');
+        if (existingWarn) existingWarn.remove();
+        var box = document.createElement('div');
+        box.className = 'alert alert-warning alert-dismissible fade show small mt-1 py-1 px-2 qa-dup-warning';
+        var icon = document.createElement('i');
+        icon.className = 'bi bi-exclamation-triangle';
+        box.appendChild(icon);
+        box.appendChild(document.createTextNode(' Benzer isimli bir kayıt zaten var: '));
+        var strong = document.createElement('strong');
+        strong.textContent = dup.name;
+        box.appendChild(strong);
+        box.appendChild(document.createTextNode(' — aynı müşteri olabilir, kontrol edin.'));
+        var closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'btn-close btn-close-sm';
+        closeBtn.setAttribute('data-bs-dismiss', 'alert');
+        closeBtn.style.fontSize = '0.6rem';
+        box.appendChild(closeBtn);
+        inputEl.parentNode.insertBefore(box, inputEl.nextSibling);
+        setTimeout(function () { if (box.parentNode) box.parentNode.removeChild(box); }, 8000);
     }
 
     function renderQuickAddForm(container, query, looksLikePhone) {
