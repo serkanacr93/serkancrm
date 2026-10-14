@@ -408,6 +408,17 @@ class Deal(db.Model):
         return self.value
 
     @property
+    def subtotal_tl(self):
+        """C6 (2026-10-14): deger_tl'nin KDV HARIC karsiligi - AYNI donusum
+        mantigi (TRY ise aynen; doviz + kur varsa kur ile carpilir; kur yoksa
+        oldugu gibi). Kullanici bazli aylik siparis kartlari icin."""
+        if self.para_birimi == 'TRY' or not self.para_birimi:
+            return self.subtotal
+        if self.kullanilan_kur:
+            return self.subtotal * self.kullanilan_kur
+        return self.subtotal
+
+    @property
     def odeme_yontemi_listesi(self):
         """odeme_yontemi'ndeki kodlari ("havale,cek") okunabilir etiket
         listesine cevirir (["Havale / EFT", "Çek"]) - bilinmeyen/bos kod

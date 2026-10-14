@@ -1201,6 +1201,7 @@ def register_routes(app):
 
         toplam_teklif, siparis_sayisi, donusum_pct = siparisler.teklif_siparis_sayilari(scope_user_id)
         siparis_ozet = siparisler.siparis_summary(scope_user_id, limit=5)
+        ks = _kullanici_siparis_kart_verisi('')
 
         bugun_tahsilat = db.session.query(db.func.coalesce(db.func.sum(Payment.amount), 0)).filter(
             Payment.payment_date == today, Payment.status == 'odendi'
@@ -1310,7 +1311,20 @@ def register_routes(app):
                                 dun_kg=uretim_row.dun_kg, ay_kg=uretim_row.ay_kg,
                                 production_cycle_customers=production_cycle_customers,
                                 low_stock_products=low_stock_products,
-                                pending_commission_total=pending_commission_total)
+                                pending_commission_total=pending_commission_total, ks=ks)
+
+    def _kullanici_siparis_kart_verisi(ay_param):
+        """C6: ana sayfa kullanici-bazli aylik siparis kartlari - gorunurluk
+        _deal_visibility_user_id() (Komuta Merkezi ile AYNI kural); 'kisitli'
+        rolu TL/kg'yi hic gormez (sunucu tarafinda uretilmez)."""
+        scope = _deal_visibility_user_id()
+        return siparisler.kullanici_aylik_siparisler(scope, ay_param, mali_gizle=(current_user.role == 'kisitli'))
+
+    @app.route('/api/anasayfa/aylik-siparisler')
+    @login_required
+    def api_anasayfa_aylik_siparisler():
+        veri = _kullanici_siparis_kart_verisi(request.args.get('ay', ''))
+        return render_template('_km_kullanici_siparisleri.html', ks=veri)
 
     @app.route('/siparisler')
     @login_required
@@ -1319,6 +1333,11 @@ def register_routes(app):
         tum hesap/filtre mantigi app/siparisler.py'de (tek kaynak, Komuta
         Merkezi + sidebar panel ile PAYLASILIR)."""
         scope_user_id = _deal_visibility_user_id()
+        # C6: "tumunu gor" linki - SADECE kisitlamasiz gorunumdeki (admin)
+        # kullanici belirli bir kullaniciya filtreleyebilir.
+        kullanici_id = request.args.get('kullanici', type=int)
+        if kullanici_id and scope_user_id is None:
+            scope_user_id = kullanici_id
         mod = request.args.get('mod', 'aylik')
         if mod not in ('aylik', 'toplam'):
             mod = 'aylik'

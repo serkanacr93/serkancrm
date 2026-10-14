@@ -303,3 +303,90 @@ def siparisler_sayfa_verisi(scope_user_id, mod, ay_param, page=1, per_page=50):
         'kpis': kpis, 'rows': page_rows, 'total': total, 'page': page,
         'pages': max(1, (total + per_page - 1) // per_page),
     }
+
+
+# ---- C6 (2026-10-14): Ana sayfa - kullanici bazinda aylik siparisler ----
+
+def _istanbul_today():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo('Europe/Istanbul')).date()
+
+
+def ay_araligi(ay_param):
+    """'YYYY-MM' -> (ay_start, ay_end, prev 'YYYY-MM', next 'YYYY-MM',
+    bu_ay_mi). Gecersiz/bos parametre = Europe/Istanbul'a gore bu ay."""
+    bugun = _istanbul_today()
+    try:
+        y, m = map(int, (ay_param or '').split('-'))
+        ay_start = date(y, m, 1)
+    except (ValueError, TypeError, AttributeError):
+        ay_start = date(bugun.year, bugun.month, 1)
+    ay_end = date(ay_start.year + 1, 1, 1) if ay_start.month == 12 else date(ay_start.year, ay_start.month + 1, 1)
+    prev_s = date(ay_start.year - 1, 12, 1) if ay_start.month == 1 else date(ay_start.year, ay_start.month - 1, 1)
+    return (ay_start, ay_end, prev_s.strftime('%Y-%m'), ay_end.strftime('%Y-%m'),
+            ay_start == date(bugun.year, bugun.month, 1))
+
+
+def kullanici_aylik_siparisler(scope_user_id, ay_param, mali_gizle=False, satir_limit=3):
+    """Kullanici basina secili ayin siparisleri. TEK siparis sorgusu (joinedload
+    ile kalemler/musteri) + tek kullanici sorgusu + tek GROUP BY (bekleyen
+    teklif) - N+1 yok. Siparis = stage 'kazanilan' ve Production'i iptal
+    OLMAYAN (geri cekilen/iptal edilen teklif zaten stage 'kaybedilen'e
+    doner, bkz. routes.py). scope_user_id None ise tum aktif kullanicilar,
+    degilse sadece o kullanici. mali_gizle=True ise TL/kg SUNUCU tarafinda
+    hic uretilmez."""
+    from app.models import User
+    ay_start, ay_end, prev_ay, next_ay, bu_ay = ay_araligi(ay_param)
+
+    uq = User.query.filter(User.is_active.is_(True))
+    if scope_user_id is not None:
+        uq = uq.filter(User.id == scope_user_id)
+    users = uq.order_by(User.full_name, User.username).all()
+    ids = [u.id for u in users]
+
+    # Hafif sorgu: durum turetmesi (sevkiyat/odeme) burada GEREKMEDIGI icin
+    # _siparis_query'nin agir joinedload'lari yerine sadece musteri/kalem/
+    # uretim yuklenir - TEK SELECT, satir basina ek sorgu yok.
+    oq = Deal.query.join(Production, Production.deal_id == Deal.id).filter(
+        Deal.stage == 'kazanilan', Production.start_date >= ay_start, Production.start_date < ay_end,
+        Production.status != 'iptal', Deal.user_id.in_(ids),
+    ).options(joinedload(Deal.customer), joinedload(Deal.items), joinedload(Deal.production))
+    orders = oq.all() if ids else []
+
+    bekleyen = dict(db.session.query(Deal.user_id, db.func.count(Deal.id)).filter(
+        Deal.user_id.in_(ids), Deal.stage.notin_(['kazanilan', 'kaybedilen', 'revize'])
+    ).group_by(Deal.user_id).all()) if ids else {}
+
+    by_user = {i: [] for i in ids}
+    for d in orders:
+        if d.user_id in by_user:
+            by_user[d.user_id].append(d)
+
+    sonuc = []
+    for u in users:
+        deals = sorted(by_user[u.id], key=lambda d: (d.siparis_tarihi or date.min, d.id), reverse=True)
+        rows = []
+        for d in deals[:satir_limit]:
+            k = d.items[0] if d.items else None
+            rows.append({'id': d.id, 'musteri_adi': d.customer.display_name if d.customer else '-',
+                         'urun': (k.description[:60] if k and k.description else d.title),
+                         'miktar': k.quantity if k else None, 'birim': k.unit if k else None,
+                         'tarih': d.siparis_tarihi})
+        item = {
+            'user_id': u.id, 'ad': u.full_name or u.username,
+            'bas': ((u.full_name or u.username or '?').strip()[:1] or '?').upper(),
+            'rol': 'Yönetici' if u.role == 'admin' else ('Kısıtlı' if u.role == 'kisitli' else 'Satış'),
+            'sayi': len(deals), 'kalan': max(0, len(deals) - satir_limit), 'rows': rows,
+            'bekleyen_teklif': bekleyen.get(u.id, 0),
+        }
+        if not mali_gizle:
+            item['tl'] = sum(d.subtotal_tl for d in deals)
+            item['kg'] = sum(i.quantity for d in deals for i in d.items if i.unit == 'kg' and i.quantity)
+        sonuc.append(item)
+    sonuc.sort(key=lambda x: (-x['sayi'], x['ad'].lower()))
+    return {
+        'users': sonuc, 'ay': ay_start.strftime('%Y-%m'), 'prev_ay': prev_ay, 'next_ay': next_ay,
+        'bu_ay': bu_ay, 'ay_baslik': f'{TR_AYLAR[ay_start.month - 1]} {ay_start.year}',
+        'mali_gizle': mali_gizle,
+    }

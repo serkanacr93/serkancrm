@@ -1,0 +1,31 @@
+{# C6: kullanici bazinda aylik siparisler - ana sayfa yan paneli (dar sutun, sikisik liste) + fetch ile yenilenen govde #}
+<div class="kks-nav">
+    <button type="button" class="kks-btn" data-ay="{{ ks.prev_ay }}" title="Önceki ay">‹</button>
+    <button type="button" class="kks-btn kks-bu-ay{{ ' kks-on' if ks.bu_ay }}" data-ay="">Bu ay</button>
+    <button type="button" class="kks-btn" data-ay="{{ ks.next_ay }}" title="Sonraki ay">›</button>
+</div>
+<div class="kks-ay">{{ ks.ay_baslik }}</div>
+{% for u in ks.users %}
+<div class="kks-card">
+    <div class="kks-hd">
+        <span class="kks-av">{{ u.bas }}</span>
+        <span class="kks-who"><strong>{{ u.ad }}</strong><small>{{ u.rol }}</small></span>
+        <span class="kks-n" title="{{ ks.ay_baslik }} sipariş sayısı">{{ u.sayi }}</span>
+    </div>
+    {% if u.sayi %}
+        {% for r in u.rows %}
+        <a href="{{ url_for('deal_detail', id=r.id) }}" class="kks-row">
+            <span class="kks-txt">{{ r.musteri_adi }} · {{ r.urun }}{% if r.miktar %} {{ r.miktar|round(0)|int }} {{ r.birim }}{% endif %}</span>
+            <span class="kks-dt">{{ r.tarih.strftime('%d.%m') if r.tarih else '' }}</span>
+        </a>
+        {% endfor %}
+        <a class="kks-more" href="{{ url_for('siparisler_sayfa', mod='aylik', ay=ks.ay, kullanici=u.user_id) }}">{% if u.kalan %}+{{ u.kalan }} sipariş daha · {% endif %}tümünü gör →</a>
+        {% if not ks.mali_gizle %}
+        <div class="kks-tot">Toplam: {{ "{:,.0f}".format(u.tl or 0)|replace(',', '.') }} TL · {{ "{:,.0f}".format(u.kg or 0)|replace(',', '.') }} kg</div>
+        {% endif %}
+    {% else %}
+        <div class="kks-empty">Bu ay henüz sipariş yok</div>
+        {% if u.bekleyen_teklif %}<div class="kks-wait">⏳ {{ u.bekleyen_teklif }} teklif onay bekliyor</div>{% endif %}
+    {% endif %}
+</div>
+{% endfor %}

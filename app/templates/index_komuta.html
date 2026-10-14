@@ -49,6 +49,31 @@
     .km-kpis { grid-template-columns:repeat(2,1fr); }
     .km-two { grid-template-columns:1fr; }
 }
+
+/* C6: kullanici bazinda aylik siparisler (yan panelde, Hizli Islemler'in hemen alti) */
+.kks { margin-top:16px; padding-top:12px; border-top:1px solid #3a3a3c; }
+.kks h6 { margin-bottom:8px; line-height:1.3; }
+.kks-nav { display:flex; gap:4px; margin-bottom:6px; }
+.kks-btn { flex:1; background:#2a2a2c; color:#ddd; border:1px solid #3a3a3c; border-radius:6px; font-size:0.72rem; padding:3px 0; cursor:pointer; }
+.kks-btn.kks-on { background:#FBC213; color:#353639; border-color:#FBC213; font-weight:700; }
+.kks-ay { font-size:0.72rem; color:#aaa; margin-bottom:8px; text-align:center; }
+.kks-card { background:#2a2a2c; border-radius:8px; padding:8px; margin-bottom:8px; border-top:3px solid #FBC213; }
+.kks-hd { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.kks-av { width:24px; height:24px; border-radius:50%; background:#353639; color:#FBC213; border:1px solid #FBC213; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.72rem; flex-shrink:0; }
+.kks-who { display:flex; flex-direction:column; min-width:0; flex:1; line-height:1.15; }
+.kks-who strong { font-size:0.76rem; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kks-who small { font-size:0.64rem; color:#999; }
+.kks-n { font-size:1.35rem; font-weight:700; color:#FBC213; }
+.kks-row { display:flex; justify-content:space-between; gap:4px; font-size:0.68rem; color:#ddd; text-decoration:none; padding:3px 0; border-top:1px solid #3a3a3c; }
+.kks-row:hover { color:#FBC213; }
+.kks-txt { min-width:0; overflow-wrap:anywhere; }
+.kks-dt { color:#999; flex-shrink:0; }
+.kks-more { display:block; font-size:0.66rem; color:#FBC213; text-decoration:none; margin-top:3px; }
+.kks-tot { font-size:0.66rem; color:#bbb; margin-top:4px; border-top:1px solid #3a3a3c; padding-top:3px; }
+.kks-empty { font-size:0.7rem; color:#999; }
+.kks-wait { font-size:0.68rem; color:#FBC213; margin-top:2px; }
+.kks-loading { opacity:.5; pointer-events:none; }
+@media (max-width: 991.98px) { .kks-card { display:block; } }
 </style>
 
 <div class="km-hd">
@@ -137,6 +162,11 @@
         <a href="{{ url_for('add_payment') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-cash"></i> Ödeme Gir</a>
         <a href="{{ url_for('manual_irsaliye_add') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-truck"></i> İrsaliye Kes</a>
 
+        <div class="kks" id="kks">
+            <h6 style="text-transform:none;letter-spacing:0;font-size:0.8rem;">📦 Bu ay alınan siparişler · kullanıcı bazında</h6>
+            <div id="kks-body">{% set ks = ks %}{% include "_km_kullanici_siparisleri.html" %}</div>
+        </div>
+
         <div class="km-side-info">
             {% if production_cycle_customers %}
             <div class="fw-bold mb-1" style="color:#F5B800;">Sipariş Zamanı Gelen</div>
@@ -155,4 +185,27 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var body = document.getElementById('kks-body');
+    if (!body) return;
+    // Hizli art arda tiklamada YAVAS gelen eski cevap yeni secimin ustune
+    // yazmasin diye sadece EN SON istegin cevabi uygulanir.
+    var son = 0;
+    body.addEventListener('click', function (e) {
+        var b = e.target.closest('.kks-btn');
+        if (!b) return;
+        var benim = ++son;
+        body.classList.add('kks-loading');
+        fetch('{{ url_for("api_anasayfa_aylik_siparisler") }}?ay=' + encodeURIComponent(b.dataset.ay || ''), {credentials: 'same-origin'})
+            .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+            .then(function (h) { if (benim === son) body.innerHTML = h; })
+            .catch(function () {})
+            .then(function () { if (benim === son) body.classList.remove('kks-loading'); });
+    });
+})();
+</script>
 {% endblock %}
