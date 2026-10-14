@@ -18,3 +18,6 @@ Bu dosya 2026-10-13 denetimi sırasında, denetimde incelenen A–I maddelerinin
 | 2026-10-14 | PAKET A İş 2: yeni tasarımda küçük düzeltmeler (Ürün tipi kaldırma, Numune gizleme, TR sayı biçimi) | `e31b7e7` | CANLIDA DOĞRULANMADI (giriş engelli, yerelde ✅) |
 | 2026-10-14 | PAKET A İş 3: Ödeme Şekli yeniden tasarım (%/TL peşinat, sayısal vade, otomatik bakiye) | `699c131` | CANLIDA DOĞRULANMADI (giriş engelli, yerelde ✅) |
 | 2026-10-14 | PAKET A İş 4: MİSS Kuruyemiş teşhisi (salt okuma) — sonuç: mükerrer müşteri kaydı, bağlantı bozuk değil | — (kod değişikliği yok, sadece rapor) | n/a |
+| 2026-10-14 | PAKET B İş B1: Havale/EFT seçilince IBAN önizleme (mavi kutu) + PDF'de sarı IBAN kutusu (TR+EN, yeni tasarım) | `d48e1f2` | CANLIDA DOĞRULANMADI (giriş engelli, yerelde ✅) |
+| 2026-10-14 | PAKET B İş B2: Manuel irsaliye düzenleme + faturayla iki yönlü eşitleme + fark raporu + kilit (muhasebeye gönderildi) | `c3ebec3` | CANLIDA DOĞRULANMADI (giriş engelli, yerelde ✅) |
+| 2026-10-14 | PAKET B İş B3: Teklif formunda numaralı ürün kartları (CompanySettings.teklif_formu_gorunumu, Kart/Eski Tablo) | `168b642`, `1213ed1` | CANLIDA DOĞRULANMADI (giriş engelli, yerelde ✅ — kart/tablo veri özdeşliği, Kese/Doypack Seç, mobil, Eski Tablo tüm testleri geçti) |
