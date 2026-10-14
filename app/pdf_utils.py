@@ -231,6 +231,54 @@ def _birim_fiyat_tr(value):
     return f'{int_part_fmt},{dec_part}'
 
 
+# ===== PAKET B Is B5 (2026-10-14): Ingilizce teklif PDF'i - sayi/etiket
+# yardimcilari. SADECE _generate_deal_pdf_yeni(lang='en') tarafindan
+# kullanilir - TR yolunu (yukaridaki _money_tr/_miktar_tr/_birim_fiyat_tr)
+# ve Klasik tasarimi HIC ETKILEMEZ. =====
+
+def _money_en(value):
+    """EN para formati: bin ayraci virgul, ondalik nokta, DAIMA 2 ondalik
+    (1700 -> '1,700.00') - _money_tr ile AYNI yuvarlama, sadece ayrac ters."""
+    value = round(float(value), 2)
+    sign = '-' if value < 0 else ''
+    return sign + f'{abs(value):,.2f}'
+
+
+def _miktar_en(value):
+    """EN miktar formati - _miktar_tr ile AYNI mantik (tam sayida ondalik
+    yok, kusuratli olanda gereksiz sifirlar kirpilir), sadece ayraclar EN."""
+    value = float(value)
+    if value == int(value):
+        return f'{int(value):,}'
+    s = f'{value:,.2f}'
+    int_part, dec_part = s.split('.')
+    dec_part = dec_part.rstrip('0') or '0'
+    return f'{int_part}.{dec_part}'
+
+
+def _birim_fiyat_en(value):
+    """EN birim fiyat formati - _birim_fiyat_tr ile AYNI hassasiyet kurali
+    (en az 2, en fazla 4 ondalik), sadece ayraclar EN."""
+    value = float(value)
+    s = f'{value:.4f}'
+    int_part, dec_part = s.split('.')
+    while len(dec_part) > 2 and dec_part.endswith('0'):
+        dec_part = dec_part[:-1]
+    return f'{int(int_part):,}.{dec_part}'
+
+
+_UNIT_LABELS_EN = {'adet': 'pcs', 'kg': 'kg', 'mt': 'm', 'lt': 'L', 'm2': 'm²', 'set': 'set'}
+
+_PAYMENT_METHOD_LABELS_EN = {
+    'havale': 'Bank transfer', 'nakit': 'Cash', 'cek': 'Cheque',
+    'senet': 'Promissory note', 'kredi_karti': 'Credit card',
+}
+
+
+def _unit_en(unit):
+    return _UNIT_LABELS_EN.get(unit, unit)
+
+
 def _kagit_cinsi_farkli_mi(description, kagit_cinsi):
     """Is 2a: kagit cinsi degeri urun adiyla AYNIYSA (buyuk/kucuk harf ve
     bosluk farki haric) o satir basilmaz - tekrar olmasin diye."""
@@ -282,7 +330,7 @@ def _kur_adi_yeni():
     return 'döviz satış'
 
 
-def _kur_notu_yeni(deal, kur_tarihi_str):
+def _kur_notu_yeni(deal, kur_tarihi_str, lang='tr'):
     """Dovizli kalem varsa kur notu metnini doner, yoksa None.
 
     PAKET B Is B4 (Kalem bazli doviz, Asama 1) - deal.para_birimi 'TRY' olsa
@@ -290,16 +338,24 @@ def _kur_notu_yeni(deal, kur_tarihi_str):
     bu, teklif seviyesi dovizden (asagidaki ESKI dal) AYRI ve ONUNLA AYNI
     teklifte BIRLIKTE kullanilmaz - bkz. app/models.py Deal.calculate_totals).
     Bu durumda kullanilan para birimlerinin HEPSI icin (1 veya 2) tek notta
-    listelenir. Eski (teklif seviyesi) dal DEGISTIRILMEDI."""
+    listelenir. Eski (teklif seviyesi) dal DEGISTIRILMEDI.
+
+    PAKET B Is B5 - lang='en' ise AYNI mantik, Ingilizce metin."""
     if deal.para_birimi == 'TRY':
         kullanilan = []
         if deal.kur_usd and any(i.para_birimi == 'USD' for i in deal.items):
-            kullanilan.append(f"1 USD = {deal.kur_usd:,.2f} TL")
+            kullanilan.append(f"1 USD = {deal.kur_usd:,.2f} TRY" if lang == 'en' else f"1 USD = {deal.kur_usd:,.2f} TL")
         if deal.kur_eur and any(i.para_birimi == 'EUR' for i in deal.items):
-            kullanilan.append(f"1 EUR = {deal.kur_eur:,.2f} TL")
+            kullanilan.append(f"1 EUR = {deal.kur_eur:,.2f} TRY" if lang == 'en' else f"1 EUR = {deal.kur_eur:,.2f} TL")
         if not kullanilan:
             return None
         tarih_str = deal.kur_tarihi.strftime('%d.%m.%Y') if deal.kur_tarihi else kur_tarihi_str
+        if lang == 'en':
+            kaynak = 'TCMB' if deal.kur_turu == 'tcmb' else 'the stated'
+            return (
+                f"The TRY equivalent of foreign-currency items was calculated using the {kaynak} rate "
+                f"dated {tarih_str} ({' · '.join(kullanilan)}). The grand total is in TRY."
+            )
         kaynak = 'TCMB' if deal.kur_turu == 'tcmb' else 'belirtilen'
         return (
             f"Dövizli kalemlerin TL karşılığı {tarih_str} tarihli {kaynak} kur ile hesaplanmıştır "
@@ -307,6 +363,12 @@ def _kur_notu_yeni(deal, kur_tarihi_str):
         )
     if not deal.kullanilan_kur:
         return None
+    if lang == 'en':
+        return (
+            f"The exchange rate is the TCMB {_kur_adi_yeni()} rate dated {kur_tarihi_str} "
+            f"(1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TRY). Foreign-currency items are "
+            f"converted to TRY at the TCMB rate on the payment date."
+        )
     return (
         f"Döviz kuru {kur_tarihi_str} tarihli TCMB {_kur_adi_yeni()} kurudur "
         f"(1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TL). Döviz kalemler "
@@ -322,16 +384,34 @@ _DEFAULT_TERMS_YENI = [
     "Teslim yeri: Konya fabrika teslim.",
 ]
 
+# PAKET B Is B5 - varsayilan sartlarin Ingilizce karsiligi. SADECE
+# company.teklif_sartlari BOS ise kullanilir (KARAR: kullanicinin kendi
+# yazdigi ozel sartlar - genelde Turkce - lang='en' olsa da CEVRILMEZ,
+# oldugu gibi basilir; bkz. _build_terms_yeni).
+_DEFAULT_TERMS_YENI_EN = [
+    "This quotation is valid until {gecerlilik}.",
+    "{kur_notu}",
+    "Production starts after sample / print proof approval.",
+    "A ±10% production tolerance applies to quantities.",
+    "Delivery point: Ex-works, Konya factory.",
+]
 
-def _build_terms_yeni(deal, company):
+
+def _build_terms_yeni(deal, company, lang='tr'):
     """Sirket ayarlarindaki teklif_sartlari (serbest metin, satir basina
     bir madde) doluysa onu, yoksa _DEFAULT_TERMS_YENI'yi kullanir.
     {gecerlilik}/{kur_notu} yer tutucularini doldurur; kur_notu yoksa
-    (TRY teklif) o satiri tamamen ATAR (numaralar kayar)."""
+    (TRY teklif) o satiri tamamen ATAR (numaralar kayar).
+
+    PAKET B Is B5 - lang='en' ise varsayilan sartlar _DEFAULT_TERMS_YENI_EN
+    olur VE tarih biçimi degismez (dd.mm.yyyy, TR/EN farki yok). KARAR:
+    company.teklif_sartlari DOLUYSA (kullanicinin kendi, genelde Turkce
+    metni) lang ne olursa olsun OLDUGU GIBI basilir - otomatik ceviri
+    YAPILMAZ (yanlis/riskli ceviri ihtimaline karsi guvenli varsayilan)."""
     gecerlilik_str = deal.valid_until.strftime('%d.%m.%Y') if deal.valid_until else '-'
     kur_tarihi = deal.deal_date or deal.created_at.date()
     kur_tarihi_str = kur_tarihi.strftime('%d.%m.%Y') if kur_tarihi else '-'
-    kur_notu = _kur_notu_yeni(deal, kur_tarihi_str)
+    kur_notu = _kur_notu_yeni(deal, kur_tarihi_str, lang=lang)
 
     if company.teklif_sartlari and company.teklif_sartlari.strip():
         raw_lines = [l.strip() for l in company.teklif_sartlari.splitlines() if l.strip()]
@@ -339,7 +419,7 @@ def _build_terms_yeni(deal, company):
         if kur_notu and not has_kur_placeholder:
             raw_lines.append('{kur_notu}')
     else:
-        raw_lines = list(_DEFAULT_TERMS_YENI)
+        raw_lines = list(_DEFAULT_TERMS_YENI_EN if lang == 'en' else _DEFAULT_TERMS_YENI)
 
     result = []
     for line in raw_lines:
@@ -352,16 +432,21 @@ def _build_terms_yeni(deal, company):
     return result
 
 
-def generate_deal_pdf(deal):
+def generate_deal_pdf(deal, lang='tr'):
     """2026-10-13 (Teklif PDF yeni tasarim): CompanySettings.teklif_pdf_tasarim
     ayarina gore 'yeni' (varsayilan, NULL dahil) veya 'klasik' tasarimi
     cagiran dispatcher. Klasik secilirse eski PDF BIREBIR AYNI cikar -
     _generate_deal_pdf_klasik() asagida, eski generate_deal_pdf() govdesinin
-    degistirilmemis halidir."""
+    degistirilmemis halidir.
+
+    PAKET B Is B5 (2026-10-14): 'lang' parametresi - 'tr' (varsayilan,
+    eski cagrilar/ default) veya 'en'. KARAR: Ingilizce SADECE yeni
+    tasarimda var - Klasik tasarim hic degistirilmedi, lang='en' ile
+    cagrilsa bile klasik seciliyse YOK SAYILIR (Klasik hep TR basar)."""
     company = _get_company_settings_for_pdf()
     if company.teklif_pdf_tasarim == 'klasik':
         return _generate_deal_pdf_klasik(deal)
-    return _generate_deal_pdf_yeni(deal)
+    return _generate_deal_pdf_yeni(deal, lang=lang if lang in ('tr', 'en') else 'tr')
 
 
 def _generate_deal_pdf_klasik(deal):
@@ -852,9 +937,11 @@ def _draw_watermark_yeni(canvas_obj, text):
     canvas_obj.restoreState()
 
 
-def _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages):
+def _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages, lang='tr'):
     """Sayfa dibinde SABIT alt bilgi bandi - antrasit zemin, ustunde sari
-    cizgi. doc.build() canvasmaker'i uzerinden her sayfada cagirilir."""
+    cizgi. doc.build() canvasmaker'i uzerinden her sayfada cagirilir.
+    PAKET B Is B5 - lang='en' ise 'Sayfa X/Y'/'ORİJİNAL BELGE' Ingilizce
+    basilir, sirket adi/adres gibi veri alanlari degismez."""
     band_h = 0.9*cm
     y0 = doc.bottomMargin - 0.35*cm
     canvas_obj.saveState()
@@ -872,7 +959,7 @@ def _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages):
     canvas_obj.setFillColor(colors.HexColor('#cccccc'))
     unvan_bits = [b for b in [company.company_name, 'Karatay / KONYA'] if b]
     canvas_obj.drawString(doc.leftMargin + 0.35*cm + left_w, y0 + band_h/2 - 3, '· ' + ' · '.join(unvan_bits))
-    right_text = f"{deal.display_no} · Sayfa {page_num}/{total_pages}"
+    right_text = f"{deal.display_no} · Page {page_num}/{total_pages}" if lang == 'en' else f"{deal.display_no} · Sayfa {page_num}/{total_pages}"
     canvas_obj.setFont('Vera-Bold', 9)
     canvas_obj.setFillColor(colors.white)
     canvas_obj.drawRightString(A4[0] - doc.rightMargin - 0.25*cm, y0 + band_h/2 - 3, right_text)
@@ -882,7 +969,7 @@ def _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages):
     canvas_obj.saveState()
     canvas_obj.setFont('Vera', 5.5)
     canvas_obj.setFillColor(_Y_MIKRO)
-    unit = f"{left_text} · ORİJİNAL BELGE · {deal.display_no} · "
+    unit = f"{left_text} · ORIGINAL DOCUMENT · {deal.display_no} · " if lang == 'en' else f"{left_text} · ORİJİNAL BELGE · {deal.display_no} · "
     unit_w = canvas_obj.stringWidth(unit, 'Vera', 5.5)
     available_w = A4[0] - 1.0*cm
     repeats = max(1, int(available_w // unit_w) + 1) if unit_w > 0 else 1
@@ -918,12 +1005,62 @@ class _DealPdfCanvasYeni(_PDFCanvas):
         _PDFCanvas.save(self)
 
 
-def _generate_deal_pdf_yeni(deal):
+_YENI_PDF_LABELS = {
+    'tr': {
+        'title': 'TEKLİF', 'teklif_no': 'Teklif No:', 'tarih': 'Tarih:', 'gecerlilik': 'Geçerlilik:',
+        'hazirlayan': 'Hazırlayan:', 'vd': 'V.D.:', 'vno': 'V.No:', 'tel': 'Tel:', 'faks': 'Faks:',
+        'musteri_bilgi': 'MÜŞTERİYE AİT BİLGİLER', 'odeme_sekli': 'ÖDEME ŞEKLİ', 'yetkili': 'Yetkili:',
+        'telefon': 'Telefon:', 'adres': 'Adres:', 'vade': 'Vade:', 'pesin': 'Peşin', 'odeme': 'Ödeme:',
+        'doviz_kuru': 'Döviz kuru:', 'banka': 'Banka:', 'alici': 'Alıcı:',
+        'urun_fiyat_basligi': 'ÜRÜN VE FİYAT BİLGİLERİ', 'kdv_haric_not': 'Fiyatlar KDV hariçtir',
+        'h_numune': 'Numune', 'h_urun': 'Ürün ve teknik özellikler', 'h_miktar': 'Miktar',
+        'h_fiyat': 'Birim fiyat', 'h_teslim': 'Teslim', 'h_tutar': 'Tutar\n(KDV hariç)',
+        'kagit_cinsi': 'Kağıt cinsi:', 'olcu': 'Ölçü:', 'en': 'En', 'boy': 'Boy', 'korugu': 'Körük',
+        'baski': 'Baskı:', 'adet_basi': 'Adet başı ≈', 'aciklama_basligi': 'A Ç I K L A M A',
+        'teklif_sartlari_basligi': 'TEKLİF ŞARTLARI', 'toplam_haric': 'Toplam (KDV hariç)',
+        'kdv': 'KDV', 'genel_toplam': 'GENEL TOPLAM', 'yalniz': 'Yalnız:',
+        'henuz_urun_yok': '<i>Henüz ürün eklenmemiş.</i>', 'teklifi_veren': 'Teklifi veren',
+        'musteri_onayi': 'Müşteri onayı', 'kase_imza': 'Kaşe / İmza:', 'ad_soyad': 'Ad Soyad:',
+        'tl': 'TL',
+    },
+    'en': {
+        'title': 'QUOTATION', 'teklif_no': 'Quotation No:', 'tarih': 'Date:', 'gecerlilik': 'Valid until:',
+        'hazirlayan': 'Prepared by:', 'vd': 'Tax Office:', 'vno': 'Tax No:', 'tel': 'Tel:', 'faks': 'Fax:',
+        'musteri_bilgi': 'CUSTOMER INFORMATION', 'odeme_sekli': 'PAYMENT TERMS', 'yetkili': 'Contact:',
+        'telefon': 'Phone:', 'adres': 'Address:', 'vade': 'Payment due:', 'pesin': 'Immediate', 'odeme': 'Method:',
+        'doviz_kuru': 'Exchange rate:', 'banka': 'Bank:', 'alici': 'Beneficiary:',
+        'urun_fiyat_basligi': 'PRODUCT AND PRICE DETAILS', 'kdv_haric_not': 'Prices exclude VAT',
+        'h_numune': 'Sample', 'h_urun': 'Product & specifications', 'h_miktar': 'Quantity',
+        'h_fiyat': 'Unit price', 'h_teslim': 'Delivery', 'h_tutar': 'Amount\n(excl. VAT)',
+        'kagit_cinsi': 'Paper type:', 'olcu': 'Size:', 'en': 'Width', 'boy': 'Height', 'korugu': 'Gusset',
+        'baski': 'Print:', 'adet_basi': 'Per piece ≈', 'aciklama_basligi': 'N O T E S',
+        'teklif_sartlari_basligi': 'TERMS & CONDITIONS', 'toplam_haric': 'Subtotal (excl. VAT)',
+        'kdv': 'VAT', 'genel_toplam': 'GRAND TOTAL', 'yalniz': None,
+        'henuz_urun_yok': '<i>No items added yet.</i>', 'teklifi_veren': 'Issued by',
+        'musteri_onayi': 'Customer approval', 'kase_imza': 'Stamp / Signature:', 'ad_soyad': 'Name:',
+        'tl': 'TRY',
+    },
+}
+
+
+def _generate_deal_pdf_yeni(deal, lang='tr'):
     """2026-10-13: Teklif PDF - YENİ tasarim (gercek logo renkleri: sari
     #FBC213 + antrasit #353639, kirmizi YOK). CompanySettings.teklif_pdf_tasarim
     'klasik' ise bu fonksiyon hic cagrilmaz (bkz. generate_deal_pdf
     dispatcher) - klasik _generate_deal_pdf_klasik() TAMAMEN ayri ve
-    degismeden kalir. PEŞİNAT/BAKİYE/KALAN bu tasarimda HİÇ BASILMAZ."""
+    degismeden kalir. PEŞİNAT/BAKİYE/KALAN bu tasarimda HİÇ BASILMAZ.
+
+    PAKET B Is B5 (2026-10-14): lang='tr' (varsayilan - TUM eski
+    cagrilar/davranis AYNEN korunur) veya 'en'. Etiketler _YENI_PDF_LABELS
+    sozlugunden (t), sayi bicimi lang='en' ise _money_en/_miktar_en/
+    _birim_fiyat_en'den (money/qty/price degiskenleri) gelir. KARAR: EN
+    modda tutar-yaziyla (Yalnız: ...) satiri HIC BASILMAZ (gorev tanimi
+    geregi) - t['yalniz'] None oldugunda asagida atlanir."""
+    t = _YENI_PDF_LABELS['en' if lang == 'en' else 'tr']
+    money = _money_en if lang == 'en' else _money_tr
+    qty_fmt = _miktar_en if lang == 'en' else _miktar_tr
+    price_fmt = _birim_fiyat_en if lang == 'en' else _birim_fiyat_tr
+    unit_label = _unit_en if lang == 'en' else (lambda u: u)
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.4*cm, leftMargin=1.4*cm, topMargin=1.6*cm, bottomMargin=2.0*cm)
     content_w = A4[0] - doc.leftMargin - doc.rightMargin
@@ -963,25 +1100,30 @@ def _generate_deal_pdf_yeni(deal):
     company_block = [Paragraph(company.company_name or 'Lema Ambalaj', company_name_style)]
     if company.address:
         company_block.append(Paragraph(company.address.replace('\n', '<br/>'), gray_small))
-    contact1 = [b for b in [f"Tel: {company.phone}" if company.phone else None,
-                             f"Faks: {company.fax}" if company.fax else None] if b]
+    contact1 = [b for b in [f"{t['tel']} {company.phone}" if company.phone else None,
+                             f"{t['faks']} {company.fax}" if company.fax else None] if b]
     if contact1:
         company_block.append(Paragraph(' · '.join(contact1), gray_small))
     contact2 = [b for b in [company.email, company.website] if b]
     if contact2:
         company_block.append(Paragraph(' · '.join(contact2), gray_small))
     if company.tax_office or company.tax_id:
-        company_block.append(Paragraph(f"V.D.: {company.tax_office or '-'} · V.No: {company.tax_id or '-'}", gray_small))
+        company_block.append(Paragraph(f"{t['vd']} {company.tax_office or '-'} · {t['vno']} {company.tax_id or '-'}", gray_small))
 
     teklif_tarihi = deal.deal_date or deal.created_at.date()
     seller_name = (deal.seller.full_name or deal.seller.username) if deal.seller else '-'
+    # Is B5: harf araligi (' '.join(list(...))) sadece KISA TR basligina
+    # ('TEKLİF', 6 harf) uyuyordu - EN 'QUOTATION' (9 harf) ayni 6cm
+    # kutuda cift satira bolunup kiriliyordu (Playwright/pypdf testiyle
+    # gorulup duzeltildi). EN icin harf araligi KULLANILMAZ.
+    title_text = ' '.join(list(t['title'])) if lang == 'tr' else t['title']
     right_block = [
-        Paragraph(' '.join(list('TEKLİF')), title_style),
+        Paragraph(title_text, title_style),
         Spacer(1, 2*mm),
-        Paragraph(f"Teklif No: {deal.display_no}", meta_bold_style),
-        Paragraph(f"Tarih: {teklif_tarihi.strftime('%d.%m.%Y') if teklif_tarihi else '-'}", meta_style),
-        Paragraph(f"Geçerlilik: {deal.valid_until.strftime('%d.%m.%Y') if deal.valid_until else '-'}", meta_bold_style),
-        Paragraph(f"Hazırlayan: {seller_name}", meta_style),
+        Paragraph(f"{t['teklif_no']} {deal.display_no}", meta_bold_style),
+        Paragraph(f"{t['tarih']} {teklif_tarihi.strftime('%d.%m.%Y') if teklif_tarihi else '-'}", meta_style),
+        Paragraph(f"{t['gecerlilik']} {deal.valid_until.strftime('%d.%m.%Y') if deal.valid_until else '-'}", meta_bold_style),
+        Paragraph(f"{t['hazirlayan']} {seller_name}", meta_style),
     ]
 
     logo_w = 4.6*cm
@@ -1049,23 +1191,39 @@ def _generate_deal_pdf_yeni(deal):
     if customer.company_name:
         customer_lines.append(f"<b>{_clean_for_pdf(customer.company_name)}</b>")
     if customer_person_name:
-        customer_lines.append(f"Yetkili: {customer_person_name}")
+        customer_lines.append(f"{t['yetkili']} {customer_person_name}")
     if customer.phone:
-        customer_lines.append(f"Telefon: {customer.phone}")
+        customer_lines.append(f"{t['telefon']} {customer.phone}")
     if customer.tax_office or customer.tax_id:
-        customer_lines.append(f"V.D.: {customer.tax_office or '-'} · V.No: {customer.tax_id or '-'}")
+        customer_lines.append(f"{t['vd']} {customer.tax_office or '-'} · {t['vno']} {customer.tax_id or '-'}")
     adres = customer.company_address or customer.address
     if adres:
-        customer_lines.append(f"Adres: {adres}")
+        customer_lines.append(f"{t['adres']} {adres}")
 
     kur_tarihi = deal.deal_date or deal.created_at.date()
     kur_tarihi_str = kur_tarihi.strftime('%d.%m.%Y') if kur_tarihi else '-'
-    payment_lines = [f"Vade: {deal.vade_gun_metni or 'Peşin'}"]
-    odeme_labels = deal.odeme_yontemi_listesi
+    # PAKET B Is B5: Vade/Odeme Yontemi metinleri, deal.vade_gun_metni/
+    # odeme_yontemi_listesi (TR, baska yerlerde de kullanilan PAYLASILAN
+    # property'ler) DEGISTIRILMEDEN, lang='en' icin burada AYRICA turetilir.
+    if lang == 'en':
+        if deal.odeme_vade_gun is not None:
+            vade_display = t['pesin'] if deal.odeme_vade_gun == 0 else f'{deal.odeme_vade_gun} days'
+        else:
+            vade_display = deal.vade_gun or t['pesin']
+        odeme_codes = [c.strip() for c in (deal.odeme_yontemi or '').split(',') if c.strip()]
+        odeme_labels = [_PAYMENT_METHOD_LABELS_EN[c] for c in odeme_codes if c in _PAYMENT_METHOD_LABELS_EN]
+    else:
+        vade_display = deal.vade_gun_metni or t['pesin']
+        odeme_labels = deal.odeme_yontemi_listesi
+    payment_lines = [f"{t['vade']} {vade_display}"]
     if odeme_labels:
-        payment_lines.append(f"Ödeme: {' · '.join(odeme_labels)}")
+        payment_lines.append(f"{t['odeme']} {' · '.join(odeme_labels)}")
     if deal.para_birimi != 'TRY' and deal.kullanilan_kur:
-        payment_lines.append(f"Döviz kuru: 1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TL · TCMB {kur_tarihi_str}")
+        # NOT: bu satir TARIHSEL olarak hep Python'un ':,.2f' bicimini
+        # kullandi (_money_tr DEGIL) - TR davranisini AYNEN korumak icin
+        # lang='tr' dalinda bu bicim DEGISTIRILMEDI, SADECE 'en' icin
+        # ayraclar EN'e (zaten ayni ':,.2f') - tek fark 'TL' -> 'TRY' etiketi.
+        payment_lines.append(f"{t['doviz_kuru']} 1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} {t['tl']} · TCMB {kur_tarihi_str}")
 
     customer_w = content_w * 0.54
     payment_w = content_w - customer_w
@@ -1076,7 +1234,7 @@ def _generate_deal_pdf_yeni(deal):
     if 'havale' in (deal.odeme_yontemi or '').split(','):
         iban_rows = []
         if company.banka_adi:
-            iban_rows.append(Paragraph(f"Banka: {_escape(company.banka_adi)}", table_cell_style))
+            iban_rows.append(Paragraph(f"{t['banka']} {_escape(company.banka_adi)}", table_cell_style))
         if company.iban:
             iban_rows.append(Paragraph(f"IBAN: <font face='Courier'>{_iban_grupla(company.iban)}</font>", table_cell_style))
         if deal.para_birimi == 'USD' and company.iban_usd:
@@ -1084,7 +1242,7 @@ def _generate_deal_pdf_yeni(deal):
         if deal.para_birimi == 'EUR' and company.iban_eur:
             iban_rows.append(Paragraph(f"IBAN (EUR): <font face='Courier'>{_iban_grupla(company.iban_eur)}</font>", table_cell_style))
         if company.company_name:
-            iban_rows.append(Paragraph(f"Alıcı: {_escape(company.company_name)}", table_cell_style))
+            iban_rows.append(Paragraph(f"{t['alici']} {_escape(company.company_name)}", table_cell_style))
         if iban_rows:
             iban_box = Table([[r] for r in iban_rows], colWidths=[payment_w - 24])
             iban_box.setStyle(TableStyle([
@@ -1094,8 +1252,8 @@ def _generate_deal_pdf_yeni(deal):
             ]))
             payment_lines.append(iban_box)
 
-    customer_box = _box('MÜŞTERİYE AİT BİLGİLER', customer_lines, customer_w)
-    payment_box = _box('ÖDEME ŞEKLİ', payment_lines, payment_w)
+    customer_box = _box(t['musteri_bilgi'], customer_lines, customer_w)
+    payment_box = _box(t['odeme_sekli'], payment_lines, payment_w)
     boxes_table = Table([[customer_box, payment_box]], colWidths=[customer_w, payment_w])
     boxes_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -1106,15 +1264,15 @@ def _generate_deal_pdf_yeni(deal):
     elements.append(Spacer(1, 4*mm))
 
     # ===== 4) ÜRÜN VE FİYAT BİLGİLERİ basligi =====
-    heading_row = Table([[Paragraph('ÜRÜN VE FİYAT BİLGİLERİ', ParagraphStyle('YProdHead', parent=bold, fontSize=9.5)),
-                           Paragraph('Fiyatlar KDV hariçtir', ParagraphStyle('YProdNote', parent=gray_small, alignment=2))]],
+    heading_row = Table([[Paragraph(t['urun_fiyat_basligi'], ParagraphStyle('YProdHead', parent=bold, fontSize=9.5)),
+                           Paragraph(t['kdv_haric_not'], ParagraphStyle('YProdNote', parent=gray_small, alignment=2))]],
                          colWidths=[content_w * 0.6, content_w * 0.4])
     heading_row.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'BOTTOM'), ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
     elements.append(heading_row)
     elements.append(Spacer(1, 2*mm))
 
     # ===== 5) ÜRÜN TABLOSU =====
-    para_sym = 'TL' if deal.para_birimi == 'TRY' else deal.para_birimi_sembol
+    para_sym = t['tl'] if deal.para_birimi == 'TRY' else deal.para_birimi_sembol
     deal_delivery_fallback = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
 
     if deal.items:
@@ -1123,10 +1281,10 @@ def _generate_deal_pdf_yeni(deal):
         has_any_numune = any(item.numune_gorseli for item in deal.items)
         if has_any_numune:
             col_widths = [0.9*cm, 1.8*cm, 6.3*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
-            headers = ['#', 'Numune', 'Ürün ve teknik özellikler', 'Miktar', 'Birim fiyat', 'Teslim', 'Tutar\n(KDV hariç)']
+            headers = ['#', t['h_numune'], t['h_urun'], t['h_miktar'], t['h_fiyat'], t['h_teslim'], t['h_tutar']]
         else:
             col_widths = [0.9*cm, 8.1*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
-            headers = ['#', 'Ürün ve teknik özellikler', 'Miktar', 'Birim fiyat', 'Teslim', 'Tutar\n(KDV hariç)']
+            headers = ['#', t['h_urun'], t['h_miktar'], t['h_fiyat'], t['h_teslim'], t['h_tutar']]
         data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style) for h in headers]]
 
         static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
@@ -1158,22 +1316,22 @@ def _generate_deal_pdf_yeni(deal):
             # urun adiyla (harf/bosluk farki haric) AYNIYSA basilmaz.
             urun_lines = [f"<b>{_escape(item.description)}</b>"]
             if _kagit_cinsi_farkli_mi(item.description, item.kagit_cinsi):
-                urun_lines.append(f"<font color='#666666' size=6.8>Kağıt cinsi: {_escape(item.kagit_cinsi)}</font>")
+                urun_lines.append(f"<font color='#666666' size=6.8>{t['kagit_cinsi']} {_escape(item.kagit_cinsi)}</font>")
             olcu_bits = []
             if item.en:
-                olcu_bits.append(f"En {_escape(item.en)}")
+                olcu_bits.append(f"{t['en']} {_escape(item.en)}")
             if item.boy:
-                olcu_bits.append(f"Boy {_escape(item.boy)}")
+                olcu_bits.append(f"{t['boy']} {_escape(item.boy)}")
             if item.korugu:
-                olcu_bits.append(f"Körük {_escape(item.korugu)}")
+                olcu_bits.append(f"{t['korugu']} {_escape(item.korugu)}")
             if olcu_bits:
-                urun_lines.append(f"<font color='#666666' size=6.8>Ölçü: {' · '.join(olcu_bits)} cm</font>")
+                urun_lines.append(f"<font color='#666666' size=6.8>{t['olcu']} {' · '.join(olcu_bits)} cm</font>")
             if item.renk:
-                urun_lines.append(f"<font color='#666666' size=6.8>Baskı: {_escape(item.renk)}</font>")
+                urun_lines.append(f"<font color='#666666' size=6.8>{t['baski']} {_escape(item.renk)}</font>")
             is_doviz = deal.para_birimi != 'TRY' and deal.kullanilan_kur
             if is_doviz and item.unit == 'adet':
                 adet_basi_tl = item.unit_price * deal.kullanilan_kur
-                urun_lines.append(f"<b>Adet başı ≈ {_money_tr(adet_basi_tl)} TL</b>")
+                urun_lines.append(f"<b>{t['adet_basi']} {money(adet_basi_tl)} {t['tl']}</b>")
             urun_cell = Paragraph('<br/>'.join(urun_lines), table_cell_style)
 
             # PAKET B Is B4 (Kalem bazli doviz, Asama 1) - item.para_birimi
@@ -1188,17 +1346,18 @@ def _generate_deal_pdf_yeni(deal):
                 item_kur = deal.kur_usd if item.para_birimi == 'USD' else deal.kur_eur
 
             # Birim fiyat hucresi - Is 2c: en az 2, en fazla 4 ondalik
+            item_unit_label = unit_label(item.unit)
             if item_doviz_sym:
-                fiyat_text = f"{_birim_fiyat_tr(item.unit_price)} {item_doviz_sym}/{item.unit}"
+                fiyat_text = f"{price_fmt(item.unit_price)} {item_doviz_sym}/{item_unit_label}"
                 if item_kur:
-                    fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {_money_tr(item.unit_price * item_kur)} TL</font>"
+                    fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {money(item.unit_price * item_kur)} {t['tl']}</font>"
             elif deal.para_birimi == 'TRY':
-                fiyat_text = f"{_birim_fiyat_tr(item.unit_price)} TL/{item.unit}"
+                fiyat_text = f"{price_fmt(item.unit_price)} {t['tl']}/{item_unit_label}"
             else:
-                fiyat_text = f"{_birim_fiyat_tr(item.unit_price)} {para_sym}"
+                fiyat_text = f"{price_fmt(item.unit_price)} {para_sym}"
                 if deal.kullanilan_kur:
                     tl_karsilik = item.unit_price * deal.kullanilan_kur
-                    fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {_money_tr(tl_karsilik)} TL</font>"
+                    fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {money(tl_karsilik)} {t['tl']}</font>"
             fiyat_cell = Paragraph(fiyat_text, table_cell_center_style)
 
             # Teslim hucresi
@@ -1210,22 +1369,22 @@ def _generate_deal_pdf_yeni(deal):
             # dovizli kalemler HER ZAMAN TL gosterir (alttaki Ara Toplam/
             # Genel Toplam da TL - Deal.calculate_totals ile AYNI rakam).
             if item_doviz_sym and item_kur:
-                tutar_text = f"{_money_tr(item.total_price * item_kur)} TL"
+                tutar_text = f"{money(item.total_price * item_kur)} {t['tl']}"
             elif item_doviz_sym:
-                tutar_text = f"{_money_tr(item.total_price)} {item_doviz_sym}"
+                tutar_text = f"{money(item.total_price)} {item_doviz_sym}"
             elif deal.para_birimi == 'TRY':
-                tutar_text = f"{_money_tr(item.total_price)} TL"
+                tutar_text = f"{money(item.total_price)} {t['tl']}"
             elif deal.kullanilan_kur:
-                tutar_text = f"{_money_tr(item.total_price * deal.kullanilan_kur)} TL"
+                tutar_text = f"{money(item.total_price * deal.kullanilan_kur)} {t['tl']}"
             else:
-                tutar_text = f"{_money_tr(item.total_price)} {para_sym}"
+                tutar_text = f"{money(item.total_price)} {para_sym}"
             tutar_cell = Paragraph(f"<b>{tutar_text}</b>", table_cell_center_style)
 
             row = [num_cell]
             if has_any_numune:
                 row.append(numune_flowable)
             row.append(urun_cell)
-            row.append(Paragraph(f"{_miktar_tr(item.quantity)} {item.unit}", table_cell_center_style))
+            row.append(Paragraph(f"{qty_fmt(item.quantity)} {item_unit_label}", table_cell_center_style))
             row.append(fiyat_cell)
             row.append(Paragraph(item_delivery_str, table_cell_center_style))
             row.append(tutar_cell)
@@ -1263,7 +1422,7 @@ def _generate_deal_pdf_yeni(deal):
                 'YAciklamaText', parent=normal, fontSize=8, leading=11)
             aciklama_stripe_w = 0.14*cm
             aciklama_content_w = content_w - aciklama_stripe_w
-            aciklama_rows = [['', Paragraph('A Ç I K L A M A', aciklama_title_style)]]
+            aciklama_rows = [['', Paragraph(t['aciklama_basligi'], aciklama_title_style)]]
             for line in _sanitize_pdf_free_text(deal.notes).split('\n'):
                 line_text = _escape(line) if line.strip() else '&nbsp;'
                 aciklama_rows.append(['', Paragraph(line_text, aciklama_text_style)])
@@ -1283,10 +1442,10 @@ def _generate_deal_pdf_yeni(deal):
             elements.append(Spacer(1, 4*mm))
 
         # ===== 6) ALT BÖLÜM: TEKLİF ŞARTLARI (sol) + TOPLAM (sag) =====
-        terms = _build_terms_yeni(deal, company)
+        terms = _build_terms_yeni(deal, company, lang=lang)
         terms_stripe_w = 0.16*cm
         terms_w = content_w * 0.55
-        terms_lines = [Paragraph(f"{i}. {t}", terms_style) for i, t in enumerate(terms, 1)]
+        terms_lines = [Paragraph(f"{i}. {term}", terms_style) for i, term in enumerate(terms, 1)]
         # Is B1 (2026-10-14): eski "BANKA · IBAN" satiri BURADAN KALDIRILDI -
         # IBAN artik SADECE ÖDEME ŞEKLİ kutusunda (Havale/EFT seciliyse) basiliyor.
         terms_content = Table([[l] for l in terms_lines], colWidths=[terms_w - terms_stripe_w - 10])
@@ -1294,7 +1453,7 @@ def _generate_deal_pdf_yeni(deal):
             ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
             ('TOPPADDING', (0, 0), (-1, -1), 1), ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
-        terms_title = Paragraph('TEKLİF ŞARTLARI', ParagraphStyle('YTermsTitle', parent=bold, fontSize=8.5))
+        terms_title = Paragraph(t['teklif_sartlari_basligi'], ParagraphStyle('YTermsTitle', parent=bold, fontSize=8.5))
         terms_box_inner = Table([[terms_title], [terms_content]], colWidths=[terms_w - terms_stripe_w - 10])
         terms_box_inner.setStyle(TableStyle([
             ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
@@ -1310,23 +1469,28 @@ def _generate_deal_pdf_yeni(deal):
 
         # Toplam kutusu - SADECE 3 satir
         if deal.para_birimi == 'TRY':
-            toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal, deal.vat_amount, deal.value, 'TL'
+            toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal, deal.vat_amount, deal.value, t['tl']
             tl_for_words = genel_toplam
         elif deal.kullanilan_kur:
             k = deal.kullanilan_kur
-            toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal * k, deal.vat_amount * k, deal.value * k, 'TL'
+            toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal * k, deal.vat_amount * k, deal.value * k, t['tl']
             tl_for_words = genel_toplam
         else:
             toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal, deal.vat_amount, deal.value, para_sym
             tl_for_words = None
+        # PAKET B Is B5: EN modda tutar-yaziyla HIC BASILMAZ (gorev tanimi
+        # geregi) - t['yalniz'] None oldugunda asagida atlaniyor.
+        if lang == 'en':
+            tl_for_words = None
 
+        vat_rate_label = f"{t['kdv']} ({deal.vat_rate:.0f}%)" if lang == 'en' else f"{t['kdv']} (%{deal.vat_rate:.0f})"
         totals_data = [
-            [Paragraph('Toplam (KDV hariç)', ParagraphStyle('YTotLabel', parent=normal, fontSize=8)),
-             Paragraph(f"{_money_tr(toplam_haric)} {toplam_sym}", ParagraphStyle('YTotVal', parent=normal, fontSize=8, alignment=2))],
-            [Paragraph(f"KDV (%{deal.vat_rate:.0f})", ParagraphStyle('YVatLabel', parent=normal, fontSize=8)),
-             Paragraph(f"{_money_tr(kdv)} {toplam_sym}", ParagraphStyle('YVatVal', parent=normal, fontSize=8, alignment=2))],
-            [Paragraph('GENEL TOPLAM', ParagraphStyle('YGrandLabel', parent=normal, fontName='Vera-Bold', fontSize=9.5, textColor=colors.white)),
-             Paragraph(f"{_money_tr(genel_toplam)} {toplam_sym}", ParagraphStyle('YGrandVal', parent=normal, fontName='Vera-Bold', fontSize=10, alignment=2, textColor=_Y_SARI))],
+            [Paragraph(t['toplam_haric'], ParagraphStyle('YTotLabel', parent=normal, fontSize=8)),
+             Paragraph(f"{money(toplam_haric)} {toplam_sym}", ParagraphStyle('YTotVal', parent=normal, fontSize=8, alignment=2))],
+            [Paragraph(vat_rate_label, ParagraphStyle('YVatLabel', parent=normal, fontSize=8)),
+             Paragraph(f"{money(kdv)} {toplam_sym}", ParagraphStyle('YVatVal', parent=normal, fontSize=8, alignment=2))],
+            [Paragraph(t['genel_toplam'], ParagraphStyle('YGrandLabel', parent=normal, fontName='Vera-Bold', fontSize=9.5, textColor=colors.white)),
+             Paragraph(f"{money(genel_toplam)} {toplam_sym}", ParagraphStyle('YGrandVal', parent=normal, fontName='Vera-Bold', fontSize=10, alignment=2, textColor=_Y_SARI))],
         ]
         toplam_w = content_w - terms_w - 6*mm
         totals_table = Table(totals_data, colWidths=[toplam_w * 0.5, toplam_w * 0.5])
@@ -1341,7 +1505,7 @@ def _generate_deal_pdf_yeni(deal):
         totals_wrapper = [totals_table]
         if tl_for_words is not None:
             totals_wrapper.append(Spacer(1, 2*mm))
-            totals_wrapper.append(Paragraph(f"Yalnız: {tutar_yaziyla(tl_for_words)}", italic_style))
+            totals_wrapper.append(Paragraph(f"{t['yalniz']} {tutar_yaziyla(tl_for_words)}", italic_style))
 
         bottom_table = Table([[terms_box, totals_wrapper]], colWidths=[terms_w, toplam_w])
         bottom_table.setStyle(TableStyle([
@@ -1351,7 +1515,7 @@ def _generate_deal_pdf_yeni(deal):
         ]))
         elements.append(bottom_table)
     else:
-        elements.append(Paragraph("<i>Henüz ürün eklenmemiş.</i>", normal))
+        elements.append(Paragraph(t['henuz_urun_yok'], normal))
 
     elements.append(Spacer(1, 7*mm))
 
@@ -1360,12 +1524,12 @@ def _generate_deal_pdf_yeni(deal):
     elements.append(Spacer(1, 4*mm))
     seller_company = company.company_name or 'Lema Ambalaj'
     signature_data = [
-        ['Teklifi veren', '', 'Müşteri onayı'],
+        [t['teklifi_veren'], '', t['musteri_onayi']],
         [f'{seller_name} · {seller_company}', '', ' '],
         ['', '', ''],
-        ['Kaşe / İmza:', '', 'Ad Soyad:'],
-        ['', '', 'Kaşe / İmza:'],
-        ['', '', 'Tarih:'],
+        [t['kase_imza'], '', t['ad_soyad']],
+        ['', '', t['kase_imza']],
+        ['', '', t['tarih']],
     ]
     sig_table = Table(signature_data, colWidths=[(content_w - 2.2*cm) / 2, 2.2*cm, (content_w - 2.2*cm) / 2])
     sig_table.setStyle(TableStyle([
@@ -1378,7 +1542,7 @@ def _generate_deal_pdf_yeni(deal):
     elements.append(sig_table)
 
     def _footer_cb(canvas_obj, page_num, total_pages):
-        _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages)
+        _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages, lang=lang)
 
     doc.build(elements, canvasmaker=lambda *a, **kw: _DealPdfCanvasYeni(*a, footer_cb=_footer_cb, **kw))
     buffer.seek(0)

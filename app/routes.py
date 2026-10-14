@@ -3066,7 +3066,7 @@ def register_routes(app):
         if not current_user.is_admin and deal.user_id != current_user.id:
             flash('Bu teklifi görüntüleme yetkiniz yok.', 'danger')
             return redirect(url_for('deals'))
-        return render_template('deal_detail.html', deal=deal)
+        return render_template('deal_detail.html', deal=deal, company_settings=_get_company_settings())
 
     @app.route('/deals/<int:id>/edit', methods=['GET', 'POST'])
     @login_required
@@ -3215,15 +3215,22 @@ def register_routes(app):
         if not current_user.is_admin and deal.user_id != current_user.id:
             flash('Bu teklifin PDF\'ini görüntüleme yetkiniz yok.', 'danger')
             return redirect(url_for('deals'))
-        pdf = generate_deal_pdf(deal)
-        
+        # PAKET B Is B5 (2026-10-14): ?lang=en ile Ingilizce PDF - SADECE
+        # yeni tasarimda calisir (generate_deal_pdf icindeki KARAR: Klasik
+        # secilmisse lang yok sayilir, hep TR basilir).
+        lang = request.args.get('lang', 'tr')
+        if lang not in ('tr', 'en'):
+            lang = 'tr'
+        pdf = generate_deal_pdf(deal, lang=lang)
+
         # Teklifler klasörünü oluştur (yoksa)
         teklifler_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Teklifler')
         os.makedirs(teklifler_dir, exist_ok=True)
-        
+
         # Dosya adını teklif başlığından oluştur (Türkçe karakterleri temizle)
         safe_title = deal.title.replace(' ', '_').replace('ı', 'i').replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ö', 'o').replace('ç', 'c')
-        filename = f'teklif_{safe_title}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        lang_suffix = '_EN' if lang == 'en' else ''
+        filename = f'teklif_{safe_title}{lang_suffix}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
         filepath = os.path.join(teklifler_dir, filename)
         
         # PDF'i dosyaya kaydet

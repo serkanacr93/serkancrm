@@ -15,6 +15,13 @@
         <a href="{{ url_for('deal_pdf', id=deal.id) }}" class="btn btn-info" target="_blank">
             <i class="bi bi-file-pdf"></i> PDF İndir
         </a>
+        {% if company_settings.teklif_pdf_tasarim != 'klasik' %}
+        {# PAKET B Is B5 (2026-10-14): Ingilizce PDF SADECE yeni tasarimda
+           var - Klasik secilmisse bu buton gosterilmez (Klasik hep TR). #}
+        <a href="{{ url_for('deal_pdf', id=deal.id, lang='en') }}" class="btn btn-outline-info" target="_blank">
+            <i class="bi bi-file-pdf"></i> PDF İndir (EN)
+        </a>
+        {% endif %}
         <a href="{{ url_for('edit_deal', id=deal.id) }}" class="btn btn-warning">
             <i class="bi bi-pencil"></i> Düzenle
         </a>
