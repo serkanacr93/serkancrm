@@ -39,6 +39,19 @@
         <div class="tk-f tk-fiyat">
             <label class="tk-label">Birim Fiyat (₺)</label>
             <input type="number" class="form-control form-control-sm item-price" name="price_{{ idx }}" value="{{ item.unit_price if item else '' }}" min="0" step="any" required>
+            {# PAKET B Is B4 (Kalem bazli doviz, Asama 1) - bu segment SADECE
+               teklif TL ise (para_birimi degisince JS ile gosterilir/gizlenir,
+               bkz. add_deal.html/edit_deal.html script'leri) kullanilabilir.
+               Deger '' ise kalem TL'dir (eski davranis - sunucuda None olarak
+               islenir, Deal.calculate_totals'i etkilemez). #}
+            <div class="btn-group btn-group-sm tk-doviz-toggle" role="group" style="display:none;" data-idx="{{ idx }}">
+                <input type="radio" class="btn-check" name="para_birimi_{{ idx }}" id="pb_tl_{{ idx }}" value="" {{ 'checked' if not item or not item.para_birimi }}>
+                <label class="btn btn-outline-secondary" for="pb_tl_{{ idx }}">TL</label>
+                <input type="radio" class="btn-check" name="para_birimi_{{ idx }}" id="pb_usd_{{ idx }}" value="USD" {{ 'checked' if item and item.para_birimi == 'USD' }}>
+                <label class="btn btn-outline-secondary" for="pb_usd_{{ idx }}">USD</label>
+                <input type="radio" class="btn-check" name="para_birimi_{{ idx }}" id="pb_eur_{{ idx }}" value="EUR" {{ 'checked' if item and item.para_birimi == 'EUR' }}>
+                <label class="btn btn-outline-secondary" for="pb_eur_{{ idx }}">EUR</label>
+            </div>
         </div>
         <div class="tk-f tk-toplam">
             <label class="tk-label">KDV Hariç Tutar</label>

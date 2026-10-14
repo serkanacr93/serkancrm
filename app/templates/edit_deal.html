@@ -229,11 +229,30 @@
                 {% endfor %}
             </div>
             {% else %}
+            <div class="p-2 rounded mb-3" id="b4_kur_band" style="background:#F3F6FB; border:1px solid #d7e3f4; {{ '' if deal.para_birimi == 'TRY' or not deal.para_birimi else 'display:none;' }}">
+                <div class="d-flex flex-wrap align-items-end gap-3">
+                    <div>
+                        <label class="form-label small mb-1">1 USD = ? ₺</label>
+                        <input type="number" step="0.0001" min="0" class="form-control form-control-sm" id="b4_kur_usd" name="kur_usd" style="width:140px;" value="{{ deal.kur_usd or '' }}">
+                    </div>
+                    <div>
+                        <label class="form-label small mb-1">1 EUR = ? ₺</label>
+                        <input type="number" step="0.0001" min="0" class="form-control form-control-sm" id="b4_kur_eur" name="kur_eur" style="width:140px;" value="{{ deal.kur_eur or '' }}">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="b4_tcmb_fetch_btn">
+                        <i class="bi bi-arrow-repeat"></i> TCMB'den Güncelle
+                    </button>
+                    <div class="small text-muted" id="b4_kur_info">{% if deal.kur_tarihi %}Son güncelleme: {{ deal.kur_tarihi.strftime('%d.%m.%Y') }} ({{ 'TCMB' if deal.kur_turu == 'tcmb' else 'Elle girildi' }}){% endif %}</div>
+                </div>
+                <input type="hidden" id="b4_kur_turu" name="kur_turu" value="{{ deal.kur_turu or '' }}">
+                <div class="small text-muted mt-1">Kalemlerde USD/EUR seçerseniz burada girilen kur ile TL karşılığı hesaplanır. Genel toplam her zaman TL'dir.</div>
+            </div>
             <div id="items-container" class="teklif-kartlar">
                 {% for item in deal.items %}
                 {% with idx=loop.index0 %}{% include "_teklif_kart_fields.html" %}{% endwith %}
                 {% endfor %}
             </div>
+            <div class="small text-muted mb-2" id="b4-doviz-ozet" style="display:none;"></div>
             {% endif %}
             <div class="d-flex gap-2 mb-3">
                 {% if teklif_yardimci_enabled %}
@@ -298,7 +317,61 @@ document.getElementById('para_birimi').addEventListener('change', function () {
         kurBox.style.display = 'block';
         fetchTcmbRate(this.value);
     }
+    updateB4DovizUiVisibility();
+    calculateGrandTotal();
 });
+
+// PAKET B Is B4 (Kalem bazli doviz, Asama 1) - bkz. add_deal.html'deki
+// AYNI mantik/KARAR (iki doviz mekanizmasi ayni teklifte cakismasin).
+function b4DealIsTry() {
+    var sel = document.getElementById('para_birimi');
+    return !sel || sel.value === 'TRY';
+}
+function updateB4DovizUiVisibility() {
+    var show = b4DealIsTry();
+    var band = document.getElementById('b4_kur_band');
+    if (band) band.style.display = show ? 'block' : 'none';
+    document.querySelectorAll('.tk-doviz-toggle').forEach(function (el) {
+        el.style.display = show ? '' : 'none';
+    });
+}
+
+var b4KurUsdEl = document.getElementById('b4_kur_usd');
+var b4KurEurEl = document.getElementById('b4_kur_eur');
+var b4KurTuruEl = document.getElementById('b4_kur_turu');
+if (b4KurUsdEl) {
+    b4KurUsdEl.addEventListener('input', function () { b4KurTuruEl.value = 'manuel'; calculateGrandTotal(); });
+    b4KurEurEl.addEventListener('input', function () { b4KurTuruEl.value = 'manuel'; calculateGrandTotal(); });
+    document.getElementById('b4_tcmb_fetch_btn').addEventListener('click', function () {
+        var info = document.getElementById('b4_kur_info');
+        info.className = 'small text-muted';
+        info.textContent = 'TCMB kuru alınıyor...';
+        Promise.all([
+            fetch('/api/tcmb-rate?currency=USD').then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); }),
+            fetch('/api/tcmb-rate?currency=EUR').then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); })
+        ]).then(function (results) {
+            var okUsd = results[0].ok, okEur = results[1].ok;
+            if (okUsd) b4KurUsdEl.value = results[0].b.rate;
+            if (okEur) b4KurEurEl.value = results[1].b.rate;
+            if (okUsd || okEur) {
+                b4KurTuruEl.value = 'tcmb';
+                info.className = 'small text-success';
+                info.textContent = 'TCMB güncel kuru alındı (gerekirse elle değiştirebilirsiniz).';
+            } else {
+                info.className = 'small text-danger';
+                info.textContent = 'TCMB kuru alınamadı, elle girin.';
+            }
+            calculateGrandTotal();
+        }).catch(function () {
+            info.className = 'small text-danger';
+            info.textContent = 'TCMB kuru alınamadı (bağlantı hatası), elle girin.';
+        });
+    });
+}
+document.addEventListener('change', function (e) {
+    if (e.target.matches('.tk-doviz-toggle .btn-check')) calculateGrandTotal();
+});
+updateB4DovizUiVisibility();
 
 function fetchTcmbRate(currency) {
     var kurInput = document.getElementById('kullanilan_kur');
@@ -339,22 +412,58 @@ function currentCurrencySymbolEdit() {
 function calculateGrandTotal() {
     var subtotal = 0;
     var sym = currentCurrencySymbolEdit();
+    var dealIsTry = b4DealIsTry();
+    var kurUsd = (dealIsTry && b4KurUsdEl) ? (parseFloat(b4KurUsdEl.value) || 0) : 0;
+    var kurEur = (dealIsTry && b4KurEurEl) ? (parseFloat(b4KurEurEl.value) || 0) : 0;
+    var ozet = { USD: 0, USD_TL: 0, EUR: 0, EUR_TL: 0 };
     document.querySelectorAll('#items-container input[name^="qty_"]').forEach(function (qtyInput) {
         var name = qtyInput.name; // "qty_3" -> "price_3"
         var idx = name.split('_')[1];
         var priceInput = document.querySelector('input[name="price_' + idx + '"]');
         var qty = parseFloat(qtyInput.value) || 0;
         var price = priceInput ? (parseFloat(priceInput.value) || 0) : 0;
-        var lineTotal = qty * price;
-        subtotal += lineTotal;
+        var lineTotal = qty * price; // kalemin KENDI para biriminde (eski alanlarla AYNI anlam)
         // Paket B - Is B3: kart gorunumundeki ".item-total" (KDV haric
         // tutar) - add_deal.html'deki ayni davranisla tutarli olsun diye.
         var row = qtyInput.closest('.item-row') || qtyInput.closest('.teklif-kart');
         var totalInput = row ? row.querySelector('.item-total') : null;
-        if (totalInput) totalInput.value = (qty && price) ? lineTotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym : '';
+        // PAKET B Is B4: kalem bazli doviz - bkz. add_deal.html'deki ayni mantik.
+        var itemCur = (dealIsTry && row) ? (row.querySelector('.tk-doviz-toggle .btn-check:checked')?.value || '') : '';
+        var itemSym = sym;
+        var lineTotalTl = lineTotal;
+        if (itemCur === 'USD') { itemSym = '$'; lineTotalTl = kurUsd ? lineTotal * kurUsd : lineTotal; }
+        else if (itemCur === 'EUR') { itemSym = '€'; lineTotalTl = kurEur ? lineTotal * kurEur : lineTotal; }
+        if (totalInput) {
+            if (qty && price) {
+                var text = lineTotal.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ' + itemSym;
+                if (itemCur && ((itemCur === 'USD' && kurUsd) || (itemCur === 'EUR' && kurEur))) {
+                    text += ' ≈ ' + lineTotalTl.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₺';
+                }
+                totalInput.value = text;
+            } else {
+                totalInput.value = '';
+            }
+        }
+        subtotal += lineTotalTl;
+        if (itemCur === 'USD') { ozet.USD += lineTotal; ozet.USD_TL += lineTotalTl; }
+        else if (itemCur === 'EUR') { ozet.EUR += lineTotal; ozet.EUR_TL += lineTotalTl; }
     });
     var vatRate = parseFloat(document.getElementById('vat_rate').value) || 0;
     var grandTotal = subtotal * (1 + vatRate / 100);
+
+    var ozetEl = document.getElementById('b4-doviz-ozet');
+    if (ozetEl) {
+        if (ozet.USD > 0 || ozet.EUR > 0) {
+            var parcalar = [];
+            if (ozet.USD > 0) parcalar.push('$' + ozet.USD.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' (≈ ' + ozet.USD_TL.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₺)');
+            if (ozet.EUR > 0) parcalar.push('€' + ozet.EUR.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' (≈ ' + ozet.EUR_TL.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₺)');
+            ozetEl.textContent = 'Döviz kalemler: ' + parcalar.join(' · ') + ' — Genel toplam TL\'dir.';
+            ozetEl.style.display = '';
+        } else {
+            ozetEl.style.display = 'none';
+        }
+    }
+
     updateOdemeSekli(grandTotal, currentCurrencySymbolEdit());
 }
 
@@ -401,7 +510,7 @@ function updateOdemeSekli(grandTotal, sym) {
     var hesapEl = document.getElementById('pesinat_hesap_satiri');
     var hataEl = document.getElementById('pesinat_hata');
     var hata = '';
-    var fmt = function (v) { return v.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym; };
+    var fmt = function (v) { return v.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ' + sym; };
 
     if (tipi === 'yuzde') {
         if (deger > 100) hata = "Peşinat oranı %100'ü aşamaz.";
@@ -451,7 +560,16 @@ function buildTeklifKartHtml(idx) {
             '<div class="tk-f tk-tip"><label class="tk-label">Tip</label><select class="form-select form-select-sm" name="urun_tipi_' + idx + '" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır."><option value="uretim">Üretim</option><option value="ticaret">Ticaret</option></select></div>' +
             '<div class="tk-f tk-miktar"><label class="tk-label">Miktar</label><input type="number" class="form-control form-control-sm item-qty" name="qty_' + idx + '" min="0" step="0.01" required></div>' +
             '<div class="tk-f tk-birim"><label class="tk-label">Birim</label><select class="form-select form-select-sm" name="unit_' + idx + '"><option value="adet">Adet</option><option value="kg">Kg</option><option value="mt">Metre</option><option value="lt">Litre</option><option value="m2">m²</option><option value="set">Set</option></select></div>' +
-            '<div class="tk-f tk-fiyat"><label class="tk-label">Birim Fiyat (₺)</label><input type="number" class="form-control form-control-sm item-price" name="price_' + idx + '" min="0" step="any" required></div>' +
+            '<div class="tk-f tk-fiyat"><label class="tk-label">Birim Fiyat (₺)</label><input type="number" class="form-control form-control-sm item-price" name="price_' + idx + '" min="0" step="any" required>' +
+                '<div class="btn-group btn-group-sm tk-doviz-toggle" role="group" style="display:none;" data-idx="' + idx + '">' +
+                    '<input type="radio" class="btn-check" name="para_birimi_' + idx + '" id="pb_tl_' + idx + '" value="" checked>' +
+                    '<label class="btn btn-outline-secondary" for="pb_tl_' + idx + '">TL</label>' +
+                    '<input type="radio" class="btn-check" name="para_birimi_' + idx + '" id="pb_usd_' + idx + '" value="USD">' +
+                    '<label class="btn btn-outline-secondary" for="pb_usd_' + idx + '">USD</label>' +
+                    '<input type="radio" class="btn-check" name="para_birimi_' + idx + '" id="pb_eur_' + idx + '" value="EUR">' +
+                    '<label class="btn btn-outline-secondary" for="pb_eur_' + idx + '">EUR</label>' +
+                '</div>' +
+            '</div>' +
             '<div class="tk-f tk-toplam"><label class="tk-label">KDV Hariç Tutar</label><input type="text" class="form-control form-control-sm item-total fw-bold text-end" readonly></div>' +
         '</div>' +
         '<div class="item-specs-row" style="display:contents">' +
@@ -474,6 +592,7 @@ document.getElementById('add-item').addEventListener('click', function() {
         wrapper.innerHTML = buildTeklifKartHtml(itemCount);
         container.appendChild(wrapper.firstElementChild);
         itemCount++;
+        updateB4DovizUiVisibility();
         return;
     }
     const row = document.createElement('div');

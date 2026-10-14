@@ -283,10 +283,29 @@ def _kur_adi_yeni():
 
 
 def _kur_notu_yeni(deal, kur_tarihi_str):
-    """Dovizli kalem varsa kur notu metnini doner, yoksa None. Birden
-    fazla farkli para birimi (nadir - DealItem'larda ayri kur yok, Deal
-    tek para birimi tutuyor) olmadigi icin tek satir yeterli."""
-    if deal.para_birimi == 'TRY' or not deal.kullanilan_kur:
+    """Dovizli kalem varsa kur notu metnini doner, yoksa None.
+
+    PAKET B Is B4 (Kalem bazli doviz, Asama 1) - deal.para_birimi 'TRY' olsa
+    da kalemlerde (item.para_birimi) USD/EUR kullanilmis olabilir (KARAR:
+    bu, teklif seviyesi dovizden (asagidaki ESKI dal) AYRI ve ONUNLA AYNI
+    teklifte BIRLIKTE kullanilmaz - bkz. app/models.py Deal.calculate_totals).
+    Bu durumda kullanilan para birimlerinin HEPSI icin (1 veya 2) tek notta
+    listelenir. Eski (teklif seviyesi) dal DEGISTIRILMEDI."""
+    if deal.para_birimi == 'TRY':
+        kullanilan = []
+        if deal.kur_usd and any(i.para_birimi == 'USD' for i in deal.items):
+            kullanilan.append(f"1 USD = {deal.kur_usd:,.2f} TL")
+        if deal.kur_eur and any(i.para_birimi == 'EUR' for i in deal.items):
+            kullanilan.append(f"1 EUR = {deal.kur_eur:,.2f} TL")
+        if not kullanilan:
+            return None
+        tarih_str = deal.kur_tarihi.strftime('%d.%m.%Y') if deal.kur_tarihi else kur_tarihi_str
+        kaynak = 'TCMB' if deal.kur_turu == 'tcmb' else 'belirtilen'
+        return (
+            f"Dövizli kalemlerin TL karşılığı {tarih_str} tarihli {kaynak} kur ile hesaplanmıştır "
+            f"({' · '.join(kullanilan)}). Genel toplam TL'dir."
+        )
+    if not deal.kullanilan_kur:
         return None
     return (
         f"Döviz kuru {kur_tarihi_str} tarihli TCMB {_kur_adi_yeni()} kurudur "
@@ -1157,8 +1176,23 @@ def _generate_deal_pdf_yeni(deal):
                 urun_lines.append(f"<b>Adet başı ≈ {_money_tr(adet_basi_tl)} TL</b>")
             urun_cell = Paragraph('<br/>'.join(urun_lines), table_cell_style)
 
+            # PAKET B Is B4 (Kalem bazli doviz, Asama 1) - item.para_birimi
+            # SADECE deal.para_birimi 'TRY' ise anlamlidir (KARAR: iki doviz
+            # mekanizmasi ayni teklifte cakismaz - bkz. app/models.py
+            # Deal.calculate_totals yorumu). Eski kayitlarda item.para_birimi
+            # hep None - asagidaki if/elif hic tetiklenmez, mevcut PDF
+            # ciktisi DEGISMEZ.
+            item_doviz_sym = {'USD': '$', 'EUR': '€'}.get(item.para_birimi) if deal.para_birimi == 'TRY' else None
+            item_kur = None
+            if item_doviz_sym:
+                item_kur = deal.kur_usd if item.para_birimi == 'USD' else deal.kur_eur
+
             # Birim fiyat hucresi - Is 2c: en az 2, en fazla 4 ondalik
-            if deal.para_birimi == 'TRY':
+            if item_doviz_sym:
+                fiyat_text = f"{_birim_fiyat_tr(item.unit_price)} {item_doviz_sym}/{item.unit}"
+                if item_kur:
+                    fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {_money_tr(item.unit_price * item_kur)} TL</font>"
+            elif deal.para_birimi == 'TRY':
                 fiyat_text = f"{_birim_fiyat_tr(item.unit_price)} TL/{item.unit}"
             else:
                 fiyat_text = f"{_birim_fiyat_tr(item.unit_price)} {para_sym}"
@@ -1172,8 +1206,14 @@ def _generate_deal_pdf_yeni(deal):
 
             # Tutar (KDV haric) hucresi - TL'ye cevrilebiliyorsa TL, degilse
             # kendi para biriminde (bkz. Deal.deger_tl ile AYNI mantik -
-            # Komuta Merkezi'nde de bu yaklasim kullaniliyor).
-            if deal.para_birimi == 'TRY':
+            # Komuta Merkezi'nde de bu yaklasim kullaniliyor). Kalem bazli
+            # dovizli kalemler HER ZAMAN TL gosterir (alttaki Ara Toplam/
+            # Genel Toplam da TL - Deal.calculate_totals ile AYNI rakam).
+            if item_doviz_sym and item_kur:
+                tutar_text = f"{_money_tr(item.total_price * item_kur)} TL"
+            elif item_doviz_sym:
+                tutar_text = f"{_money_tr(item.total_price)} {item_doviz_sym}"
+            elif deal.para_birimi == 'TRY':
                 tutar_text = f"{_money_tr(item.total_price)} TL"
             elif deal.kullanilan_kur:
                 tutar_text = f"{_money_tr(item.total_price * deal.kullanilan_kur)} TL"

@@ -344,6 +344,19 @@ class Deal(db.Model):
     # gunlerde farkli kurla gelebilir) - Deal'de tek bir "kesin" kur YOKTUR.
     para_birimi = db.Column(db.String(3), default='TRY', nullable=False)  # TRY / EUR / USD
     kullanilan_kur = db.Column(db.Float, nullable=True)  # 1 birim para_birimi = ? TL (gosterge)
+    # PAKET B Is B4 (Kalem bazli doviz, Asama 1) - yukaridaki para_birimi/
+    # kullanilan_kur TEKLIF SEVIYESINDE (tum teklif tek dovizde) calisir ve
+    # DEGISTIRILMEDI. Bu alanlar AYRI bir mekanizma: tek bir teklif icinde
+    # kalemler FARKLI para birimlerinde girilebilsin, Deal.value/subtotal
+    # HER ZAMAN TL olarak hesaplansin diye. KARAR: iki mekanizma AYNI teklifte
+    # birlikte kullanilmaz - para_birimi 'TRY' disindaysa (teklif seviyesi
+    # doviz zaten aktifse) kalem bazli doviz formu/PDF kodu bu alanlari
+    # kullanmaz, eski davranis degismeden calisir (bkz. calculate_totals,
+    # add_deal/edit_deal formu, pdf_utils). Eski kayitlarda hepsi NULL kalir.
+    kur_usd = db.Column(db.Float, nullable=True)  # kalem bazli doviz icin kullanilan 1 USD = ? TL (TCMB veya elle)
+    kur_eur = db.Column(db.Float, nullable=True)  # kalem bazli doviz icin kullanilan 1 EUR = ? TL
+    kur_tarihi = db.Column(db.Date, nullable=True)  # kur_usd/kur_eur'un cekildigi/girildigi tarih
+    kur_turu = db.Column(db.String(10), nullable=True)  # 'tcmb' | 'manuel'
     # 2026-10-13 (Teklif PDF yeni tasarim): secilen odeme yontemi kod(lar)i,
     # virgulle ayrilmis (orn. "havale,cek") - bkz. PAYMENT_METHOD_LABELS.
     # Eski tekliflerde NULL kalir (geriye donuk doldurma YOK).
@@ -419,9 +432,26 @@ class Deal(db.Model):
         """items verilirse (yeni olusturulan/henuz self.items'a yuklenmemis
         DealItem listesi) onlar uzerinden hesaplar - self.items'a erismek,
         henuz yuklenmemis bir iliski icin ekstra bir SELECT tetikler (bkz.
-        add_deal), items parametresiyle bu onlenir."""
+        add_deal), items parametresiyle bu onlenir.
+
+        PAKET B Is B4: item.para_birimi dolu VE bu teklif TL ise (para_birimi
+        'TRY'/bos - kalem bazli doviz sadece bu durumda aktif, yukaridaki
+        KARAR'a bkz.) kalemin tutari deal.kur_usd/kur_eur ile TL'ye cevrilip
+        toplanir. item.para_birimi NULL/'TRY' olan (TUM eski kayitlar dahil)
+        kalemler icin bu if hic calismaz, item.total_price DOGRUDAN TL olarak
+        toplanir - eski davranisla MATEMATIKSEL OLARAK AYNI (ek kuruş farkı
+        olusturmaz)."""
         source = items if items is not None else self.items
-        self.subtotal = sum(item.total_price for item in source)
+        deal_is_tl = not self.para_birimi or self.para_birimi == 'TRY'
+        total = 0.0
+        for item in source:
+            tutar = item.total_price
+            if deal_is_tl and item.para_birimi == 'USD' and self.kur_usd:
+                tutar = item.total_price * self.kur_usd
+            elif deal_is_tl and item.para_birimi == 'EUR' and self.kur_eur:
+                tutar = item.total_price * self.kur_eur
+            total += tutar
+        self.subtotal = total
         self.vat_amount = self.subtotal * (self.vat_rate / 100)
         self.value = self.subtotal + self.vat_amount
 
@@ -537,6 +567,35 @@ class DealItem(db.Model):
     # Is 3 - kalem bazli numune gorseli (opsiyonel, static/ koku itibariyle
     # goreli yol) - Teklif PDF'inde ilgili kalemin yaninda gosterilir.
     numune_gorseli = db.Column(db.String(300), nullable=True)
+
+    # PAKET B Is B4 (Kalem bazli doviz, Asama 1) - bu kalemin girildigi para
+    # birimi. NULL/'TRY' = eski davranis (unit_price/total_price zaten
+    # teklifin kendi para biriminde - degismedi). 'USD'/'EUR' ise unit_price/
+    # total_price O PARA BIRIMINDE tutulur, TL karsiligi asagidaki
+    # total_price_tl property'siyle (Deal.kur_usd/kur_eur kullanarak) elde
+    # edilir - bkz. Deal.calculate_totals icindeki KARAR.
+    para_birimi = db.Column(db.String(3), nullable=True)  # None/'TRY' | 'USD' | 'EUR'
+
+    @property
+    def kur(self):
+        """Bu kalemin para_birimi'ne gore Deal.kur_usd/kur_eur'dan uygun
+        kuru dondurur - yoksa None (kalem TL ise veya kur henuz girilmemisse)."""
+        if self.para_birimi == 'USD':
+            return self.deal.kur_usd if self.deal else None
+        if self.para_birimi == 'EUR':
+            return self.deal.kur_eur if self.deal else None
+        return None
+
+    @property
+    def total_price_tl(self):
+        """total_price'in TL karsiligi - kalem dovizli ve kur biliniyorsa
+        cevrilir, degilse (TL kalem veya eski kayit) total_price aynen
+        dondurulur. Sadece GOSTERIM icin (PDF/ozet) - Deal.value bu alandan
+        degil, calculate_totals'daki ayni mantiktan hesaplanir."""
+        kur = self.kur
+        if kur:
+            return self.total_price * kur
+        return self.total_price
 
 # Uretim asama akisi: basit 3 durumlu siralama. 'iptal' bilincli olarak bu
 # akisin disinda tutulur (sadece edit_production'dan elle secilir).

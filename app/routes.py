@@ -551,6 +551,41 @@ def _parse_odeme_sekli_form(form, deal_value):
     return values, errors
 
 
+def _parse_kalem_doviz_form(form, deal_para_birimi):
+    """PAKET B Is B4 (Kalem bazli doviz, Asama 1). KARAR: bu ozellik SADECE
+    teklif TL ise (deal_para_birimi 'TRY'/bos - teklif seviyesi doviz, yani
+    para_birimi EUR/USD/GBP, zaten AYRI/eski bir mekanizma) aktif olur -
+    boylece iki doviz mekanizmasi ayni teklifte cakismaz. deal_para_birimi
+    TRY degilse kur_usd/kur_eur/kur_tarihi/kur_turu HER ZAMAN None doner,
+    form'da ne gonderilmis olursa olsun (eski mekanizmanin alanlarina
+    dokunulmaz). Donus: (kur_usd, kur_eur, kur_tarihi, kur_turu)."""
+    if deal_para_birimi != 'TRY':
+        return None, None, None, None
+    kur_usd_raw = form.get('kur_usd', '').strip()
+    kur_eur_raw = form.get('kur_eur', '').strip()
+    kur_usd = float(kur_usd_raw.replace(',', '.')) if kur_usd_raw else None
+    kur_eur = float(kur_eur_raw.replace(',', '.')) if kur_eur_raw else None
+    kur_turu = form.get('kur_turu', '').strip() or None
+    if kur_turu not in ('tcmb', 'manuel'):
+        kur_turu = None
+    kur_tarihi = None
+    if kur_usd or kur_eur:
+        kur_tarihi = datetime.now().date()
+        if not kur_turu:
+            kur_turu = 'manuel'
+    return kur_usd, kur_eur, kur_tarihi, kur_turu
+
+
+def _parse_item_para_birimi(form, i, deal_para_birimi):
+    """PAKET B Is B4 - bir kalemin para_birimi'ni form'dan okur. deal_para_birimi
+    'TRY' degilse (teklif seviyesi doviz aktifse) HER ZAMAN None doner -
+    kalem bazli doviz o durumda devre disi (bkz. _parse_kalem_doviz_form)."""
+    if deal_para_birimi != 'TRY':
+        return None
+    val = form.get(f'para_birimi_{i}', '').strip().upper()
+    return val if val in ('USD', 'EUR') else None
+
+
 def _next_deal_no():
     """Bir sonraki teklif numarasini dondurur. MAX() SQL agregasyonu NULL
     degerleri otomatik yok sayar - Deal.query.order_by(deal_no.desc())
@@ -2908,6 +2943,7 @@ def register_routes(app):
             kullanilan_kur_raw = request.form.get('kullanilan_kur', '').strip()
             kullanilan_kur = float(kullanilan_kur_raw) if kullanilan_kur_raw and para_birimi != 'TRY' else None
             odeme_yontemi = ','.join(request.form.getlist('odeme_yontemi')) or None
+            kur_usd, kur_eur, kur_tarihi, kur_turu = _parse_kalem_doviz_form(request.form, para_birimi)
 
             try:
                 deal = Deal(
@@ -2929,6 +2965,10 @@ def register_routes(app):
                     bakiye_tarihi=datetime.strptime(request.form['bakiye_tarihi'], '%Y-%m-%d').date() if request.form.get('bakiye_tarihi') else None,
                     para_birimi=para_birimi,
                     kullanilan_kur=kullanilan_kur,
+                    kur_usd=kur_usd,
+                    kur_eur=kur_eur,
+                    kur_tarihi=kur_tarihi,
+                    kur_turu=kur_turu,
                     customer_id=customer.id,
                     user_id=current_user.id
                 )
@@ -2964,6 +3004,7 @@ def register_routes(app):
                         renk=request.form.get(f'renk_{i}', '').strip() or None,
                         teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
                         numune_gorseli=numune_path,
+                        para_birimi=_parse_item_para_birimi(request.form, i, para_birimi),
                         deal_id=deal.id
                     )
                     db.session.add(item)
@@ -3068,6 +3109,7 @@ def register_routes(app):
             kullanilan_kur_raw = request.form.get('kullanilan_kur', '').strip()
             deal.para_birimi = para_birimi
             deal.kullanilan_kur = float(kullanilan_kur_raw) if kullanilan_kur_raw and para_birimi != 'TRY' else None
+            deal.kur_usd, deal.kur_eur, deal.kur_tarihi, deal.kur_turu = _parse_kalem_doviz_form(request.form, para_birimi)
 
             DealItem.query.filter_by(deal_id=id).delete()
             i = 0
@@ -3099,6 +3141,7 @@ def register_routes(app):
                                renk=request.form.get(f'renk_{i}', '').strip() or None,
                                teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
                                numune_gorseli=numune_path,
+                               para_birimi=_parse_item_para_birimi(request.form, i, para_birimi),
                                deal_id=deal.id)
                 db.session.add(item)
                 new_items.append(item)
@@ -3231,6 +3274,8 @@ def register_routes(app):
             deal_date=today, expected_close=deal.expected_close, valid_until=today + timedelta(days=7),
             vat_rate=deal.vat_rate, notes=f"Revize. Orijinal: {deal.display_no}. {deal.notes or ''}".strip(),
             para_birimi=deal.para_birimi, kullanilan_kur=deal.kullanilan_kur,
+            kur_usd=deal.kur_usd, kur_eur=deal.kur_eur,
+            kur_tarihi=deal.kur_tarihi, kur_turu=deal.kur_turu,
             customer_id=deal.customer_id,
             user_id=deal.user_id
         )
@@ -3241,6 +3286,7 @@ def register_routes(app):
                                    unit_price=item.unit_price, total_price=item.total_price,
                                    urun_tipi=item.urun_tipi,
                                    kagit_cinsi=item.kagit_cinsi, boy=item.boy, en=item.en, renk=item.renk,
+                                   para_birimi=item.para_birimi,
                                    teslim_tarihi=item.teslim_tarihi, deal_id=new_deal.id))
         db.session.flush()
         new_deal.calculate_totals()
