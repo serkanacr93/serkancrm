@@ -427,8 +427,6 @@ function buildTeklifKartHtml(idx) {
         '<button type="button" class="btn btn-sm btn-danger remove-item teklif-kart-sil" title="Kalemi sil"><i class="bi bi-trash"></i></button>' +
         '<div class="item-row" style="display:contents">' +
             '<div class="tk-f tk-urun"><label class="tk-label">Ürün Adı</label><input type="text" class="form-control form-control-sm" name="desc_' + idx + '" required></div>' +
-            '<div class="tk-f tk-kagit"><label class="tk-label">Kağıt Cinsi</label><input type="text" class="form-control form-control-sm" name="kagit_cinsi_' + idx + '" placeholder="Kağıt Cinsi"></div>' +
-            '<div class="tk-f tk-renk"><label class="tk-label">Renk / Baskı</label><input type="text" class="form-control form-control-sm" name="renk_' + idx + '" placeholder="Renk / Baskı"></div>' +
             '<div class="tk-f tk-tip"><label class="tk-label">Tip</label><select class="form-select form-select-sm" name="urun_tipi_' + idx + '" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır."><option value="uretim">Üretim</option><option value="ticaret">Ticaret</option></select></div>' +
             '<div class="tk-f tk-miktar"><label class="tk-label">Miktar</label><input type="number" class="form-control form-control-sm item-qty" name="qty_' + idx + '" min="0" step="0.01" required></div>' +
             '<div class="tk-f tk-birim"><label class="tk-label">Birim</label><select class="form-select form-select-sm" name="unit_' + idx + '"><option value="adet">Adet</option><option value="kg">Kg</option><option value="mt">Metre</option><option value="lt">Litre</option><option value="m2">m²</option><option value="set">Set</option></select></div>' +
@@ -436,6 +434,8 @@ function buildTeklifKartHtml(idx) {
             '<div class="tk-f tk-toplam"><label class="tk-label">KDV Hariç Tutar</label><input type="text" class="form-control form-control-sm item-total fw-bold text-end" readonly></div>' +
         '</div>' +
         '<div class="item-specs-row" style="display:contents">' +
+            '<div class="tk-f tk-kagit"><label class="tk-label">Kağıt Cinsi</label><input type="text" class="form-control form-control-sm" name="kagit_cinsi_' + idx + '" placeholder="Kağıt Cinsi"></div>' +
+            '<div class="tk-f tk-renk"><label class="tk-label">Renk / Baskı</label><input type="text" class="form-control form-control-sm" name="renk_' + idx + '" placeholder="Renk / Baskı"></div>' +
             '<div class="tk-f tk-en"><label class="tk-label">En</label><input type="text" class="form-control form-control-sm" name="en_' + idx + '" placeholder="En"></div>' +
             '<div class="tk-f tk-boy"><label class="tk-label">Boy</label><input type="text" class="form-control form-control-sm" name="boy_' + idx + '" placeholder="Boy"></div>' +
             '<div class="tk-f tk-korugu"><label class="tk-label">Körük</label><input type="text" class="form-control form-control-sm" name="korugu_' + idx + '" placeholder="Körük"></div>' +
