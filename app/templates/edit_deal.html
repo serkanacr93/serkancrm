@@ -179,6 +179,7 @@
             </div>
 
             <h5 class="mt-4 mb-3"><i class="bi bi-box"></i> Ürün / Hizmet Detayları</h5>
+            {% if company_settings.teklif_formu_gorunumu == 'tablo' %}
             <div id="items-container">
                 {% for item in deal.items %}
                 <div class="row mb-2 item-row">
@@ -227,6 +228,13 @@
                 </div>
                 {% endfor %}
             </div>
+            {% else %}
+            <div id="items-container" class="teklif-kartlar">
+                {% for item in deal.items %}
+                {% with idx=loop.index0 %}{% include "_teklif_kart_fields.html" %}{% endwith %}
+                {% endfor %}
+            </div>
+            {% endif %}
             <div class="d-flex gap-2 mb-3">
                 {% if teklif_yardimci_enabled %}
                 <button type="button" class="btn btn-warning text-dark btn-sm" id="ty-kese-btn">
@@ -330,13 +338,20 @@ function currentCurrencySymbolEdit() {
 
 function calculateGrandTotal() {
     var subtotal = 0;
+    var sym = currentCurrencySymbolEdit();
     document.querySelectorAll('#items-container input[name^="qty_"]').forEach(function (qtyInput) {
         var name = qtyInput.name; // "qty_3" -> "price_3"
         var idx = name.split('_')[1];
         var priceInput = document.querySelector('input[name="price_' + idx + '"]');
         var qty = parseFloat(qtyInput.value) || 0;
         var price = priceInput ? (parseFloat(priceInput.value) || 0) : 0;
-        subtotal += qty * price;
+        var lineTotal = qty * price;
+        subtotal += lineTotal;
+        // Paket B - Is B3: kart gorunumundeki ".item-total" (KDV haric
+        // tutar) - add_deal.html'deki ayni davranisla tutarli olsun diye.
+        var row = qtyInput.closest('.item-row') || qtyInput.closest('.teklif-kart');
+        var totalInput = row ? row.querySelector('.item-total') : null;
+        if (totalInput) totalInput.value = (qty && price) ? lineTotal.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ' + sym : '';
     });
     var vatRate = parseFloat(document.getElementById('vat_rate').value) || 0;
     var grandTotal = subtotal * (1 + vatRate / 100);
@@ -424,9 +439,43 @@ function updateOdemeSekli(grandTotal, sym) {
 
 calculateGrandTotal();
 
+var TEKLIF_GORUNUM = {{ ('tablo' if company_settings.teklif_formu_gorunumu == 'tablo' else 'kart')|tojson }};
+
+function buildTeklifKartHtml(idx) {
+    // _teklif_kart_fields.html ile AYNI yapi (bkz. o dosyadaki uyari notu).
+    return '<div class="teklif-kart">' +
+        '<div class="teklif-kart-badge">' + (idx + 1) + '</div>' +
+        '<button type="button" class="btn btn-sm btn-danger remove-item teklif-kart-sil" title="Kalemi sil"><i class="bi bi-trash"></i></button>' +
+        '<div class="item-row" style="display:contents">' +
+            '<div class="tk-f tk-urun"><label class="tk-label">Ürün Adı</label><input type="text" class="form-control form-control-sm" name="desc_' + idx + '" required></div>' +
+            '<div class="tk-f tk-kagit"><label class="tk-label">Kağıt Cinsi</label><input type="text" class="form-control form-control-sm" name="kagit_cinsi_' + idx + '" placeholder="Kağıt Cinsi"></div>' +
+            '<div class="tk-f tk-renk"><label class="tk-label">Renk / Baskı</label><input type="text" class="form-control form-control-sm" name="renk_' + idx + '" placeholder="Renk / Baskı"></div>' +
+            '<div class="tk-f tk-tip"><label class="tk-label">Tip</label><select class="form-select form-select-sm" name="urun_tipi_' + idx + '" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır."><option value="uretim">Üretim</option><option value="ticaret">Ticaret</option></select></div>' +
+            '<div class="tk-f tk-miktar"><label class="tk-label">Miktar</label><input type="number" class="form-control form-control-sm item-qty" name="qty_' + idx + '" min="0" step="0.01" required></div>' +
+            '<div class="tk-f tk-birim"><label class="tk-label">Birim</label><select class="form-select form-select-sm" name="unit_' + idx + '"><option value="adet">Adet</option><option value="kg">Kg</option><option value="mt">Metre</option><option value="lt">Litre</option><option value="m2">m²</option><option value="set">Set</option></select></div>' +
+            '<div class="tk-f tk-fiyat"><label class="tk-label">Birim Fiyat (₺)</label><input type="number" class="form-control form-control-sm item-price" name="price_' + idx + '" min="0" step="any" required></div>' +
+            '<div class="tk-f tk-toplam"><label class="tk-label">KDV Hariç Tutar</label><input type="text" class="form-control form-control-sm item-total fw-bold text-end" readonly></div>' +
+        '</div>' +
+        '<div class="item-specs-row" style="display:contents">' +
+            '<div class="tk-f tk-en"><label class="tk-label">En</label><input type="text" class="form-control form-control-sm" name="en_' + idx + '" placeholder="En"></div>' +
+            '<div class="tk-f tk-boy"><label class="tk-label">Boy</label><input type="text" class="form-control form-control-sm" name="boy_' + idx + '" placeholder="Boy"></div>' +
+            '<div class="tk-f tk-korugu"><label class="tk-label">Körük</label><input type="text" class="form-control form-control-sm" name="korugu_' + idx + '" placeholder="Körük"></div>' +
+            '<div class="tk-f tk-teslim"><label class="tk-label">Teslim Tarihi</label><input type="date" class="form-control form-control-sm" name="teslim_tarihi_' + idx + '"></div>' +
+            '<div class="tk-f tk-numune"><label class="tk-label">Numune</label><input type="file" class="form-control form-control-sm" name="numune_gorseli_' + idx + '" accept="image/jpeg,image/png"></div>' +
+        '</div>' +
+    '</div>';
+}
+
 let itemCount = {{ deal.items|length }};
 document.getElementById('add-item').addEventListener('click', function() {
     const container = document.getElementById('items-container');
+    if (TEKLIF_GORUNUM !== 'tablo') {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = buildTeklifKartHtml(itemCount);
+        container.appendChild(wrapper.firstElementChild);
+        itemCount++;
+        return;
+    }
     const row = document.createElement('div');
     row.className = 'row mb-2 item-row';
     row.innerHTML = `
@@ -476,6 +525,11 @@ document.getElementById('add-item').addEventListener('click', function() {
 
 document.addEventListener('click', function(e) {
     if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
+        const kart = e.target.closest('.teklif-kart');
+        if (kart) {
+            kart.remove();
+            return;
+        }
         const row = e.target.closest('.item-row');
         const specsRow = row.nextElementSibling;
         if (specsRow && specsRow.classList.contains('item-specs-row')) specsRow.remove();

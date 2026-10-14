@@ -1253,6 +1253,10 @@ class CompanySettings(db.Model):
     # gosterilecek IBAN'lar - TRY icin yukaridaki 'iban' kullanilir.
     iban_usd = db.Column(db.String(40), nullable=True)
     iban_eur = db.Column(db.String(40), nullable=True)
+    # 2026-10-14 (Paket B - Is B3): 'kart' / 'tablo' - NULL "kart" (yeni
+    # varsayilan) kabul edilir. add_deal/edit_deal'deki urun kalemleri
+    # gorunumunu secer.
+    teklif_formu_gorunumu = db.Column(db.String(10), nullable=True)
 
 class PlacesSearchConfig(db.Model):
     """Tekil satir (id=1) - Google Places otomatik arama ayarlari."""

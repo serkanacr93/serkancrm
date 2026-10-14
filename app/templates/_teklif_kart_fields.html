@@ -1,0 +1,82 @@
+{# Paket B - Is B3 (2026-10-14): numarali urun karti - TEK bir kalemin
+   alanlarini render eder. add_deal.html (item=None) ve edit_deal.html
+   (item=DealItem) tarafindan {% include %} ile kullanilir; add-item JS'i
+   de (templates/base.html DEGIL, ilgili sayfanin kendi scripti) AYNI
+   HTML'i string olarak uretir - buradaki yapı degisirse orasi da
+   guncellenmeli (bkz. add_deal.html/edit_deal.html script'lerindeki
+   buildTeklifKartHtml()).
+   ONEMLI: .item-row ve .item-specs-row DOM kardesligi (specsRow =
+   row.nextElementSibling) teklif-yardimci.js/doviz-ile-gir.js tarafindan
+   KULLANILIYOR - display:contents ile GORSEL olarak tek karta
+   birlestiriliyor ama DOM YAPISI (iki ayri sibling) AYNEN korunuyor. #}
+<div class="teklif-kart">
+    <div class="teklif-kart-badge">{{ idx + 1 }}</div>
+    <button type="button" class="btn btn-sm btn-danger remove-item teklif-kart-sil" title="Kalemi sil"><i class="bi bi-trash"></i></button>
+    <div class="item-row" style="display:contents">
+        <div class="tk-f tk-urun">
+            <label class="tk-label">Ürün Adı</label>
+            <input type="text" class="form-control form-control-sm" name="desc_{{ idx }}" value="{{ item.description if item else '' }}" required>
+        </div>
+        <div class="tk-f tk-kagit">
+            <label class="tk-label">Kağıt Cinsi</label>
+            <input type="text" class="form-control form-control-sm" name="kagit_cinsi_{{ idx }}" value="{{ item.kagit_cinsi if item else '' }}" placeholder="Kağıt Cinsi">
+        </div>
+        <div class="tk-f tk-renk">
+            <label class="tk-label">Renk / Baskı</label>
+            <input type="text" class="form-control form-control-sm" name="renk_{{ idx }}" value="{{ item.renk if item else '' }}" placeholder="Renk / Baskı">
+        </div>
+        <div class="tk-f tk-tip">
+            <label class="tk-label">Tip</label>
+            <select class="form-select form-select-sm" name="urun_tipi_{{ idx }}" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır.">
+                <option value="uretim" {{ 'selected' if item and item.urun_tipi == 'uretim' }}>Üretim</option>
+                <option value="ticaret" {{ 'selected' if item and item.urun_tipi == 'ticaret' }}>Ticaret</option>
+            </select>
+        </div>
+        <div class="tk-f tk-miktar">
+            <label class="tk-label">Miktar</label>
+            <input type="number" class="form-control form-control-sm item-qty" name="qty_{{ idx }}" value="{{ item.quantity if item else '' }}" min="0" step="0.01" required>
+        </div>
+        <div class="tk-f tk-birim">
+            <label class="tk-label">Birim</label>
+            <select class="form-select form-select-sm" name="unit_{{ idx }}">
+                {% for u in ['adet', 'kg', 'mt', 'lt', 'm2', 'set'] %}
+                <option value="{{ u }}" {{ 'selected' if item and item.unit == u }}>{{ 'm²' if u == 'm2' else u|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="tk-f tk-fiyat">
+            <label class="tk-label">Birim Fiyat (₺)</label>
+            <input type="number" class="form-control form-control-sm item-price" name="price_{{ idx }}" value="{{ item.unit_price if item else '' }}" min="0" step="any" required>
+        </div>
+        <div class="tk-f tk-toplam">
+            <label class="tk-label">KDV Hariç Tutar</label>
+            <input type="text" class="form-control form-control-sm item-total fw-bold text-end" readonly>
+        </div>
+    </div>
+    <div class="item-specs-row" style="display:contents">
+        <div class="tk-f tk-en">
+            <label class="tk-label">En</label>
+            <input type="text" class="form-control form-control-sm" name="en_{{ idx }}" value="{{ item.en if item else '' }}" placeholder="En">
+        </div>
+        <div class="tk-f tk-boy">
+            <label class="tk-label">Boy</label>
+            <input type="text" class="form-control form-control-sm" name="boy_{{ idx }}" value="{{ item.boy if item else '' }}" placeholder="Boy">
+        </div>
+        <div class="tk-f tk-korugu">
+            <label class="tk-label">Körük</label>
+            <input type="text" class="form-control form-control-sm" name="korugu_{{ idx }}" value="{{ item.korugu if item else '' }}" placeholder="Körük">
+        </div>
+        <div class="tk-f tk-teslim">
+            <label class="tk-label">Teslim Tarihi</label>
+            <input type="date" class="form-control form-control-sm" name="teslim_tarihi_{{ idx }}" value="{{ item.teslim_tarihi.strftime('%Y-%m-%d') if item and item.teslim_tarihi else '' }}">
+        </div>
+        <div class="tk-f tk-numune">
+            <label class="tk-label">Numune {{ 'Değiştir' if item and item.numune_gorseli else '' }}</label>
+            <input type="file" class="form-control form-control-sm" name="numune_gorseli_{{ idx }}" accept="image/jpeg,image/png">
+            {% if item and item.numune_gorseli %}
+            <input type="hidden" name="existing_numune_gorseli_{{ idx }}" value="{{ item.numune_gorseli }}">
+            <small class="text-muted d-block">Mevcut: {{ item.numune_gorseli.split('/')[-1] }}</small>
+            {% endif %}
+        </div>
+    </div>
+</div>

@@ -223,6 +223,7 @@
                     {% if teklif_yardimci_enabled %}
                     <div id="teklif-yardimci-mount"></div>
                     {% endif %}
+                    {% if company_settings.teklif_formu_gorunumu == 'tablo' %}
                     <div class="table-responsive">
                         <table class="table table-bordered" id="items-table">
                             <thead class="table-dark">
@@ -293,6 +294,20 @@
                             </tfoot>
                         </table>
                     </div>
+                    {% else %}
+                    <div id="items-container" class="teklif-kartlar">
+                        {% with idx=0 %}{% include "_teklif_kart_fields.html" %}{% endwith %}
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-6 offset-md-6">
+                            <table class="table table-sm table-borderless mb-0">
+                                <tr><td class="text-end">Ara Toplam:</td><td class="text-end" style="width:140px;"><strong id="subtotal">0,00 ₺</strong></td></tr>
+                                <tr><td class="text-end">KDV (<span id="vat-rate-display">20</span>%):</td><td class="text-end"><strong id="vat-amount">0,00 ₺</strong></td></tr>
+                                <tr class="table-success"><td class="text-end">GENEL TOPLAM:</td><td class="text-end"><strong id="grand-total">0,00 ₺</strong></td></tr>
+                            </table>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
 
@@ -403,58 +418,100 @@ initCustomerSearch({
     }
 });
 
+var TEKLIF_GORUNUM = {{ ('tablo' if company_settings.teklif_formu_gorunumu == 'tablo' else 'kart')|tojson }};
+
+function buildTeklifKartHtml(idx) {
+    // _teklif_kart_fields.html ile AYNI yapi (bkz. o dosyadaki uyari notu).
+    return '<div class="teklif-kart">' +
+        '<div class="teklif-kart-badge">' + (idx + 1) + '</div>' +
+        '<button type="button" class="btn btn-sm btn-danger remove-item teklif-kart-sil" title="Kalemi sil"><i class="bi bi-trash"></i></button>' +
+        '<div class="item-row" style="display:contents">' +
+            '<div class="tk-f tk-urun"><label class="tk-label">Ürün Adı</label><input type="text" class="form-control form-control-sm" name="desc_' + idx + '" required></div>' +
+            '<div class="tk-f tk-kagit"><label class="tk-label">Kağıt Cinsi</label><input type="text" class="form-control form-control-sm" name="kagit_cinsi_' + idx + '" placeholder="Kağıt Cinsi"></div>' +
+            '<div class="tk-f tk-renk"><label class="tk-label">Renk / Baskı</label><input type="text" class="form-control form-control-sm" name="renk_' + idx + '" placeholder="Renk / Baskı"></div>' +
+            '<div class="tk-f tk-tip"><label class="tk-label">Tip</label><select class="form-select form-select-sm" name="urun_tipi_' + idx + '" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır."><option value="uretim">Üretim</option><option value="ticaret">Ticaret</option></select></div>' +
+            '<div class="tk-f tk-miktar"><label class="tk-label">Miktar</label><input type="number" class="form-control form-control-sm item-qty" name="qty_' + idx + '" min="0" step="0.01" required></div>' +
+            '<div class="tk-f tk-birim"><label class="tk-label">Birim</label><select class="form-select form-select-sm" name="unit_' + idx + '"><option value="adet">Adet</option><option value="kg">Kg</option><option value="mt">Metre</option><option value="lt">Litre</option><option value="m2">m²</option><option value="set">Set</option></select></div>' +
+            '<div class="tk-f tk-fiyat"><label class="tk-label">Birim Fiyat (₺)</label><input type="number" class="form-control form-control-sm item-price" name="price_' + idx + '" min="0" step="any" required></div>' +
+            '<div class="tk-f tk-toplam"><label class="tk-label">KDV Hariç Tutar</label><input type="text" class="form-control form-control-sm item-total fw-bold text-end" readonly></div>' +
+        '</div>' +
+        '<div class="item-specs-row" style="display:contents">' +
+            '<div class="tk-f tk-en"><label class="tk-label">En</label><input type="text" class="form-control form-control-sm" name="en_' + idx + '" placeholder="En"></div>' +
+            '<div class="tk-f tk-boy"><label class="tk-label">Boy</label><input type="text" class="form-control form-control-sm" name="boy_' + idx + '" placeholder="Boy"></div>' +
+            '<div class="tk-f tk-korugu"><label class="tk-label">Körük</label><input type="text" class="form-control form-control-sm" name="korugu_' + idx + '" placeholder="Körük"></div>' +
+            '<div class="tk-f tk-teslim"><label class="tk-label">Teslim Tarihi</label><input type="date" class="form-control form-control-sm" name="teslim_tarihi_' + idx + '"></div>' +
+            '<div class="tk-f tk-numune"><label class="tk-label">Numune</label><input type="file" class="form-control form-control-sm" name="numune_gorseli_' + idx + '" accept="image/jpeg,image/png"></div>' +
+        '</div>' +
+    '</div>';
+}
+
 document.getElementById('add-item').addEventListener('click', function() {
-    const tbody = document.querySelector('#items-table tbody');
-    const row = document.createElement('tr');
-    row.className = 'item-row';
-    row.innerHTML = `
-        <td><input type="text" class="form-control form-control-sm" name="desc_${itemCount}" required></td>
-        <td><input type="number" class="form-control form-control-sm item-qty" name="qty_${itemCount}" min="0" step="0.01" required></td>
-        <td>
-            <select class="form-select form-select-sm" name="unit_${itemCount}">
-                <option value="adet">Adet</option>
-                <option value="kg">Kg</option>
-                <option value="mt">Metre</option>
-                <option value="lt">Litre</option>
-                <option value="m2">m²</option>
-                <option value="set">Set</option>
-            </select>
-        </td>
-        <td><input type="number" class="form-control form-control-sm item-price" name="price_${itemCount}" min="0" step="any" required></td>
-        <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
-        <td>
-            <select class="form-select form-select-sm" name="urun_tipi_${itemCount}" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır.">
-                <option value="uretim">Üretim</option>
-                <option value="ticaret">Ticaret</option>
-            </select>
-        </td>
-        <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
-    `;
-    const specsRow = document.createElement('tr');
-    specsRow.className = 'item-specs-row';
-    specsRow.innerHTML = `
-        <td colspan="7">
-            <div class="row g-1">
-                <div class="col"><input type="text" class="form-control form-control-sm" name="kagit_cinsi_${itemCount}" placeholder="Kağıt Cinsi"></div>
-                <div class="col"><input type="text" class="form-control form-control-sm" name="boy_${itemCount}" placeholder="Boy"></div>
-                <div class="col"><input type="text" class="form-control form-control-sm" name="en_${itemCount}" placeholder="En"></div>
-                <div class="col"><input type="text" class="form-control form-control-sm" name="korugu_${itemCount}" placeholder="Körük"></div>
-                <div class="col"><input type="text" class="form-control form-control-sm" name="renk_${itemCount}" placeholder="Renk"></div>
-                <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_${itemCount}" title="Teslim Tarihi"></div>
-                <div class="col"><input type="file" class="form-control form-control-sm" name="numune_gorseli_${itemCount}" accept="image/jpeg,image/png" title="Numune Görseli"></div>
-            </div>
-        </td>
-    `;
-    tbody.appendChild(row);
-    tbody.appendChild(specsRow);
+    if (TEKLIF_GORUNUM === 'tablo') {
+        const tbody = document.querySelector('#items-table tbody');
+        const row = document.createElement('tr');
+        row.className = 'item-row';
+        row.innerHTML = `
+            <td><input type="text" class="form-control form-control-sm" name="desc_${itemCount}" required></td>
+            <td><input type="number" class="form-control form-control-sm item-qty" name="qty_${itemCount}" min="0" step="0.01" required></td>
+            <td>
+                <select class="form-select form-select-sm" name="unit_${itemCount}">
+                    <option value="adet">Adet</option>
+                    <option value="kg">Kg</option>
+                    <option value="mt">Metre</option>
+                    <option value="lt">Litre</option>
+                    <option value="m2">m²</option>
+                    <option value="set">Set</option>
+                </select>
+            </td>
+            <td><input type="number" class="form-control form-control-sm item-price" name="price_${itemCount}" min="0" step="any" required></td>
+            <td><input type="text" class="form-control form-control-sm item-total" readonly></td>
+            <td>
+                <select class="form-select form-select-sm" name="urun_tipi_${itemCount}" title="Üretim: kendi atölyemizde üretilir. Ticaret: hazır alınıp satılır.">
+                    <option value="uretim">Üretim</option>
+                    <option value="ticaret">Ticaret</option>
+                </select>
+            </td>
+            <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>
+        `;
+        const specsRow = document.createElement('tr');
+        specsRow.className = 'item-specs-row';
+        specsRow.innerHTML = `
+            <td colspan="7">
+                <div class="row g-1">
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="kagit_cinsi_${itemCount}" placeholder="Kağıt Cinsi"></div>
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="boy_${itemCount}" placeholder="Boy"></div>
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="en_${itemCount}" placeholder="En"></div>
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="korugu_${itemCount}" placeholder="Körük"></div>
+                    <div class="col"><input type="text" class="form-control form-control-sm" name="renk_${itemCount}" placeholder="Renk"></div>
+                    <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_${itemCount}" title="Teslim Tarihi"></div>
+                    <div class="col"><input type="file" class="form-control form-control-sm" name="numune_gorseli_${itemCount}" accept="image/jpeg,image/png" title="Numune Görseli"></div>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(row);
+        tbody.appendChild(specsRow);
+    } else {
+        const container = document.getElementById('items-container');
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = buildTeklifKartHtml(itemCount);
+        container.appendChild(wrapper.firstElementChild);
+    }
     itemCount++;
     attachEvents();
 });
 
 document.addEventListener('click', function(e) {
     if (e.target.classList.contains('remove-item') || e.target.closest('.remove-item')) {
+        const kart = e.target.closest('.teklif-kart');
+        if (kart) {
+            if (document.querySelectorAll('.teklif-kart').length > 1) {
+                kart.remove();
+                calculateTotals();
+            }
+            return;
+        }
         const row = e.target.closest('.item-row');
-        if (document.querySelectorAll('.item-row').length > 1) {
+        if (row && document.querySelectorAll('.item-row').length > 1) {
             const specsRow = row.nextElementSibling;
             if (specsRow && specsRow.classList.contains('item-specs-row')) specsRow.remove();
             row.remove();

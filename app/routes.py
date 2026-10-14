@@ -5694,6 +5694,8 @@ def register_routes(app):
         company_settings.tax_id = request.form.get('tax_id', '').strip() or None
         teklif_pdf_tasarim = request.form.get('teklif_pdf_tasarim', 'yeni').strip()
         company_settings.teklif_pdf_tasarim = teklif_pdf_tasarim if teklif_pdf_tasarim == 'klasik' else None
+        teklif_formu_gorunumu = request.form.get('teklif_formu_gorunumu', 'kart').strip()
+        company_settings.teklif_formu_gorunumu = teklif_formu_gorunumu if teklif_formu_gorunumu == 'tablo' else None
         company_settings.teklif_sartlari = request.form.get('teklif_sartlari', '').strip() or None
         company_settings.banka_adi = request.form.get('banka_adi', '').strip() or None
         company_settings.iban = request.form.get('iban', '').strip() or None

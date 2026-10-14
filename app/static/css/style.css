@@ -384,3 +384,66 @@ a:hover {
     .crm-mega-box:hover { background: #3a3a3a; }
     .crm-cta-btn { margin: 10px 0 0 0; display: inline-block; }
 }
+
+/* Paket B - Is B3 (2026-10-14): Teklif formu numarali urun kartlari.
+   .item-row/.item-specs-row DOM kardesligi korunuyor (display:contents) -
+   teklif-yardimci.js/doviz-ile-gir.js'in row.nextElementSibling varsayimi
+   bozulmasin diye. */
+.teklif-kartlar { display: flex; flex-direction: column; gap: 14px; }
+.teklif-kart {
+    position: relative;
+    background: #fff;
+    border: 1px solid #e4e4e4;
+    border-left: 4px solid #FBC213;
+    border-radius: 6px;
+    padding: 14px 44px 14px 54px;
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;
+    grid-template-areas:
+        "urun urun urun kagit renk tip"
+        "en boy korugu teslim teslim numune"
+        "miktar birim fiyat fiyat toplam toplam";
+    gap: 8px 10px;
+}
+.teklif-kart-badge {
+    position: absolute; top: 14px; left: 14px;
+    width: 26px; height: 26px; border-radius: 4px;
+    background: #353639; color: #FBC213;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.85rem;
+}
+.teklif-kart-sil { position: absolute; top: 10px; right: 10px; }
+.tk-f { display: flex; flex-direction: column; min-width: 0; }
+.tk-label { font-size: 0.72rem; color: #888; margin-bottom: 2px; }
+.tk-urun { grid-area: urun; }
+.tk-kagit { grid-area: kagit; }
+.tk-renk { grid-area: renk; }
+.tk-tip { grid-area: tip; }
+.tk-en { grid-area: en; }
+.tk-boy { grid-area: boy; }
+.tk-korugu { grid-area: korugu; }
+.tk-teslim { grid-area: teslim; }
+.tk-numune { grid-area: numune; }
+.tk-miktar { grid-area: miktar; }
+.tk-birim { grid-area: birim; }
+.tk-fiyat { grid-area: fiyat; }
+.tk-parabirimi { grid-area: parabirimi; }
+.tk-toplam { grid-area: toplam; }
+.tk-toplam input { text-align: right; font-weight: 700; }
+.teklif-kart > .item-row > *:not([class*="tk-"]),
+.teklif-kart > .item-specs-row > *:not([class*="tk-"]) {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 767.98px) {
+    .teklif-kart {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "urun" "kagit" "renk" "tip"
+            "en" "boy" "korugu" "teslim" "numune"
+            "miktar" "birim" "fiyat" "parabirimi" "toplam";
+        padding: 44px 14px 14px 14px;
+    }
+    .teklif-kart-badge { top: 10px; left: 10px; }
+    .teklif-kart-sil { top: 10px; right: 10px; }
+}

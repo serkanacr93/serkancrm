@@ -80,6 +80,14 @@
                             <small class="text-muted">Klasik seçilirse PDF eskisiyle birebir aynı çıkar.</small>
                         </div>
                         <div class="col-md-3 mb-3">
+                            <label for="teklif_formu_gorunumu" class="form-label">Teklif Formu Görünümü</label>
+                            <select class="form-select" id="teklif_formu_gorunumu" name="teklif_formu_gorunumu">
+                                <option value="kart" {% if (company_settings.teklif_formu_gorunumu or 'kart') == 'kart' %}selected{% endif %}>Kart</option>
+                                <option value="tablo" {% if company_settings.teklif_formu_gorunumu == 'tablo' %}selected{% endif %}>Eski Tablo</option>
+                            </select>
+                            <small class="text-muted">Eski Tablo seçilirse ürün kalemleri bugünkü gibi tablo satırı olarak görünür.</small>
+                        </div>
+                        <div class="col-md-3 mb-3">
                             <label for="banka_adi" class="form-label">Banka Adı (opsiyonel)</label>
                             <input type="text" class="form-control" id="banka_adi" name="banka_adi" value="{{ company_settings.banka_adi or '' }}">
                         </div>
