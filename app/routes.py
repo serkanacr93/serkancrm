@@ -706,6 +706,16 @@ def _parse_kalem_doviz_form(form, deal_para_birimi):
     return kur_usd, kur_eur, kur_tarihi, kur_turu
 
 
+def _parse_termin_gun(raw):
+    """Termin (is gunu) kutusu - bos/gecersiz/0 veya negatif -> None (0 olarak
+    KAYDEDILMEZ, 'girilmedi' anlami korunur)."""
+    try:
+        val = int(str(raw or '').strip())
+    except ValueError:
+        return None
+    return val if val > 0 else None
+
+
 def _parse_item_para_birimi(form, i, deal_para_birimi):
     """PAKET B Is B4 - bir kalemin para_birimi'ni form'dan okur. deal_para_birimi
     'TRY' degilse (teklif seviyesi doviz aktifse) HER ZAMAN None doner -
@@ -3142,6 +3152,7 @@ def register_routes(app):
                     kur_eur=kur_eur,
                     kur_tarihi=kur_tarihi,
                     kur_turu=kur_turu,
+                    varsayilan_termin_gun=_parse_termin_gun(request.form.get('varsayilan_termin_gun')),
                     customer_id=customer.id,
                     user_id=current_user.id
                 )
@@ -3178,6 +3189,7 @@ def register_routes(app):
                         teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
                         numune_gorseli=numune_path,
                         para_birimi=_parse_item_para_birimi(request.form, i, para_birimi),
+                        termin_gun=_parse_termin_gun(request.form.get(f'termin_gun_{i}')),
                         deal_id=deal.id
                     )
                     db.session.add(item)
@@ -3283,6 +3295,7 @@ def register_routes(app):
             deal.para_birimi = para_birimi
             deal.kullanilan_kur = float(kullanilan_kur_raw) if kullanilan_kur_raw and para_birimi != 'TRY' else None
             deal.kur_usd, deal.kur_eur, deal.kur_tarihi, deal.kur_turu = _parse_kalem_doviz_form(request.form, para_birimi)
+            deal.varsayilan_termin_gun = _parse_termin_gun(request.form.get('varsayilan_termin_gun'))
 
             DealItem.query.filter_by(deal_id=id).delete()
             i = 0
@@ -3315,6 +3328,7 @@ def register_routes(app):
                                teslim_tarihi=datetime.strptime(teslim_tarihi_raw, '%Y-%m-%d').date() if teslim_tarihi_raw else None,
                                numune_gorseli=numune_path,
                                para_birimi=_parse_item_para_birimi(request.form, i, para_birimi),
+                               termin_gun=_parse_termin_gun(request.form.get(f'termin_gun_{i}')),
                                deal_id=deal.id)
                 db.session.add(item)
                 new_items.append(item)
@@ -3456,6 +3470,7 @@ def register_routes(app):
             para_birimi=deal.para_birimi, kullanilan_kur=deal.kullanilan_kur,
             kur_usd=deal.kur_usd, kur_eur=deal.kur_eur,
             kur_tarihi=deal.kur_tarihi, kur_turu=deal.kur_turu,
+            varsayilan_termin_gun=deal.varsayilan_termin_gun,
             customer_id=deal.customer_id,
             user_id=deal.user_id
         )
@@ -3466,7 +3481,7 @@ def register_routes(app):
                                    unit_price=item.unit_price, total_price=item.total_price,
                                    urun_tipi=item.urun_tipi,
                                    kagit_cinsi=item.kagit_cinsi, boy=item.boy, en=item.en, renk=item.renk,
-                                   para_birimi=item.para_birimi,
+                                   para_birimi=item.para_birimi, termin_gun=item.termin_gun,
                                    teslim_tarihi=item.teslim_tarihi, deal_id=new_deal.id))
         db.session.flush()
         new_deal.calculate_totals()

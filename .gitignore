@@ -25,3 +25,6 @@ dist/
 Teklifler/
 app/static/uploads/
 /Microsoft
+
+# Teklif PDF ornek ciktilari (Serkan onayi icin, commit edilmez)
+ornek_pdf/

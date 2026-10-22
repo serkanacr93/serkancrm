@@ -423,6 +423,10 @@ a:hover {
 .tk-boy { grid-area: boy; }
 .tk-korugu { grid-area: korugu; }
 .tk-teslim { grid-area: teslim; }
+/* 2026-10-22: Teslim hucresi icinde tarih + dar Termin (is gunu) alt alani */
+.tk-teslim-ic { display: flex; gap: 6px; align-items: flex-end; }
+.tk-alt { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.tk-alt-termin { flex: 0 0 74px; }
 .tk-numune { grid-area: numune; }
 .tk-miktar { grid-area: miktar; }
 .tk-birim { grid-area: birim; }

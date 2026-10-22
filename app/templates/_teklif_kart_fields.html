@@ -79,9 +79,19 @@
             <label class="tk-label">Körük</label>
             <input type="text" class="form-control form-control-sm" name="korugu_{{ idx }}" value="{{ item.korugu if item else '' }}" placeholder="Körük">
         </div>
+        {# 2026-10-22: Termin ayri grid hucresi DEGIL, Teslim hucresinin (2 sutun)
+           icinde dar alt alan - ayri hucre olunca 1300px'te tarih kirpiliyordu. #}
         <div class="tk-f tk-teslim">
-            <label class="tk-label">Teslim Tarihi</label>
-            <input type="date" class="form-control form-control-sm" name="teslim_tarihi_{{ idx }}" value="{{ item.teslim_tarihi.strftime('%Y-%m-%d') if item and item.teslim_tarihi else '' }}">
+            <div class="tk-teslim-ic">
+                <div class="tk-alt">
+                    <label class="tk-label">Teslim Tarihi</label>
+                    <input type="date" class="form-control form-control-sm" name="teslim_tarihi_{{ idx }}" value="{{ item.teslim_tarihi.strftime('%Y-%m-%d') if item and item.teslim_tarihi else '' }}">
+                </div>
+                <div class="tk-alt tk-alt-termin">
+                    <label class="tk-label">Termin (iş günü)</label>
+                    <input type="number" class="form-control form-control-sm" name="termin_gun_{{ idx }}" value="{{ item.termin_gun if item and item.termin_gun else '' }}" min="1" step="1" placeholder="15">
+                </div>
+            </div>
         </div>
         <div class="tk-f tk-numune">
             <label class="tk-label">Numune {{ 'Değiştir' if item and item.numune_gorseli else '' }}</label>

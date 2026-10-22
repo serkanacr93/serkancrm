@@ -357,6 +357,9 @@ class Deal(db.Model):
     kur_eur = db.Column(db.Float, nullable=True)  # kalem bazli doviz icin kullanilan 1 EUR = ? TL
     kur_tarihi = db.Column(db.Date, nullable=True)  # kur_usd/kur_eur'un cekildigi/girildigi tarih
     kur_turu = db.Column(db.String(10), nullable=True)  # 'tcmb' | 'manuel'
+    # 2026-10-22 (Teklif PDF vitrin): kalemde termin_gun yoksa PDF'teki
+    # "Termin" sutunu bunu kullanir (is gunu, onaydan itibaren). NULL = yok.
+    varsayilan_termin_gun = db.Column(db.Integer, nullable=True)
     # 2026-10-13 (Teklif PDF yeni tasarim): secilen odeme yontemi kod(lar)i,
     # virgulle ayrilmis (orn. "havale,cek") - bkz. PAYMENT_METHOD_LABELS.
     # Eski tekliflerde NULL kalir (geriye donuk doldurma YOK).
@@ -586,6 +589,12 @@ class DealItem(db.Model):
     # total_price_tl property'siyle (Deal.kur_usd/kur_eur kullanarak) elde
     # edilir - bkz. Deal.calculate_totals icindeki KARAR.
     para_birimi = db.Column(db.String(3), nullable=True)  # None/'TRY' | 'USD' | 'EUR'
+
+    # 2026-10-22 (Teklif PDF vitrin): kaleme ozel termin (is gunu, onaydan
+    # itibaren). NULL ise Deal.varsayilan_termin_gun, o da yoksa eski
+    # teslim_tarihi/expected_close gosterimi kullanilir. Olcu icin YENI kolon
+    # ACILMADI - mevcut en/boy/korugu (serbest metin) kullaniliyor.
+    termin_gun = db.Column(db.Integer, nullable=True)
 
     @property
     def kur(self):

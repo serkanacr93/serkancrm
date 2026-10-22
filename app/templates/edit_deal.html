@@ -158,6 +158,11 @@
                     <label for="bakiye_tarihi" class="form-label">Bakiye Tarihi <small class="text-muted">(isteğe bağlı)</small></label>
                     <input type="date" class="form-control" id="bakiye_tarihi" name="bakiye_tarihi" value="{{ deal.bakiye_tarihi.strftime('%Y-%m-%d') if deal.bakiye_tarihi else '' }}">
                 </div>
+                <div class="col-md-4 mb-3">
+                    <label for="varsayilan_termin_gun" class="form-label">Varsayılan termin (iş günü) <small class="text-muted">(isteğe bağlı)</small></label>
+                    <input type="number" min="1" step="1" class="form-control" id="varsayilan_termin_gun" name="varsayilan_termin_gun" value="{{ deal.varsayilan_termin_gun or '' }}" placeholder="örn. 15">
+                    <small class="text-muted">Kalemde termin girilmezse PDF'te bu kullanılır.</small>
+                </div>
             </div>
             <div class="row">
                 {% set secili_odeme = (deal.odeme_yontemi or '').split(',') %}
@@ -218,6 +223,8 @@
                     <div class="col"><input type="text" class="form-control form-control-sm" name="korugu_{{ loop.index0 }}" value="{{ item.korugu or '' }}" placeholder="Körük"></div>
                     <div class="col"><input type="text" class="form-control form-control-sm" name="renk_{{ loop.index0 }}" value="{{ item.renk or '' }}" placeholder="Renk"></div>
                     <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_{{ loop.index0 }}" value="{{ item.teslim_tarihi.strftime('%Y-%m-%d') if item.teslim_tarihi else '' }}" title="Teslim Tarihi"></div>
+                    {# Eski Tablo'da termin kutusu yok - mevcut degeri kaybolmasin diye gizli tasinir #}
+                    <input type="hidden" name="termin_gun_{{ loop.index0 }}" value="{{ item.termin_gun or '' }}">
                     <div class="col">
                         {% if item.numune_gorseli %}
                         <img src="{{ url_for('static', filename=item.numune_gorseli) }}" alt="Numune" style="height:31px;border:1px solid #dee2e6;border-radius:3px;vertical-align:middle;margin-right:4px;">
@@ -578,7 +585,10 @@ function buildTeklifKartHtml(idx) {
             '<div class="tk-f tk-en"><label class="tk-label">En</label><input type="text" class="form-control form-control-sm" name="en_' + idx + '" placeholder="En"></div>' +
             '<div class="tk-f tk-boy"><label class="tk-label">Boy</label><input type="text" class="form-control form-control-sm" name="boy_' + idx + '" placeholder="Boy"></div>' +
             '<div class="tk-f tk-korugu"><label class="tk-label">Körük</label><input type="text" class="form-control form-control-sm" name="korugu_' + idx + '" placeholder="Körük"></div>' +
-            '<div class="tk-f tk-teslim"><label class="tk-label">Teslim Tarihi</label><input type="date" class="form-control form-control-sm" name="teslim_tarihi_' + idx + '"></div>' +
+            '<div class="tk-f tk-teslim"><div class="tk-teslim-ic">' +
+                '<div class="tk-alt"><label class="tk-label">Teslim Tarihi</label><input type="date" class="form-control form-control-sm" name="teslim_tarihi_' + idx + '"></div>' +
+                '<div class="tk-alt tk-alt-termin"><label class="tk-label">Termin (iş günü)</label><input type="number" class="form-control form-control-sm" name="termin_gun_' + idx + '" min="1" step="1" placeholder="15"></div>' +
+            '</div></div>' +
             '<div class="tk-f tk-numune"><label class="tk-label">Numune</label><input type="file" class="form-control form-control-sm" name="numune_gorseli_' + idx + '" accept="image/jpeg,image/png"></div>' +
         '</div>' +
     '</div>';

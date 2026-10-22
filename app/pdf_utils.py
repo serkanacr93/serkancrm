@@ -2,7 +2,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm, cm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak, Flowable
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas as _PDFCanvas
@@ -912,57 +913,205 @@ _Y_BEJ = colors.HexColor('#F5EFDC')
 
 _URUN_TIPI_LABELS = {'uretim': 'Üretim', 'ticaret': 'Ticaret'}
 
+# ===== 2026-10-22: "Kurumsal vitrin" urun gorseli + ince olcu cizgileri =====
+_V_ZEMIN = colors.HexColor('#F7F6F2')
+_V_CERCEVE = colors.HexColor('#E4E1DA')
+_V_OLCU_CIZGI = colors.HexColor('#A8A8A8')
+_V_OLCU_YAZI = colors.HexColor('#8A8A8A')
+_V_ETIKET = colors.HexColor('#9A9A9A')
+_VITRIN_KUTU = 4.0 * cm
+_VITRIN_HEDEF_PX = 500  # 4 cm kutuda ~300+ dpi; daha buyukse kucultulur, daha kucuk asla buyutulmez
 
-def _draw_watermark_yeni(canvas_obj, text):
-    """Yeni tasarimin filigrani - klasigin _draw_watermark'indan FARKLI
-    (renkler ve sag ust kose artik duz metin degil, antrasit bir serit
-    icinde sari yazi) - klasik tasarimi etkilememesi icin AYRI fonksiyon.
-    2026-10-13 duzeltme: serit, METNE GORE SIKI olculendirilir (sabit genis
-    bir kutu yerine) - cok sayfali bir teklifte tekrar eden tablo basligi
-    ('Teslim' sutunu) ile CAKISTIGI Playwright/PNG render'da gorulup
-    duzeltildi (bkz. Senaryo D testi)."""
-    if not text:
-        return
-    font_size = 7
-    canvas_obj.saveState()
-    text_w = canvas_obj.stringWidth(text, 'Vera-Bold', font_size)
-    pad_x, pad_y = 5, 2.5
-    canvas_obj.translate(A4[0] - 2.0*cm, A4[1] - 0.55*cm)
-    canvas_obj.rotate(35)
-    canvas_obj.setFillColor(_Y_ANTRASIT)
-    canvas_obj.roundRect(-text_w/2 - pad_x, -font_size/2 - pad_y, text_w + 2*pad_x, font_size + 2*pad_y, 2, fill=1, stroke=0)
-    canvas_obj.setFillColor(_Y_SARI)
-    canvas_obj.setFont('Vera-Bold', font_size)
-    canvas_obj.drawCentredString(0, -font_size/2 + 1.5, text)
-    canvas_obj.restoreState()
+
+def _olcu_degeri(raw, lang='tr'):
+    """DealItem.en/boy/korugu serbest metin - ('12,5', 12.5) / ('3,5+3,5', None)
+    / (None, None) doner. Sayiysa TR (12,5) veya EN (12.5) bicimde, tam
+    sayida ondaliksiz; sayi degilse metin oldugu gibi (cizgiler sadece SAYI
+    olan en/boy icin cizilir). Eski kayitlardaki 'None'/'-' metni bos sayilir."""
+    s = (str(raw).strip() if raw is not None else '')
+    if not s or s.lower() in ('none', 'null', '-', '0'):
+        return None, None
+    m = re.fullmatch(r'(\d+)(?:[.,](\d+))?', s)
+    if not m:
+        return s, None
+    val = float(f"{m.group(1)}.{m.group(2) or '0'}")
+    if val == int(val):
+        txt = str(int(val))
+    else:
+        txt = f'{val:.2f}'.rstrip('0').rstrip('.')
+        if lang != 'en':
+            txt = txt.replace('.', ',')
+    return txt, val
+
+
+def _vitrin_gorsel_yukle(path):
+    """Gorseli KALITE KAYBI OLMADAN hazirlar: dondurme/kucultme gerekmiyorsa
+    ORIJINAL dosya dogrudan gomulur (JPEG yeniden sikistirilmaz). Uzun kenar
+    _VITRIN_HEDEF_PX'ten buyukse LANCZOS ile kucultulur; seffaf PNG -> PNG
+    (seffaflik korunur), opak -> JPEG kalite 95. Telefon fotograflarindaki
+    EXIF donus bilgisi uygulanir. Dosya yok/bozuk -> None (satir gorselsiz basilir)."""
+    try:
+        from PIL import Image as PILImage, ImageOps
+        im = PILImage.open(path)
+        im.load()
+    except Exception:
+        return None
+    try:
+        orientation = im.getexif().get(0x0112, 1)
+    except Exception:
+        orientation = 1
+    w, h = im.size
+    if orientation in (1, None) and max(w, h) <= _VITRIN_HEDEF_PX * 1.1:
+        return ImageReader(path), w, h
+    im2 = ImageOps.exif_transpose(im)
+    if max(im2.size) > _VITRIN_HEDEF_PX:
+        im2 = im2.copy()
+        im2.thumbnail((_VITRIN_HEDEF_PX, _VITRIN_HEDEF_PX), PILImage.LANCZOS)
+    has_alpha = im2.mode in ('RGBA', 'LA') or (im2.mode == 'P' and 'transparency' in im2.info)
+    buf = BytesIO()
+    if has_alpha:
+        im2.convert('RGBA').save(buf, 'PNG')
+    elif (im.format or '').upper() == 'PNG':
+        im2.convert('RGB').save(buf, 'PNG')
+    else:
+        im2.convert('RGB').save(buf, 'JPEG', quality=95, subsampling=0)
+    buf.seek(0)
+    return ImageReader(buf), im2.size[0], im2.size[1]
+
+
+class _VitrinGorsel(Flowable):
+    """4x4 cm 'kurumsal vitrin': acik gri zemin, beyaz fotograf karti (3pt
+    pay, 0,5pt cerceve + hafif golge), sol-ust/sag-alt sari L koseler, sol
+    altta 'G1' etiketi; en/boy SAYI ise kartin altina/sagina ince teknik
+    olcu cizgisi. Fotograf en-boy orani korunarak sigdirilir (kirpma yok)."""
+
+    def __init__(self, reader, px_w, px_h, etiket, en_txt=None, boy_txt=None):
+        Flowable.__init__(self)
+        self.reader, self.px_w, self.px_h = reader, px_w, px_h
+        self.etiket, self.en_txt, self.boy_txt = etiket, en_txt, boy_txt
+        self.width = self.height = _VITRIN_KUTU
+
+    def wrap(self, aw, ah):
+        return self.width, self.height
+
+    def draw(self):
+        c = self.canv
+        W = H = _VITRIN_KUTU
+        pad, bant, pay = 6, 11, 3
+        c.saveState()
+        c.setFillColor(_V_ZEMIN)
+        c.rect(0, 0, W, H, fill=1, stroke=0)
+        alt = bant if self.en_txt else 0
+        sag = bant if self.boy_txt else 0
+        ax, ay = pad, pad + alt
+        aw, ah = W - 2 * pad - sag, H - 2 * pad - alt
+        olcek = min((aw - 2 * pay) / self.px_w, (ah - 2 * pay) / self.px_h)
+        iw, ih = self.px_w * olcek, self.px_h * olcek
+        cw, ch = iw + 2 * pay, ih + 2 * pay
+        cx, cy = ax + (aw - cw) / 2, ay + (ah - ch) / 2
+        c.setFillColor(_V_CERCEVE)
+        c.rect(cx + 0.8, cy - 0.8, cw, ch, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setStrokeColor(_V_CERCEVE)
+        c.setLineWidth(0.5)
+        c.rect(cx, cy, cw, ch, fill=1, stroke=1)
+        c.drawImage(self.reader, cx + pay, cy + pay, iw, ih, mask='auto')
+        # sari L koseler
+        L = min(0.5 * cm, cw / 3, ch / 3)
+        c.setStrokeColor(_Y_SARI)
+        c.setLineWidth(2)
+        c.line(cx - 1, cy + ch, cx + L, cy + ch)
+        c.line(cx, cy + ch + 1, cx, cy + ch - L)
+        c.line(cx + cw + 1, cy, cx + cw - L, cy)
+        c.line(cx + cw, cy - 1, cx + cw, cy + L)
+        # G etiketi (sol alt, kucuk beyaz zemin uzerinde)
+        c.setFont('Helvetica', 7)
+        tw = c.stringWidth(self.etiket, 'Helvetica', 7)
+        c.setFillColor(colors.white)
+        c.rect(cx + pay, cy + pay, tw + 4, 9, fill=1, stroke=0)
+        c.setFillColor(_V_ETIKET)
+        c.drawString(cx + pay + 2, cy + pay + 2.2, self.etiket)
+        # ince olcu cizgileri (kartin kenarina gore)
+        c.setStrokeColor(_V_OLCU_CIZGI)
+        c.setLineWidth(0.5)
+        c.setFont('Helvetica', 6.5)
+        if self.en_txt:
+            y = cy - 6
+            c.line(cx, y, cx + cw, y)
+            c.line(cx, y - 2, cx, y + 2)
+            c.line(cx + cw, y - 2, cx + cw, y + 2)
+            lbl = f'{self.en_txt} cm'
+            lw = c.stringWidth(lbl, 'Helvetica', 6.5)
+            mx = cx + cw / 2
+            c.setFillColor(_V_ZEMIN)
+            c.rect(mx - lw / 2 - 1.5, y - 3, lw + 3, 6, fill=1, stroke=0)
+            c.setFillColor(_V_OLCU_YAZI)
+            c.drawCentredString(mx, y - 2.2, lbl)
+        if self.boy_txt:
+            x = cx + cw + 6
+            c.line(x, cy, x, cy + ch)
+            c.line(x - 2, cy, x + 2, cy)
+            c.line(x - 2, cy + ch, x + 2, cy + ch)
+            lbl = f'{self.boy_txt} cm'
+            lw = c.stringWidth(lbl, 'Helvetica', 6.5)
+            c.translate(x, cy + ch / 2)
+            c.rotate(90)
+            c.setFillColor(_V_ZEMIN)
+            c.rect(-lw / 2 - 1.5, -3, lw + 3, 6, fill=1, stroke=0)
+            c.setFillColor(_V_OLCU_YAZI)
+            c.drawCentredString(0, -2.2, lbl)
+        c.restoreState()
 
 
 def _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages, lang='tr'):
     """Sayfa dibinde SABIT alt bilgi bandi - antrasit zemin, ustunde sari
     cizgi. doc.build() canvasmaker'i uzerinden her sayfada cagirilir.
     PAKET B Is B5 - lang='en' ise 'Sayfa X/Y'/'ORİJİNAL BELGE' Ingilizce
-    basilir, sirket adi/adres gibi veri alanlari degismez."""
+    basilir, sirket adi/adres gibi veri alanlari degismez.
+
+    2026-10-22 duzeltmeleri: (1) sag ust kose damgasi (_draw_watermark_yeni,
+    donuk antrasit serit icinde firma adi) KALDIRILDI - TEKLİF basligina
+    biniyordu. (2) Firma adi eskiden IKI KEZ basiliyordu (kalin + '· ad ·
+    Karatay') ve uzun unvanlarda sagdaki 'TKL-xxxxx · Sayfa x/y' ile ust
+    uste biniyordu; artik bir kez basilir, sigmazsa once kuculur sonra '…'
+    ile kisaltilir - sag metne en az 0,4 cm bosluk kalir. (3) Bant eskiden
+    icerik alaninin ICINE taşıyordu (ust kenari ~2,55 cm, icerik alt siniri
+    2,0 cm); artik icerik alt sinirinin ALTINDA (ust kenar 1,7 cm)."""
     band_h = 0.9*cm
-    y0 = doc.bottomMargin - 0.35*cm
+    y0 = 0.8*cm
+    sol_x = doc.leftMargin + 0.25*cm
+    sag_x = A4[0] - doc.rightMargin - 0.25*cm
     canvas_obj.saveState()
     canvas_obj.setStrokeColor(_Y_SARI)
     canvas_obj.setLineWidth(3)
     canvas_obj.line(doc.leftMargin, y0 + band_h, A4[0] - doc.rightMargin, y0 + band_h)
     canvas_obj.setFillColor(_Y_ANTRASIT)
     canvas_obj.rect(doc.leftMargin, y0, A4[0] - doc.leftMargin - doc.rightMargin, band_h, fill=1, stroke=0)
-    canvas_obj.setFont('Vera-Bold', 9)
-    canvas_obj.setFillColor(_Y_SARI)
-    left_text = (company.company_name or 'LEMA AMBALAJ').upper()
-    canvas_obj.drawString(doc.leftMargin + 0.25*cm, y0 + band_h/2 - 3, left_text)
-    left_w = canvas_obj.stringWidth(left_text, 'Vera-Bold', 9)
-    canvas_obj.setFont('Vera', 8)
-    canvas_obj.setFillColor(colors.HexColor('#cccccc'))
-    unvan_bits = [b for b in [company.company_name, 'Karatay / KONYA'] if b]
-    canvas_obj.drawString(doc.leftMargin + 0.35*cm + left_w, y0 + band_h/2 - 3, '· ' + ' · '.join(unvan_bits))
     right_text = f"{deal.display_no} · Page {page_num}/{total_pages}" if lang == 'en' else f"{deal.display_no} · Sayfa {page_num}/{total_pages}"
     canvas_obj.setFont('Vera-Bold', 9)
     canvas_obj.setFillColor(colors.white)
-    canvas_obj.drawRightString(A4[0] - doc.rightMargin - 0.25*cm, y0 + band_h/2 - 3, right_text)
+    canvas_obj.drawRightString(sag_x, y0 + band_h/2 - 3, right_text)
+    sol_max = (sag_x - canvas_obj.stringWidth(right_text, 'Vera-Bold', 9) - 0.4*cm) - sol_x
+
+    left_text = (company.company_name or 'LEMA AMBALAJ').upper()
+    ek = ' · Karatay / KONYA'
+    boyut = 9
+    while boyut > 7 and canvas_obj.stringWidth(left_text, 'Vera-Bold', boyut) + canvas_obj.stringWidth(ek, 'Vera', boyut - 1) > sol_max:
+        boyut -= 0.5
+    if canvas_obj.stringWidth(left_text, 'Vera-Bold', boyut) + canvas_obj.stringWidth(ek, 'Vera', boyut - 1) > sol_max:
+        ek = ''
+    sol = left_text
+    while sol and canvas_obj.stringWidth(sol + ('…' if sol != left_text else ''), 'Vera-Bold', boyut) > sol_max:
+        sol = sol[:-1]
+    if sol != left_text:
+        sol = sol.rstrip() + '…'
+    canvas_obj.setFont('Vera-Bold', boyut)
+    canvas_obj.setFillColor(_Y_SARI)
+    canvas_obj.drawString(sol_x, y0 + band_h/2 - 3, sol)
+    if ek:
+        canvas_obj.setFont('Vera', boyut - 1)
+        canvas_obj.setFillColor(colors.HexColor('#cccccc'))
+        canvas_obj.drawString(sol_x + canvas_obj.stringWidth(sol, 'Vera-Bold', boyut), y0 + band_h/2 - 3, ek)
     canvas_obj.restoreState()
 
     # mikro metin seridi - alt bandin ALTINDA (en alt kenar bosluguna sigar)
@@ -973,10 +1122,8 @@ def _draw_footer_yeni(canvas_obj, doc, company, deal, page_num, total_pages, lan
     unit_w = canvas_obj.stringWidth(unit, 'Vera', 5.5)
     available_w = A4[0] - 1.0*cm
     repeats = max(1, int(available_w // unit_w) + 1) if unit_w > 0 else 1
-    canvas_obj.drawString(0.5*cm, max(0.15*cm, y0 - 0.3*cm), unit * repeats)
+    canvas_obj.drawString(0.5*cm, 0.4*cm, unit * repeats)
     canvas_obj.restoreState()
-
-    _draw_watermark_yeni(canvas_obj, left_text)
 
 
 class _DealPdfCanvasYeni(_PDFCanvas):
@@ -1022,6 +1169,8 @@ _YENI_PDF_LABELS = {
         'henuz_urun_yok': '<i>Henüz ürün eklenmemiş.</i>', 'teklifi_veren': 'Teklifi veren',
         'musteri_onayi': 'Müşteri onayı', 'kase_imza': 'Kaşe / İmza:', 'ad_soyad': 'Ad Soyad:',
         'tl': 'TL',
+        'h_termin': 'Termin', 'is_gunu': 'iş günü', 'onaydan_sonra': 'onaydan sonra',
+        'termin_maddesi': 'Termin süreleri sipariş ve baskı provası onayından itibaren iş günü olarak hesaplanır.',
     },
     'en': {
         'title': 'QUOTATION', 'teklif_no': 'Quotation No:', 'tarih': 'Date:', 'gecerlilik': 'Valid until:',
@@ -1039,6 +1188,8 @@ _YENI_PDF_LABELS = {
         'henuz_urun_yok': '<i>No items added yet.</i>', 'teklifi_veren': 'Issued by',
         'musteri_onayi': 'Customer approval', 'kase_imza': 'Stamp / Signature:', 'ad_soyad': 'Name:',
         'tl': 'TRY',
+        'h_termin': 'Lead time', 'is_gunu': 'business days', 'onaydan_sonra': 'after approval',
+        'termin_maddesi': 'Lead times are counted in business days from order and print proof approval.',
     },
 }
 
@@ -1093,7 +1244,7 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
         try:
             cleaned = _logo_for_pdf_yeni(company.logo_data)
             if cleaned:
-                logo_img = Image(cleaned, width=4.6*cm, height=4.6*cm, kind='proportional')
+                logo_img = Image(cleaned, width=4.3*cm, height=4.3*cm, kind='proportional')
         except Exception:
             logo_img = None
 
@@ -1136,6 +1287,9 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (1, 0), (1, 0), 8),
+        # 2026-10-22: logo gorseli 4,6 cm sutunu tamamen dolduruyor, firma
+        # adi bitisik basliyordu - logo 4,3 cm'e indi + firma blogu 0,3 cm iceride.
+        ('LEFTPADDING', (1, 0), (1, 0), 0.3*cm),
     ]))
     elements.append(header_table)
     elements.append(Spacer(1, 3*mm))
@@ -1276,18 +1430,19 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
     deal_delivery_fallback = deal.expected_close.strftime('%d.%m.%Y') if deal.expected_close else '-'
 
     if deal.items:
-        # Is 2b (2026-10-14): hicbir kalemde numune_gorseli yoksa Numune
-        # sutunu TAMAMEN gizlenir, genisligi urun sutununa eklenir.
-        has_any_numune = any(item.numune_gorseli for item in deal.items)
-        if has_any_numune:
-            col_widths = [0.9*cm, 1.8*cm, 6.3*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
-            headers = ['#', t['h_numune'], t['h_urun'], t['h_miktar'], t['h_fiyat'], t['h_teslim'], t['h_tutar']]
-        else:
-            col_widths = [0.9*cm, 8.1*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
-            headers = ['#', t['h_urun'], t['h_miktar'], t['h_fiyat'], t['h_teslim'], t['h_tutar']]
+        # 2026-10-22 (kurumsal vitrin): ayri "Numune" sutunu KALDIRILDI - gorsel
+        # artik urun hucresinin SOLUNDA 4x4 cm vitrin olarak basiliyor (iki kez
+        # cizilmesin). Sutunlar her zaman eski gorselsiz yerlesimle AYNI.
+        col_widths = [0.9*cm, 8.1*cm, 2.0*cm, 2.6*cm, 2.0*cm, 2.6*cm]
+        headers = ['#', t['h_urun'], t['h_miktar'], t['h_fiyat'], t['h_termin'], t['h_tutar']]
         data = [[Paragraph(h.replace('\n', '<br/>'), table_header_style) for h in headers]]
+        urun_ic_w = col_widths[1] - 12  # hucre ici (6pt sol + 6pt sag pay)
+        olcu_style = ParagraphStyle('YOlcu', parent=table_cell_style, fontSize=8, leading=10, textColor=_V_OLCU_YAZI)
+        termin_style = ParagraphStyle('YTermin', parent=table_cell_center_style, fontName='Vera-Bold', fontSize=7.3, leading=9)
 
         static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+        termin_var = False
+        gorsel_no = 0
         for idx, item in enumerate(deal.items, 1):
             # # hucresi - antrasit kare icinde sari numara
             num_cell = Table([[str(idx)]], colWidths=[0.55*cm], rowHeights=[0.55*cm])
@@ -1298,41 +1453,45 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
 
-            # Numune hucresi (sutun gizliyse hic olusturulmaz)
-            numune_flowable = None
-            if has_any_numune:
-                if item.numune_gorseli:
-                    try:
-                        img_path = os.path.join(static_dir, item.numune_gorseli)
-                        if os.path.isfile(img_path):
-                            numune_flowable = Image(img_path, width=1.6*cm, height=1.6*cm, kind='proportional')
-                    except Exception:
-                        numune_flowable = None
-                if numune_flowable is None:
-                    numune_flowable = Table([['']], colWidths=[1.6*cm], rowHeights=[1.6*cm], style=[('BACKGROUND', (0, 0), (-1, -1), _Y_BEJ)])
-
             # Urun ve teknik ozellikler hucresi - Is 2a: "Urun tipi" satiri
             # KALDIRILDI (ic bilgi, musteriyi ilgilendirmez). Kagit cinsi,
             # urun adiyla (harf/bosluk farki haric) AYNIYSA basilmaz.
             urun_lines = [f"<b>{_escape(item.description)}</b>"]
             if _kagit_cinsi_farkli_mi(item.description, item.kagit_cinsi):
                 urun_lines.append(f"<font color='#666666' size=6.8>{t['kagit_cinsi']} {_escape(item.kagit_cinsi)}</font>")
-            olcu_bits = []
-            if item.en:
-                olcu_bits.append(f"{t['en']} {_escape(item.en)}")
-            if item.boy:
-                olcu_bits.append(f"{t['boy']} {_escape(item.boy)}")
-            if item.korugu:
-                olcu_bits.append(f"{t['korugu']} {_escape(item.korugu)}")
-            if olcu_bits:
-                urun_lines.append(f"<font color='#666666' size=6.8>{t['olcu']} {' · '.join(olcu_bits)} cm</font>")
             if item.renk:
                 urun_lines.append(f"<font color='#666666' size=6.8>{t['baski']} {_escape(item.renk)}</font>")
             is_doviz = deal.para_birimi != 'TRY' and deal.kullanilan_kur
             if is_doviz and item.unit == 'adet':
                 adet_basi_tl = item.unit_price * deal.kullanilan_kur
                 urun_lines.append(f"<b>{t['adet_basi']} {money(adet_basi_tl)} {t['tl']}</b>")
-            urun_cell = Paragraph('<br/>'.join(urun_lines), table_cell_style)
+            urun_flow = [Paragraph('<br/>'.join(urun_lines), table_cell_style)]
+            # Olcu satiri: mevcut en/boy/korugu (serbest metin) - bos olan yazilmaz.
+            en_txt, en_val = _olcu_degeri(item.en, lang)
+            boy_txt, boy_val = _olcu_degeri(item.boy, lang)
+            kor_txt, _ = _olcu_degeri(item.korugu, lang)
+            olcu_parca = [x for x in (en_txt, boy_txt, kor_txt) if x]
+            if olcu_parca:
+                urun_flow.append(Spacer(1, 1.5))
+                urun_flow.append(Paragraph(f"{t['olcu']} {_escape(' × '.join(olcu_parca))} cm", olcu_style))
+
+            gorsel = None
+            if item.numune_gorseli:
+                yuklu = _vitrin_gorsel_yukle(os.path.join(static_dir, item.numune_gorseli))
+                if yuklu:
+                    gorsel_no += 1
+                    gorsel = _VitrinGorsel(yuklu[0], yuklu[1], yuklu[2], f'G{gorsel_no}',
+                                           en_txt if en_val else None, boy_txt if boy_val else None)
+            if gorsel:
+                urun_cell = Table([[gorsel, urun_flow]], colWidths=[_VITRIN_KUTU, urun_ic_w - _VITRIN_KUTU])
+                urun_cell.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (0, 0), 0), ('RIGHTPADDING', (0, 0), (0, 0), 0),
+                    ('LEFTPADDING', (1, 0), (1, 0), 8), ('RIGHTPADDING', (1, 0), (1, 0), 0),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ]))
+            else:
+                urun_cell = urun_flow
 
             # PAKET B Is B4 (Kalem bazli doviz, Asama 1) - item.para_birimi
             # SADECE deal.para_birimi 'TRY' ise anlamlidir (KARAR: iki doviz
@@ -1360,8 +1519,17 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
                     fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {money(tl_karsilik)} {t['tl']}</font>"
             fiyat_cell = Paragraph(fiyat_text, table_cell_center_style)
 
-            # Teslim hucresi
-            item_delivery_str = item.teslim_tarihi.strftime('%d.%m.%Y') if item.teslim_tarihi else deal_delivery_fallback
+            # Termin hucresi (2026-10-22): kalem.termin_gun -> deal.varsayilan_
+            # termin_gun -> eski teslim tarihi/expected_close -> '-'
+            termin_gun = getattr(item, 'termin_gun', None) or getattr(deal, 'varsayilan_termin_gun', None)
+            if termin_gun:
+                termin_var = True
+                ilk, _, kalan = t['is_gunu'].partition(' ')
+                termin_cell = Paragraph(f"{termin_gun}&nbsp;{ilk} {kalan}<br/>"
+                                        f"<font name='Vera' size=6.3 color='#888888'>{t['onaydan_sonra']}</font>", termin_style)
+            else:
+                item_delivery_str = item.teslim_tarihi.strftime('%d.%m.%Y') if item.teslim_tarihi else deal_delivery_fallback
+                termin_cell = Paragraph(item_delivery_str, table_cell_center_style)
 
             # Tutar (KDV haric) hucresi - TL'ye cevrilebiliyorsa TL, degilse
             # kendi para biriminde (bkz. Deal.deger_tl ile AYNI mantik -
@@ -1380,17 +1548,12 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
                 tutar_text = f"{money(item.total_price)} {para_sym}"
             tutar_cell = Paragraph(f"<b>{tutar_text}</b>", table_cell_center_style)
 
-            row = [num_cell]
-            if has_any_numune:
-                row.append(numune_flowable)
-            row.append(urun_cell)
-            row.append(Paragraph(f"{qty_fmt(item.quantity)} {item_unit_label}", table_cell_center_style))
-            row.append(fiyat_cell)
-            row.append(Paragraph(item_delivery_str, table_cell_center_style))
-            row.append(tutar_cell)
-            data.append(row)
+            data.append([num_cell, urun_cell,
+                         Paragraph(f"{qty_fmt(item.quantity)} {item_unit_label}", table_cell_center_style),
+                         fiyat_cell, termin_cell, tutar_cell])
 
-        _urun_col_idx = 2 if has_any_numune else 1
+        # repeatRows=1: sari baslik her sayfada tekrar eder; Platypus bir
+        # tablo SATIRINI asla iki sayfaya bolmez (kalem satiri butun kalir).
         table = Table(data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), _Y_SARI),
@@ -1401,8 +1564,10 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
             ('BOX', (0, 0), (-1, -1), 0.75, _Y_ANTRASIT),
             ('TOPPADDING', (0, 0), (-1, 0), 5), ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
             ('TOPPADDING', (0, 1), (-1, -1), 5), ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
-            ('LEFTPADDING', (_urun_col_idx, 1), (_urun_col_idx, -1), 6),
-            ('RIGHTPADDING', (_urun_col_idx, 1), (_urun_col_idx, -1), 6),
+            ('LEFTPADDING', (1, 1), (1, -1), 6),
+            ('RIGHTPADDING', (1, 1), (1, -1), 6),
+            # Termin sutunu 2,0 cm: '120 iş günü' tek satira sigsin diye ic pay 3pt
+            ('LEFTPADDING', (4, 1), (4, -1), 3), ('RIGHTPADDING', (4, 1), (4, -1), 3),
         ]))
         elements.append(table)
         elements.append(Spacer(1, 4*mm))
@@ -1443,6 +1608,8 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
 
         # ===== 6) ALT BÖLÜM: TEKLİF ŞARTLARI (sol) + TOPLAM (sag) =====
         terms = _build_terms_yeni(deal, company, lang=lang)
+        if termin_var:
+            terms = terms + [t['termin_maddesi']]
         terms_stripe_w = 0.16*cm
         terms_w = content_w * 0.55
         terms_lines = [Paragraph(f"{i}. {term}", terms_style) for i, term in enumerate(terms, 1)]
@@ -1507,7 +1674,12 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
             totals_wrapper.append(Spacer(1, 2*mm))
             totals_wrapper.append(Paragraph(f"{t['yalniz']} {tutar_yaziyla(tl_for_words)}", italic_style))
 
-        bottom_table = Table([[terms_box, totals_wrapper]], colWidths=[terms_w, toplam_w])
+        # 2026-10-22: dis tablo eskiden icerikten 6 mm DAR kuruluyordu (sag
+        # sutun = toplam_w, ustune 6 mm sol pay) -> ortalaninca toplam kutusu
+        # urun tablosunun sag kenarindan tasiyordu. Sag sutun 6 mm payi da
+        # kapsayacak sekilde genisletildi: dis tablo = icerik genisligi, urun
+        # tablosuyla AYNI kenarlara oturur; toplam kutusunun kendisi degismedi.
+        bottom_table = Table([[terms_box, totals_wrapper]], colWidths=[terms_w, toplam_w + 6*mm])
         bottom_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
