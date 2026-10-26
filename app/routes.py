@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, IrsaliyeDegisiklikLog, format_price_tr, TR_AYLAR
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, is_emri_kalemleri, generate_siparis_dosyasi_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, siparisler, limiter, csrf
 from app.tcmb import fetch_tcmb_rate
@@ -4724,7 +4724,7 @@ def register_routes(app):
         return jsonify([
             {'id': p.id, 'label': f'{p.deal.title} - {p.stage_label}',
              'items': [{'id': it.id, 'label': f'IE-{p.id:05d}-{n} · {it.description}'}
-                       for n, it in enumerate(p.uretim_items, 1)]}
+                       for n, it in enumerate(is_emri_kalemleri(p), 1) if it.urun_tipi != 'ticaret']}
             for p in productions
         ])
 
@@ -4935,12 +4935,26 @@ def register_routes(app):
         item_ids = None
         filename = f'IsEmri_{safe_name}_IE{production.id:05d}.pdf'
         if kalem_id:
-            ids = [i.id for i in production.uretim_items]
+            ids = [i.id for i in is_emri_kalemleri(production)]
             if kalem_id in ids:
                 item_ids = [kalem_id]
                 filename = f'IsEmri_{safe_name}_IE{production.id:05d}-{ids.index(kalem_id) + 1}.pdf'
         pdf = generate_is_emri_pdf_yatay(production, copy_label=copy_label, item_ids=item_ids)
         return send_file(pdf, as_attachment=True, download_name=filename)
+
+    @app.route('/production/<int:id>/siparis-dosyasi')
+    @login_required
+    def production_siparis_dosyasi_pdf(id):
+        """2026-10-26 (2): Siparis dosyasi - kapak + onayli teklif + tum is
+        emirleri (uretim + tedarik) TEK PDF. Arsiv nushasi; sadece okur."""
+        production = Production.query.get_or_404(id)
+        if not current_user.is_admin and production.deal.user_id != current_user.id:
+            flash('Bu siparişi görme yetkiniz yok.', 'danger')
+            return redirect(url_for('production_list'))
+        pdf = generate_siparis_dosyasi_pdf(production)
+        safe_name = _safe_filename_part(_customer_full_name(production.deal.customer))
+        return send_file(pdf, as_attachment=True,
+                         download_name=f'SiparisDosyasi_{safe_name}_{production.deal.display_no}_IE{production.id:05d}.pdf')
 
     @app.route('/is-emirleri')
     @login_required
@@ -4969,14 +4983,14 @@ def register_routes(app):
         bugun = datetime.now().date()
         satirlar = []
         for p in productions:
-            items = p.uretim_items
+            items = is_emri_kalemleri(p)
             for sira, it in enumerate(items, 1):
                 b = is_emri_kalem_bilgisi(p, it, sira, len(items), katalog)
                 musteri = p.deal.customer.display_name if p.deal and p.deal.customer else '-'
                 if q and q.casefold() not in f"{b['no']} {musteri} {b['urun']}".casefold():
                     continue
                 termin_renk = None
-                if b['termin'] and b['durum'] not in ('Sevk edildi', 'İptal'):
+                if b['termin'] and b['durum'] not in ('Sevk edildi', 'İptal', 'Teslime Hazır'):
                     kalan_gun = (b['termin'] - bugun).days
                     termin_renk = 'danger' if kalan_gun < 0 else ('warning' if kalan_gun <= 3 else None)
                 satirlar.append({'p': p, 'it': it, 'b': b, 'musteri': musteri, 'termin_renk': termin_renk})

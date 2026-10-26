@@ -2131,6 +2131,74 @@ def kese_gramaj_bul(deal_item, katalog=None):
     return None
 
 
+_ADDAN_OLCU_RE = re.compile(
+    r'(\d+(?:[.,]\d+)?)\s*[x×X*]\s*(\d+(?:[.,]\d+)?)'
+    r'(?:\s*[x×X*]\s*(\d+(?:[.,]\d+)?))?'
+    r'(?:\s*\(\s*(\d+(?:[.,]\d+)?(?:\s*\+\s*\d+(?:[.,]\d+)?)?)\s*\))?')
+_ADDAN_MALZEME = ['gold metalize', 'gümüş metalize', 'metalize', 'şeffaf', 'esmer recycle', 'esmer virjin',
+                  'beyaz kraft', 'beyaz virjin', 'kuşe', 'esmer', 'kraft', 'beyaz']
+_ADDAN_OZELLIK = ['kare dipli', 'dipsiz', 'kilitli', 'pencereli', 'zipli', 'valfli', 'tabanlı', 'körüklü']
+
+
+def _tr_lower(s):
+    return (s or '').replace('I', 'ı').replace('İ', 'i').lower()
+
+
+def _tr_baslik(s):
+    return ' '.join((w[:1].replace('i', 'İ').replace('ı', 'I').upper() + w[1:]) for w in s.split())
+
+
+def addan_detaylar(ad):
+    """2026-10-26: urun ADINDAN olcu / malzeme / ozellik cikarir - kalemin
+    kendi alanlari BOSSA is emrinde onlarin yerine yazilir (dolu alan her
+    zaman onceliklidir). '... doypack 16×27 (4+4)' -> en 16, boy 27, korugu
+    '4+4'; 'gold metalize' -> malzeme; 'kilitli' -> ozellik."""
+    sonuc = {'en': None, 'boy': None, 'korugu': None, 'malzeme': None, 'ozellik': None}
+    if not ad:
+        return sonuc
+    m = _ADDAN_OLCU_RE.search(ad)
+    if m:
+        sonuc['en'], sonuc['boy'] = m.group(1), m.group(2)
+        sonuc['korugu'] = m.group(3) or (m.group(4).replace(' ', '') if m.group(4) else None)
+    kucuk = _tr_lower(ad)
+    desen = re.compile('|'.join(re.escape(k) for k in sorted(_ADDAN_MALZEME, key=len, reverse=True)))
+    bulunan = []
+    for m2 in desen.finditer(kucuk):
+        if m2.group(0) not in bulunan:
+            bulunan.append(m2.group(0))
+    if bulunan:
+        sonuc['malzeme'] = _tr_baslik(' '.join(bulunan))
+    oz = [_tr_baslik(k) for k in _ADDAN_OZELLIK if k in kucuk]
+    if oz:
+        sonuc['ozellik'] = ' · '.join(oz)
+    return sonuc
+
+
+def is_emri_kalemleri(production):
+    """2026-10-26 (2): is emrine giren TUM kalemler - uretim VE ticaret
+    (ticaret kalemleri 'TEDARIK' is emri olarak basilir, artik atlanmaz).
+    Sira = ProductionItem.id (numara IE-xxxxx-n bu siradan gelir; PDF,
+    /is-emirleri ve Gunluk Uretim secicisi AYNI numarayi kullanir)."""
+    items = getattr(production, 'items', None)
+    if items is None:
+        items = list(getattr(production, 'uretim_items', []) or [])
+    return sorted(items, key=lambda i: (i.id or 0))
+
+
+def _teslim_yeri(deal, company):
+    """Teklif sartlarindaki 'Teslim yeri: ...' maddesinden degeri alir
+    (sirket ayarlarindaki serbest metin, yoksa varsayilan sartlar)."""
+    try:
+        satirlar = _build_terms_yeni(deal, company)
+    except Exception:
+        satirlar = list(_DEFAULT_TERMS_YENI)
+    for s in satirlar:
+        m = re.match(r'\s*teslim\s*(yeri|şekli|sekli)\s*:\s*(.+)', s, re.IGNORECASE)
+        if m:
+            return m.group(2).strip().rstrip('.')
+    return None
+
+
 def _is_gunu_ekle(baslangic, gun):
     d = baslangic
     eklenen = 0
@@ -2155,9 +2223,17 @@ def is_emri_kalem_bilgisi(production, pitem, sira, toplam, katalog=None):
         # ayni aciklamali kalemle eslestir.
         di = next((x for x in deal.items if x.description == pitem.description), None)
 
+    urun_adi = (pitem.description if pitem is not None else None) or (di.description if di else '')
+    addan = addan_detaylar(urun_adi)
     en_txt, en_val = _olcu_degeri(di.en) if di else (None, None)
     boy_txt, boy_val = _olcu_degeri(di.boy) if di else (None, None)
     kor_txt, _ = _olcu_degeri(di.korugu) if di else (None, None)
+    # Kalemde olcu girilmemisse urun adindaki olcu kullanilir (dolu alan oncelikli)
+    if not en_txt and not boy_txt and addan['en']:
+        en_txt, en_val = _olcu_degeri(addan['en'])
+        boy_txt, boy_val = _olcu_degeri(addan['boy'])
+        if not kor_txt and addan['korugu']:
+            kor_txt, _ = _olcu_degeri(addan['korugu'])
     parca = [x for x in (en_txt, boy_txt, kor_txt) if x]
     if parca:
         olcu = ' × '.join(parca) + ' cm'
@@ -2171,7 +2247,7 @@ def is_emri_kalem_bilgisi(production, pitem, sira, toplam, katalog=None):
         gerceklesen = pitem.produced_quantity or 0
         if birim == 'kg':
             kg = sum((o.toplam_kg or 0) for o in (pitem.daily_outputs or []))
-            if len(production.uretim_items) == 1:
+            if len([x for x in is_emri_kalemleri(production) if (getattr(x, 'urun_tipi', None) or 'uretim') != 'ticaret']) == 1:
                 kg += sum((o.toplam_kg or 0) for o in (production.daily_outputs or [])
                           if getattr(o, 'production_item_id', None) is None)
             gerceklesen = max(gerceklesen, kg)
@@ -2186,8 +2262,14 @@ def is_emri_kalem_bilgisi(production, pitem, sira, toplam, katalog=None):
     elif production.due_date:
         termin = production.due_date
 
+    tip = (getattr(pitem, 'urun_tipi', None) or 'uretim') if pitem is not None else 'uretim'
+    if tip == 'ticaret':
+        from app.models import TICARET_STAGE_LABELS
+        gerceklesen = 0
     if production.status == 'iptal':
         durum = 'İptal'
+    elif tip == 'ticaret' and production.status != 'sevkiyat':
+        durum = TICARET_STAGE_LABELS.get(getattr(pitem, 'ticaret_durumu', None) or 'siparis_edildi', 'Sipariş edildi')
     elif production.status == 'sevkiyat':
         durum = 'Sevk edildi'
     elif planlanan and gerceklesen >= planlanan:
@@ -2209,12 +2291,15 @@ def is_emri_kalem_bilgisi(production, pitem, sira, toplam, katalog=None):
             gorsel, gorsel_kaynak = tg, 'tasarim'
 
     return {
+        'tip': tip,
+        'ticaret_durumu': (getattr(pitem, 'ticaret_durumu', None) or 'siparis_edildi') if tip == 'ticaret' else None,
         'no': f'IE-{production.id:05d}-{sira}',
         'sira': sira, 'toplam': toplam,
         'deal_item': di,
         'urun': (pitem.description if pitem is not None else '-'),
         'kese_gramaj': kese_gramaj_bul(di, katalog),
-        'kagit': _ie_temiz(pitem.kagit_tipi if pitem is not None else None) or _ie_temiz(di.kagit_cinsi if di else None),
+        'kagit': _ie_temiz(pitem.kagit_tipi if pitem is not None else None) or _ie_temiz(di.kagit_cinsi if di else None) or addan['malzeme'],
+        'ozellik': addan['ozellik'],
         'gramaj': _ie_temiz(pitem.gramaj if pitem is not None else None),
         'olcu': olcu,
         'en_txt': en_txt if en_val else None, 'boy_txt': boy_txt if boy_val else None, 'kor_txt': kor_txt,
@@ -2405,7 +2490,7 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
     musteri = _clean_for_pdf(customer.company_name) if customer.company_name else \
         f"{_clean_for_pdf(customer.first_name) or ''} {_clean_for_pdf(customer.last_name) or ''}".strip()
 
-    tum = list(production.uretim_items)
+    tum = is_emri_kalemleri(production)
     toplam = len(tum)
     secili = [(i, p) for i, p in enumerate(tum, 1) if not item_ids or p.id in item_ids]
     if not secili:
@@ -2433,6 +2518,19 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
         except Exception:
             logo_reader = None
 
+    # 2026-10-26 (2): siparis bilgileri (2. serit) - fiyat/odeme YOK (atolye kagidi)
+    seller = getattr(deal, 'seller', None)
+    satis = (getattr(seller, 'full_name', None) or getattr(seller, 'username', None) or '-') if seller else '-'
+    teslim_sekli = _teslim_yeri(deal, company) or '-'
+    n_ticaret = sum(1 for x in tum if (getattr(x, 'urun_tipi', None) or 'uretim') == 'ticaret')
+    n_uretim = len(tum) - n_ticaret
+    parca = []
+    if n_uretim:
+        parca.append(f'{n_uretim} üretim')
+    if n_ticaret:
+        parca.append(f'{n_ticaret} tedarik')
+    siparis_ozet = f"{len(tum)} kalem" + (f" ({', '.join(parca)})" if parca and len(parca) > 1 else '')
+
     sayfa_sayisi = len(secili)
     for sayfa_idx, (sira, pitem) in enumerate(secili, 1):
         b = is_emri_kalem_bilgisi(production, pitem, sira, toplam, katalog)
@@ -2452,16 +2550,30 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
             c.setFont('Vera-Bold', sz)
             c.drawCentredString(M + 2.1 * cm, top - hdr_h / 2 - 4, ad)
 
+        ticaret = b['tip'] == 'ticaret'
         c.setFillColor(_Y_ANTRASIT)
         c.setFont('Vera-Bold', 22)
-        baslik = 'İ Ş   E M R İ'
-        c.drawCentredString(PW / 2, top - 0.95 * cm, baslik)
+        c.drawCentredString(PW / 2, top - 0.95 * cm, 'İ Ş   E M R İ')
         c.setFont('Vera', 9)
         c.setFillColor(colors.HexColor('#666666'))
         alt_bas = f'Kalem {sira} / {toplam}'
+        alt_bas_y = top - 1.5 * cm
         if copy_label:
             alt_bas += f'   ·   Nüsha: {copy_label}'
-        c.drawCentredString(PW / 2, top - 1.5 * cm, alt_bas)
+        if ticaret:
+            # tedarik: baslik ayni, alt satirda mavi "TEDARIK" etiketi (firma bloguna tasmasin)
+            et = 'TEDARİK'
+            tw = c.stringWidth(alt_bas, 'Vera', 9)
+            ew = c.stringWidth(et, 'Vera-Bold', 8) + 10
+            x0 = PW / 2 - (tw + 6 + ew) / 2
+            c.drawString(x0, alt_bas_y, alt_bas)
+            c.setFillColor(colors.HexColor('#1B4F8A'))
+            c.roundRect(x0 + tw + 6, alt_bas_y - 3, ew, 12, 2, fill=1, stroke=0)
+            c.setFillColor(colors.white)
+            c.setFont('Vera-Bold', 8)
+            c.drawString(x0 + tw + 11, alt_bas_y, et)
+        else:
+            c.drawCentredString(PW / 2, alt_bas_y, alt_bas)
 
         sag_x = PW - M
         firma_w = 8.6 * cm
@@ -2499,8 +2611,8 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
         c.line(M, y - 3.5, PW - M, y - 3.5)
         y -= 0.45 * cm
 
-        # ===== BILGI SERIDI (6 kutu) =====
-        strip_h = 1.05 * cm
+        # ===== BILGI SERIDI (6 kutu + siparis bilgileri satiri) =====
+        strip_h = 0.95 * cm
         siparis_tarihi = production.start_date or (production.created_at.date() if production.created_at else None)
         kutular = [
             ('İŞ EMRİ NO', b['no']),
@@ -2526,8 +2638,27 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
             dg2, dsz = _ie_metin_sigdir(c, str(dg), 'Vera-Bold', 11, kw - 14, 7)
             c.setFillColor(_Y_ANTRASIT)
             c.setFont('Vera-Bold', dsz)
-            c.drawString(kx + 7, y - 0.83 * cm, dg2)
-        y -= strip_h + 0.35 * cm
+            c.drawString(kx + 7, y - 0.77 * cm, dg2)
+        # 2. satir: siparis bilgileri (her kutu 2 sutun genisliginde)
+        y2 = y - strip_h
+        c.setStrokeColor(_Y_ANTRASIT)
+        c.setLineWidth(1)
+        c.rect(M, y2 - strip_h, CW, strip_h, fill=0, stroke=1)
+        kw2 = CW / 3
+        for i, (et, dg) in enumerate([('SATIŞ TEMSİLCİSİ', satis), ('TESLİM ŞEKLİ', teslim_sekli), ('SİPARİŞTE', siparis_ozet)]):
+            kx = M + i * kw2
+            if i:
+                c.setStrokeColor(_Y_CIZGI_GRI)
+                c.setLineWidth(0.5)
+                c.line(kx, y2 - strip_h + 3, kx, y2 - 3)
+            c.setFillColor(_IE_ETIKET_GRI)
+            c.setFont('Vera', 6.6)
+            c.drawString(kx + 7, y2 - 0.35 * cm, et)
+            dg2, dsz = _ie_metin_sigdir(c, str(dg), 'Vera-Bold', 10, kw2 - 14, 7)
+            c.setFillColor(_Y_ANTRASIT)
+            c.setFont('Vera-Bold', dsz)
+            c.drawString(kx + 7, y2 - 0.77 * cm, dg2)
+        y = y2 - strip_h - 0.3 * cm
 
         # ===== GOVDE: sol bilgiler | sag gorsel =====
         imza_h = 1.45 * cm
@@ -2560,10 +2691,12 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
         if b['gramaj']:
             satir.append(('Kağıt gramajı', b['gramaj']))
         satir.append(('Ölçü (En × Boy × Körük)', b['olcu']))
+        if b.get('ozellik'):
+            satir.append(('Özellik', b['ozellik']))
         satir.append(('Baskı', b['baski']))
         satir.append(('Birim', b['birim']))
         et_w = sol_w * 0.36
-        rh = 0.62 * cm
+        rh = 0.56 * cm
         c.setLineWidth(1)
         tablo_h = rh * len(satir)
         c.setFillColor(_IE_ETIKET_ZEMIN)
@@ -2580,12 +2713,12 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
             vx = sol_x + et_w + 6
             vw = sol_w - et_w - 12
             if et == 'Kese numarası' and dg:
-                c.setFont('Vera-Bold', 10.5)
-                bw = c.stringWidth(dg, 'Vera-Bold', 10.5) + 12
+                c.setFont('Vera-Bold', 9.5)
+                bw = c.stringWidth(dg, 'Vera-Bold', 9.5) + 12
                 c.setFillColor(_Y_ANTRASIT)
-                c.rect(vx - 2, ry + 3, bw, rh - 6, fill=1, stroke=0)
+                c.rect(vx - 2, ry + 2.5, bw, rh - 5, fill=1, stroke=0)
                 c.setFillColor(_Y_SARI)
-                c.drawString(vx + 4, ry + rh / 2 - 3.6, dg)
+                c.drawString(vx + 4, ry + rh / 2 - 3.3, dg)
             else:
                 t2, s2 = _ie_metin_sigdir(c, str(dg) if dg else '-', 'Vera-Bold', 9.5, vw, 6.5)
                 c.setFillColor(_Y_ANTRASIT if dg else colors.HexColor('#999999'))
@@ -2597,11 +2730,13 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
         y -= tablo_h + 0.25 * cm
 
         # -- Miktar kutulari --
-        mk_h = 1.15 * cm
         mk_w = (sol_w - 0.25 * cm) / 2
+        mk_h = 1.05 * cm
+        ikinci = ('TEDARİK DURUMU', b['durum']) if ticaret else \
+            ('GERÇEKLEŞEN', f"{_miktar_tr(b['gerceklesen'])} {b['birim']}" if b['gerceklesen'] else '')
         for i, (et, dg) in enumerate([
-            ('PLANLANAN', f"{_miktar_tr(b['planlanan'])} {b['birim']}" if b['planlanan'] else '-'),
-            ('GERÇEKLEŞEN', f"{_miktar_tr(b['gerceklesen'])} {b['birim']}" if b['gerceklesen'] else ''),
+            ('PLANLANAN' if not ticaret else 'MİKTAR', f"{_miktar_tr(b['planlanan'])} {b['birim']}" if b['planlanan'] else '-'),
+            ikinci,
         ]):
             kx = sol_x + i * (mk_w + 0.25 * cm)
             c.setStrokeColor(_Y_ANTRASIT)
@@ -2611,10 +2746,36 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
             c.setFont('Vera', 6.6)
             c.drawString(kx + 7, y - 0.33 * cm, et)
             if dg:
+                dg3, dsz3 = _ie_metin_sigdir(c, dg, 'Vera-Bold', 15, mk_w - 14, 8)
                 c.setFillColor(_Y_ANTRASIT)
-                c.setFont('Vera-Bold', 15)
-                c.drawString(kx + 7, y - 0.95 * cm, dg)
-        y -= mk_h + 0.25 * cm
+                c.setFont('Vera-Bold', dsz3)
+                c.drawString(kx + 7, y - 0.88 * cm, dg3)
+        y -= mk_h + 0.22 * cm
+
+        # -- TEDARIK kutusu (sadece ticaret kalemleri) --
+        if ticaret:
+            from app.models import TICARET_STAGES
+            td_h = 1.2 * cm
+            mavi = colors.HexColor('#1B4F8A')
+            c.setFillColor(colors.HexColor('#F2F7FC'))
+            c.rect(sol_x, y - td_h, sol_w, td_h, fill=1, stroke=0)
+            c.setFillColor(mavi)
+            c.rect(sol_x, y - td_h, 4, td_h, fill=1, stroke=0)
+            c.setFont('Vera-Bold', 8.5)
+            c.drawString(sol_x + 11, y - 0.4 * cm, 'Bu kalem atölyede üretilmez – hazır alınıp sevk edilir.')
+            anahtarlar = [k for k, _ in TICARET_STAGES]
+            try:
+                aktif = anahtarlar.index(b['ticaret_durumu'])
+            except ValueError:
+                aktif = 0
+            kx = sol_x + 11
+            c.setFont('Vera', 8)
+            for i, (k, et) in enumerate(TICARET_STAGES):
+                _ie_kutu_isareti(c, kx, y - 0.95 * cm, 8, i <= aktif)
+                c.setFillColor(_Y_ANTRASIT)
+                c.drawString(kx + 12, y - 0.92 * cm, et)
+                kx += c.stringWidth(et, 'Vera', 8) + 34
+            y -= td_h + 0.22 * cm
 
         # -- KOLI kutusu --
         koli_h = 1.05 * cm
@@ -2708,6 +2869,226 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
     c.save()
     buf.seek(0)
     return buf
+
+
+# ===== 2026-10-26 (2): SIPARIS DOSYASI - kapak + onayli teklif + tum is emirleri (tek PDF) =====
+
+def _siparis_kapak_pdf(production, company, deal, kalem_bilgileri, sayfa_plani):
+    """A4 dikey kapak: siparis ozeti (musteri, tarihler, satis, termin, odeme
+    plani, genel toplam), kalem listesi (URETIM/TEDARIK) ve dosya icerigi."""
+    PW, PH = A4
+    M = 1.5 * cm
+    CW = PW - 2 * M
+    buf = BytesIO()
+    c = _PDFCanvas(buf, pagesize=A4)
+    c.setTitle(f'Sipariş Dosyası {deal.display_no}')
+    top = PH - M
+    # baslik
+    logo_reader = None
+    if company.logo_data:
+        lb = _logo_for_pdf_yeni(company.logo_data)
+        if lb:
+            try:
+                logo_reader = ImageReader(lb)
+            except Exception:
+                logo_reader = None
+    if logo_reader:
+        lw, lh = logo_reader.getSize()
+        olc = min(4.5 * cm / lw, 1.6 * cm / lh)
+        c.drawImage(logo_reader, M, top - lh * olc, lw * olc, lh * olc, mask='auto')
+    c.setFillColor(_Y_ANTRASIT)
+    c.setFont('Vera-Bold', 18)
+    c.drawRightString(PW - M, top - 0.75 * cm, 'S İ P A R İ Ş   D O S Y A S I')
+    c.setFont('Vera', 8.5)
+    c.setFillColor(colors.HexColor('#666666'))
+    c.drawRightString(PW - M, top - 1.3 * cm, f"{deal.display_no} · IE-{production.id:05d}")
+    y = top - 1.95 * cm
+    c.setStrokeColor(_Y_SARI)
+    c.setLineWidth(3)
+    c.line(M, y, PW - M, y)
+    c.setStrokeColor(_Y_ANTRASIT)
+    c.setLineWidth(1)
+    c.line(M, y - 3.5, PW - M, y - 3.5)
+    y -= 0.6 * cm
+
+    customer = deal.customer
+    musteri = _clean_for_pdf(customer.company_name) if customer.company_name else \
+        f"{_clean_for_pdf(customer.first_name) or ''} {_clean_for_pdf(customer.last_name) or ''}".strip()
+    seller = getattr(deal, 'seller', None)
+    satis = (getattr(seller, 'full_name', None) or getattr(seller, 'username', None) or '-') if seller else '-'
+    siparis_tarihi = production.start_date or (production.created_at.date() if production.created_at else None)
+    terminler = [b['termin'] for b in kalem_bilgileri if b['termin']]
+    termin = max(terminler) if terminler else production.due_date
+    sym = 'TL' if (deal.para_birimi or 'TRY') == 'TRY' else deal.para_birimi
+    pes = getattr(deal, 'pesinat_orani', None)
+    pes_txt = '-'
+    if pes is not None:
+        pes_txt = f"%{_miktar_tr(pes)}"
+        try:
+            pes_txt += f" · {_money_tr(deal.value * pes / 100)} {sym}"
+        except Exception:
+            pass
+        if getattr(deal, 'pesinat_tarihi', None):
+            pes_txt += f" · {deal.pesinat_tarihi.strftime('%d.%m.%Y')}"
+    bak = getattr(deal, 'bakiye_tarihi', None)
+    alanlar = [
+        ('MÜŞTERİ', musteri), ('SİPARİŞ TARİHİ', siparis_tarihi.strftime('%d.%m.%Y') if siparis_tarihi else '-'),
+        ('TEKLİF NO', deal.display_no), ('İŞ EMRİ', f'IE-{production.id:05d}'),
+        ('SATIŞ TEMSİLCİSİ', satis), ('TERMİN (en geç)', termin.strftime('%d.%m.%Y') if termin else '-'),
+        ('PEŞİNAT', pes_txt), ('BAKİYE TARİHİ', bak.strftime('%d.%m.%Y') if bak else '-'),
+        ('TESLİM ŞEKLİ', _teslim_yeri(deal, company) or '-'),
+        ('GENEL TOPLAM (KDV dahil)', f"{_money_tr(deal.value or 0)} {sym}"),
+    ]
+    rh = 0.95 * cm
+    kw = CW / 2
+    satir = (len(alanlar) + 1) // 2
+    c.setStrokeColor(_Y_ANTRASIT)
+    c.setLineWidth(1)
+    c.rect(M, y - satir * rh, CW, satir * rh, fill=0, stroke=1)
+    for i, (et, dg) in enumerate(alanlar):
+        kx = M + (i % 2) * kw
+        ky = y - (i // 2) * rh
+        if i % 2:
+            c.setStrokeColor(_Y_CIZGI_GRI)
+            c.setLineWidth(0.5)
+            c.line(kx, ky - rh + 3, kx, ky - 3)
+        if i // 2:
+            c.setStrokeColor(_Y_CIZGI_GRI)
+            c.setLineWidth(0.5)
+            c.line(kx + 3, ky, kx + kw - 3, ky)
+        c.setFillColor(_IE_ETIKET_GRI)
+        c.setFont('Vera', 6.8)
+        c.drawString(kx + 7, ky - 0.33 * cm, et)
+        dg2, dsz = _ie_metin_sigdir(c, str(dg), 'Vera-Bold', 10.5, kw - 14, 7)
+        c.setFillColor(_Y_ANTRASIT)
+        c.setFont('Vera-Bold', dsz)
+        c.drawString(kx + 7, ky - 0.75 * cm, dg2)
+    y -= satir * rh + 0.6 * cm
+
+    # kalemler
+    c.setFillColor(_Y_ANTRASIT)
+    c.setFont('Vera-Bold', 10)
+    c.drawString(M, y, 'KALEMLER')
+    y -= 0.25 * cm
+    rh2 = 0.8 * cm
+    for b in kalem_bilgileri:
+        if y - rh2 < 6 * cm:
+            c.setFont('Vera', 8)
+            c.setFillColor(colors.HexColor('#777777'))
+            c.drawString(M, y - 0.4 * cm, f'… ve diğer kalemler (toplam {len(kalem_bilgileri)}) – iş emri sayfalarında')
+            y -= 0.6 * cm
+            break
+        c.setStrokeColor(_V_CERCEVE)
+        c.setLineWidth(0.6)
+        c.rect(M, y - rh2, CW, rh2 - 2, fill=0, stroke=1)
+        c.setFillColor(_Y_ANTRASIT)
+        c.rect(M + 5, y - rh2 + 5, 14, 14, fill=1, stroke=0)
+        c.setFillColor(_Y_SARI)
+        c.setFont('Vera-Bold', 8)
+        c.drawCentredString(M + 12, y - rh2 + 9, str(b['sira']))
+        ad = b['urun'] + (f" · {b['kese_gramaj']} gr" if b['kese_gramaj'] and f"{b['kese_gramaj']}" not in b['urun'] else '')
+        mik = f"{_miktar_tr(b['planlanan'])} {b['birim']}" if b['planlanan'] else ''
+        if b['koli_baskisiz']:
+            mik += ' · baskısız koli'
+        ad2, asz = _ie_metin_sigdir(c, ad, 'Vera-Bold', 9, CW * 0.55, 6.5)
+        c.setFillColor(_Y_ANTRASIT)
+        c.setFont('Vera-Bold', asz)
+        c.drawString(M + 26, y - rh2 + 9, ad2)
+        c.setFont('Vera', 8.5)
+        c.setFillColor(colors.HexColor('#444444'))
+        c.drawRightString(PW - M - 70, y - rh2 + 9, mik)
+        etiket = 'TEDARİK' if b['tip'] == 'ticaret' else 'ÜRETİM'
+        if b['tip'] == 'ticaret':
+            c.setFillColor(colors.HexColor('#E3EEF9'))
+            c.rect(PW - M - 62, y - rh2 + 6, 56, 12, fill=1, stroke=0)
+            c.setFillColor(colors.HexColor('#1B4F8A'))
+        else:
+            c.setFillColor(_Y_ANTRASIT)
+            c.rect(PW - M - 62, y - rh2 + 6, 56, 12, fill=1, stroke=0)
+            c.setFillColor(_Y_SARI)
+        c.setFont('Vera-Bold', 7)
+        c.drawCentredString(PW - M - 34, y - rh2 + 9.5, etiket)
+        y -= rh2
+    y -= 0.5 * cm
+
+    # dosya icerigi
+    c.setFillColor(_Y_ANTRASIT)
+    c.setFont('Vera-Bold', 10)
+    c.drawString(M, y, 'DOSYA İÇERİĞİ')
+    y -= 0.5 * cm
+    c.setFont('Vera', 9)
+    for ad, sayfa in sayfa_plani:
+        c.setFillColor(colors.HexColor('#333333'))
+        c.drawString(M + 6, y, ad)
+        c.drawRightString(PW - M - 6, y, sayfa)
+        c.setStrokeColor(_V_CERCEVE)
+        c.setDash(1, 2)
+        c.line(M + 6 + c.stringWidth(ad, 'Vera', 9) + 4, y + 2, PW - M - 10 - c.stringWidth(sayfa, 'Vera', 9), y + 2)
+        c.setDash()
+        y -= 0.5 * cm
+
+    # imza / arsiv notu + footer
+    c.setFont('Vera', 8)
+    c.setFillColor(colors.HexColor('#777777'))
+    c.drawString(M, 2.4 * cm, f"Dosya oluşturma: {datetime.now().strftime('%d.%m.%Y %H:%M')} · Bu dosya arşiv içindir; iş emri sayfaları fiyat içermez.")
+    fh = 0.55 * cm
+    fy = 1.2 * cm
+    c.setFillColor(_Y_ANTRASIT)
+    c.rect(M, fy, CW, fh, fill=1, stroke=0)
+    c.setStrokeColor(_Y_SARI)
+    c.setLineWidth(2)
+    c.line(M, fy + fh, PW - M, fy + fh)
+    c.setFont('Vera', 7)
+    c.setFillColor(_Y_MIKRO)
+    c.drawString(M + 8, fy + fh / 2 - 2.5, (company.company_name or 'Lema Ambalaj'))
+    c.setFillColor(colors.white)
+    c.setFont('Vera-Bold', 7.5)
+    c.drawRightString(PW - M - 8, fy + fh / 2 - 2.5, f'{deal.display_no} · Sipariş dosyası · Kapak')
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+def generate_siparis_dosyasi_pdf(production):
+    """Tek PDF: (1) kapak, (2) onayli teklif (Ayarlar'daki teklif tasarimi -
+    yeni/klasik - aynen), (3) tum is emri sayfalari (uretim + tedarik).
+    Veritabanina hicbir sey YAZMAZ."""
+    from pypdf import PdfReader, PdfWriter
+    from app.models import KeseGramajKatalog
+    try:
+        katalog = KeseGramajKatalog.query.all()
+    except Exception:
+        katalog = []
+    company = _get_company_settings_for_pdf()
+    deal = production.deal
+    kalemler = is_emri_kalemleri(production)
+    bilgiler = [is_emri_kalem_bilgisi(production, it, n, len(kalemler), katalog) for n, it in enumerate(kalemler, 1)]
+
+    teklif = PdfReader(generate_deal_pdf(deal))
+    is_emri = PdfReader(generate_is_emri_pdf_yatay(production))
+    n_teklif, n_ie = len(teklif.pages), len(is_emri.pages)
+    plan = [('Kapak – sipariş özeti', 's. 1'),
+            (f'Onaylı teklif ({deal.display_no})', f's. 2' if n_teklif == 1 else f's. 2–{1 + n_teklif}')]
+    s = 2 + n_teklif
+    for b in bilgiler or [None]:
+        if b is None:
+            plan.append(('İş emri', f's. {s}'))
+        else:
+            tur = 'tedarik' if b['tip'] == 'ticaret' else 'üretim'
+            plan.append((f"İş emri {b['no']} ({tur}) – {b['urun'][:45]}", f's. {s}'))
+        s += 1
+    kapak = PdfReader(_siparis_kapak_pdf(production, company, deal, bilgiler, plan))
+
+    w = PdfWriter()
+    for r in (kapak, teklif, is_emri):
+        for pg in r.pages:
+            w.add_page(pg)
+    w.add_metadata({'/Title': f'Sipariş Dosyası {deal.display_no} - IE-{production.id:05d}'})
+    out = BytesIO()
+    w.write(out)
+    out.seek(0)
+    return out
 
 
 def _escape_xml(s):

@@ -10,6 +10,7 @@
 <style>
 .ie-koli-uyari { background:#FFF3C4; color:#353639; border:1px solid #E8C860; font-weight:600; }
 .ie-kese { background:#353639; color:#FBC213; font-weight:700; }
+.ie-tedarik { background:#E3EEF9; color:#1B4F8A; border:1px solid #9DBCE0; font-weight:700; }
 .ie-tablo td { vertical-align: middle; }
 @media (max-width: 767.98px) {
     .ie-tablo thead { display:none; }
@@ -33,7 +34,7 @@
 </ul>
 <div class="d-flex flex-wrap gap-1 mb-3">
     <a class="btn btn-sm {{ 'btn-dark' if not filtre else 'btn-outline-secondary' }}" href="{{ url_for('is_emirleri', durum=sekme, q=q) }}">Hepsi</a>
-    {% for d in ['Bekliyor', 'Üretimde', 'Hazır', 'Sevk edildi'] %}
+    {% for d in ['Bekliyor', 'Üretimde', 'Hazır', 'Sevk edildi', 'Sipariş Edildi', 'Tedarik Edildi', 'Teslime Hazır'] %}
     <a class="btn btn-sm {{ 'btn-dark' if filtre == d else 'btn-outline-secondary' }}" href="{{ url_for('is_emirleri', durum=sekme, q=q, kalem_durum=d) }}">{{ d }} <span class="badge bg-secondary">{{ sayac.get(d, 0) }}</span></a>
     {% endfor %}
 </div>
@@ -55,24 +56,31 @@
             <td data-et="Müşteri">{{ s.musteri }}</td>
             <td data-et="Ürün">
                 <span>{{ b.urun }}</span>
+                {% if b.tip == 'ticaret' %}<span class="badge ie-tedarik ms-1">TEDARİK</span>{% endif %}
                 {% if b.kese_gramaj %}<span class="badge ie-kese ms-1">{{ b.kese_gramaj }} gr</span>{% endif %}
             </td>
             <td data-et="Koli">
                 {% if b.koli_baskisiz %}<span class="badge ie-koli-uyari">⚠ Baskısız</span>{% else %}<span class="text-muted small">Firma baskılı</span>{% endif %}
             </td>
             <td data-et="Planlanan" class="text-end">{{ miktar_tr(b.planlanan) }} {{ b.birim }}</td>
+            {% if b.tip == 'ticaret' %}
+            <td data-et="Gerçekleşen" class="text-end text-muted">—</td>
+            <td data-et="Kalan" class="text-end text-muted">—</td>
+            {% else %}
             <td data-et="Gerçekleşen" class="text-end">{{ miktar_tr(b.gerceklesen) if b.gerceklesen else '-' }}{{ ' ' ~ b.birim if b.gerceklesen }}</td>
             <td data-et="Kalan" class="text-end">{{ miktar_tr(b.kalan) }} {{ b.birim }}</td>
+            {% endif %}
             <td data-et="Termin">
                 {% if b.termin %}<span class="{{ 'text-danger fw-bold' if s.termin_renk == 'danger' else ('text-warning fw-bold' if s.termin_renk == 'warning' else '') }}">{{ b.termin.strftime('%d.%m.%Y') }}</span>{% else %}-{% endif %}
             </td>
             <td data-et="Durum">
-                {% set renk = {'Bekliyor': 'secondary', 'Üretimde': 'primary', 'Hazır': 'success', 'Sevk edildi': 'dark', 'İptal': 'danger'} %}
+                {% set renk = {'Bekliyor': 'secondary', 'Üretimde': 'primary', 'Hazır': 'success', 'Sevk edildi': 'dark', 'İptal': 'danger', 'Sipariş Edildi': 'info', 'Tedarik Edildi': 'primary', 'Teslime Hazır': 'success'} %}
                 <span class="badge bg-{{ renk.get(b.durum, 'secondary') }}">{{ b.durum }}</span>
             </td>
             <td data-et="" class="text-nowrap">
                 <a class="btn btn-sm btn-outline-dark" href="{{ url_for('production_is_emri_pdf', id=s.p.id, kalem=s.it.id) }}" title="Bu kalemin iş emri PDF'i"><i class="bi bi-printer"></i> PDF</a>
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('production_detail', id=s.p.id) }}" title="Üretilen miktar ve durumu güncelle"><i class="bi bi-pencil"></i> Güncelle</a>
+                {% if s.b.sira == 1 %}<a class="btn btn-sm btn-warning" href="{{ url_for('production_siparis_dosyasi_pdf', id=s.p.id) }}" title="Kapak + onaylı teklif + tüm iş emirleri"><i class="bi bi-folder2-open"></i></a>{% endif %}
             </td>
         </tr>
     {% endfor %}

@@ -211,3 +211,79 @@ def test_teklif_pdf_kese_adda_varsa_tekrar_yazilmaz():
     with pdfplumber.open(io.BytesIO(pdf)) as d:
         t = '\n'.join(p.extract_text() or '' for p in d.pages)
     assert t.count('1000 gr') == 1
+
+
+# ---------- 2026-10-26 (2): tedarik is emri + siparis bilgileri + siparis dosyasi ----------
+
+def _karisik_uretim():
+    ds = [_di(1, description='1000 gr esmer kare dipli kese', en='12,5', boy='29', korugu='7', numune_gorseli=JPG,
+              quantity=500, unit='kg'),
+          _di(2, description='Gold metalize kilitli doypack 16×27', quantity=5000, unit='adet')]
+    pis = [_pi(1, ds[0], urun_tipi='uretim'), _pi(2, ds[1], urun_tipi='ticaret', ticaret_durumu='tedarik_edildi')]
+    p = _uretim(ds, [pis[0]])
+    p.items = pis
+    p.deal.seller = NS(full_name='SERKAN ACAR', username='serkan')
+    return p
+
+
+def test_tedarik_kalemi_atlanmaz_ve_mavi_sayfa():
+    sayfalar = _metin(_uret(_karisik_uretim()))
+    assert len(sayfalar) == 2
+    t2 = sayfalar[1][2]
+    assert 'TEDARİK' in t2 and 'IE-00127-2' in t2 and 'atölyede üretilmez' in t2
+    assert 'Tedarik Edildi' in t2
+
+
+def test_siparis_bilgileri_seridi():
+    t = _metin(_uret(_karisik_uretim()))[0][2]
+    assert 'SERKAN ACAR' in t
+    assert 'Konya fabrika teslim' in t
+    assert '2 kalem (1 üretim, 1 tedarik)' in t
+
+
+def test_siparis_dosyasi_kapak_teklif_is_emirleri(monkeypatch):
+    p = _karisik_uretim()
+    teklif = T._teklif([T._kalem('1000 gr esmer kare dipli kese'), T._kalem('Gold doypack')])
+    teklif.pesinat_orani, teklif.pesinat_tarihi, teklif.bakiye_tarihi = 50, date(2026, 10, 26), date(2026, 11, 26)
+    teklif.seller = p.deal.seller
+    for k in ('items',):
+        setattr(p.deal, k, p.deal.items)
+    # kapak/teklif icin teklif alanlari + is emri icin kalemler ayni nesnede
+    for ad in ('deal_date', 'created_at', 'valid_until', 'expected_close', 'customer', 'odeme_vade_gun', 'vade_gun',
+               'vade_gun_metni', 'odeme_yontemi', 'odeme_yontemi_listesi', 'para_birimi', 'para_birimi_sembol',
+               'kullanilan_kur', 'kur_usd', 'kur_eur', 'kur_tarihi', 'kur_turu', 'notes', 'subtotal', 'vat_rate',
+               'vat_amount', 'value', 'pesinat_orani', 'pesinat_tarihi', 'bakiye_tarihi'):
+        setattr(p.deal, ad, getattr(teklif, ad))
+    monkeypatch.setattr(pdf_utils, 'generate_deal_pdf', lambda d, lang='tr': pdf_utils._generate_deal_pdf_yeni(teklif))
+    pdf = pdf_utils.generate_siparis_dosyasi_pdf(p).getvalue()
+    with pdfplumber.open(io.BytesIO(pdf)) as d:
+        sayfalar = [(pg.width, pg.height, pg.extract_text() or '') for pg in d.pages]
+    kapak = sayfalar[0]
+    assert kapak[1] > kapak[0], 'kapak dikey olmali'
+    assert 'D O S Y A S I' in kapak[2] and 'PEŞİNAT' in kapak[2] and 'GENEL TOPLAM' in kapak[2] and 'TEDARİK' in kapak[2]
+    yatay = [s for s in sayfalar if s[0] > s[1]]
+    assert len(yatay) == 2, 'iki is emri sayfasi (uretim + tedarik)'
+    assert len(sayfalar) >= 4
+
+
+# ---------- 2026-10-26 (3): urun adindan olcu / malzeme / ozellik ----------
+
+@pytest.mark.parametrize('ad,en,boy,kor,malzeme', [
+    ('Gold metalize kilitli doypack 16×27 (4+4)', '16', '27', '4+4', 'Gold Metalize'),
+    ('şeffaf gold metalize kilitli doypack 16×27 (4+4)', '16', '27', '4+4', 'Şeffaf Gold Metalize'),
+    ('Poşet 30x50x10 beyaz', '30', '50', '10', 'Beyaz'),
+    ('İthal kuşe kese 12,5 X 29', '12,5', '29', None, 'Kuşe'),
+    ('Atlet poşet', None, None, None, None),
+])
+def test_addan_detaylar(ad, en, boy, kor, malzeme):
+    d = pdf_utils.addan_detaylar(ad)
+    assert (d['en'], d['boy'], d['korugu'], d['malzeme']) == (en, boy, kor, malzeme)
+
+
+def test_is_emri_bos_alanlar_addan_dolar_dolu_alan_oncelikli():
+    d = _di(1, description='Gold metalize kilitli doypack 16×27 (4+4)', quantity=5000, unit='adet')
+    t = _metin(_uret(_uretim([d], [_pi(1, d, kagit_tipi=None)])))[0][2]
+    assert '16 × 27 × 4+4 cm' in t and 'Gold Metalize' in t and 'Kilitli' in t
+    d2 = _di(1, description='Doypack 16×27', en='18', boy='30', kagit_cinsi='Kraft', quantity=1, unit='adet')
+    t2 = _metin(_uret(_uretim([d2], [_pi(1, d2)])))[0][2]
+    assert '18 × 30 cm' in t2 and '16 × 27' not in t2.split('Ölçü')[1][:30]

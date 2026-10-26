@@ -17,17 +17,21 @@
                 <li><a class="dropdown-item" href="{{ url_for('production_is_emri_pdf', id=production.id, nusha='baski') }}">Nüsha: Baskı Ustası</a></li>
                 <li><a class="dropdown-item" href="{{ url_for('production_is_emri_pdf', id=production.id, nusha='makine') }}">Nüsha: Makine Ustası</a></li>
                 <li><a class="dropdown-item" href="{{ url_for('production_is_emri_pdf', id=production.id) }}">Nüsha etiketsiz</a></li>
-                {% if production.uretim_items|length > 1 %}
+                {% set _ie_kalemler = production.items|sort(attribute='id') %}
+                {% if _ie_kalemler|length > 1 %}
                 <li><hr class="dropdown-divider"></li>
                 <li><h6 class="dropdown-header">Tek kalem yazdır</h6></li>
-                {% for it in production.uretim_items %}
-                <li><a class="dropdown-item" href="{{ url_for('production_is_emri_pdf', id=production.id, kalem=it.id) }}">IE-{{ '%05d'|format(production.id) }}-{{ loop.index }} · {{ it.description|truncate(40) }}</a></li>
+                {% for it in _ie_kalemler %}
+                <li><a class="dropdown-item" href="{{ url_for('production_is_emri_pdf', id=production.id, kalem=it.id) }}">IE-{{ '%05d'|format(production.id) }}-{{ loop.index }} · {{ it.description|truncate(40) }}{{ ' (tedarik)' if it.urun_tipi == 'ticaret' }}</a></li>
                 {% endfor %}
                 {% endif %}
                 <li><hr class="dropdown-divider"></li>
                 <li><a class="dropdown-item text-muted small" href="{{ url_for('production_is_emri_pdf', id=production.id, klasik=1) }}">Eski (dikey) tasarım</a></li>
             </ul>
         </div>
+        <a href="{{ url_for('production_siparis_dosyasi_pdf', id=production.id) }}" class="btn btn-warning" title="Kapak + onaylı teklif + tüm iş emirleri tek PDF">
+            <i class="bi bi-folder2-open"></i> Sipariş Dosyası
+        </a>
         <a href="{{ url_for('deal_detail', id=production.deal.id) }}" class="btn btn-outline-info">
             <i class="bi bi-file-earmark-text"></i> Teklif Detayı
         </a>
