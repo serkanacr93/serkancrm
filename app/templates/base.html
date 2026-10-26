@@ -82,7 +82,7 @@
     </header>
 
     {% set musteri_active = request.endpoint in ['customers','potential_customers','takip_gerekiyor_customers','duplicate_customers'] or 'customer' in request.endpoint %}
-    {% set uretim_active = 'production' in request.endpoint or 'shipment' in request.endpoint or 'irsaliye' in request.endpoint or 'product' in request.endpoint or 'tedarik' in request.endpoint or 'gunluk_uretim' in request.endpoint or request.endpoint == 'uretim_planlama' %}
+    {% set uretim_active = 'production' in request.endpoint or 'shipment' in request.endpoint or 'irsaliye' in request.endpoint or 'product' in request.endpoint or 'tedarik' in request.endpoint or 'gunluk_uretim' in request.endpoint or request.endpoint in ('uretim_planlama', 'is_emirleri') %}
     {% set finans_active = request.endpoint == 'cari_hesap_ozeti' or 'invoice' in request.endpoint or 'payment' in request.endpoint or 'commission' in request.endpoint %}
     {% set raporlar_active = request.endpoint == 'reports' or 'daily_report' in request.endpoint or 'calendar' in request.endpoint or 'task' in request.endpoint %}
     <nav class="crm-navbar navbar navbar-expand-lg navbar-dark">
@@ -130,6 +130,10 @@
                             <a class="crm-mega-box" href="{{ url_for('production_list') }}">
                                 <i class="bi bi-gear"></i>
                                 <div><strong>Üretim Listesi</strong><small>{{ navbar_summary.uretimde_count }} iş üretimde</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('is_emirleri') }}">
+                                <i class="bi bi-clipboard-check"></i>
+                                <div><strong>İş Emirleri</strong><small>Kalem bazlı takip</small></div>
                             </a>
                             <a class="crm-mega-box" href="{{ url_for('uretim_planlama') }}">
                                 <i class="bi bi-diagram-3"></i>

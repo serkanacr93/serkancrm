@@ -79,6 +79,32 @@
             <label class="tk-label">Körük</label>
             <input type="text" class="form-control form-control-sm" name="korugu_{{ idx }}" value="{{ item.korugu if item else '' }}" placeholder="Körük">
         </div>
+        {# 2026-10-26 (Is Emri): kese numarasi + koli tipi - JS ile eklenen kartlar
+           icin AYNI HTML static/js/kese-koli.js keseKoliHtml()'de. Liste:
+           Ayarlar > Teklif Yardimci'daki kese tablosu (kese_olcu). #}
+        {% set _koli = (item.koli_tipi if item and item.koli_tipi else (koli_varsayilan or 'baskili')) %}
+        <div class="tk-f tk-kesekoli"><div class="tk-kesekoli-ic">
+            <div class="tk-alt tk-alt-kese">
+                <label class="tk-label">Kese numarası</label>
+                <select class="form-select form-select-sm" name="kese_gramaj_{{ idx }}">
+                    <option value="">—</option>
+                    {% for k in (kese_olcu or []) %}{% if k.aktif or (item and item.kese_gramaj == k.gramaj) %}
+                    <option value="{{ k.gramaj }}" {{ 'selected' if item and item.kese_gramaj == k.gramaj }}>{{ k.gramaj }} gr</option>
+                    {% endif %}{% endfor %}
+                    <option value="ozel">Özel ölçü</option>
+                </select>
+                <small class="tk-kese-not text-muted d-none"></small>
+            </div>
+            <div class="tk-alt tk-alt-koli">
+                <label class="tk-label">Koli</label>
+                <div class="btn-group btn-group-sm" role="group">
+                    <input type="radio" class="btn-check" name="koli_tipi_{{ idx }}" id="koli_b_{{ idx }}" value="baskili" {{ 'checked' if _koli != 'baskisiz' }}>
+                    <label class="btn btn-outline-secondary" for="koli_b_{{ idx }}">Firma baskılı</label>
+                    <input type="radio" class="btn-check" name="koli_tipi_{{ idx }}" id="koli_n_{{ idx }}" value="baskisiz" {{ 'checked' if _koli == 'baskisiz' }}>
+                    <label class="btn btn-outline-warning" for="koli_n_{{ idx }}">Baskısız</label>
+                </div>
+            </div>
+        </div></div>
         {# 2026-10-22: Termin ayri grid hucresi DEGIL, Teslim hucresinin (2 sutun)
            icinde dar alt alan - ayri hucre olunca 1300px'te tarih kirpiliyordu. #}
         <div class="tk-f tk-teslim">

@@ -64,6 +64,17 @@
                         <label for="notes" class="form-label">Notlar</label>
                         <textarea class="form-control" id="notes" name="notes" rows="2">{{ customer.notes or '' }}</textarea>
                     </div>
+                    {# 2026-10-26: yeni tekliflerde kalemlere on-secili gelen koli #}
+                    <div class="mb-3">
+                        <label class="form-label d-block">Varsayılan koli</label>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <input type="radio" class="btn-check" name="varsayilan_koli" id="vk_b" value="baskili" {{ 'checked' if customer.varsayilan_koli != 'baskisiz' }}>
+                            <label class="btn btn-outline-secondary" for="vk_b">Firma baskılı</label>
+                            <input type="radio" class="btn-check" name="varsayilan_koli" id="vk_n" value="baskisiz" {{ 'checked' if customer.varsayilan_koli == 'baskisiz' }}>
+                            <label class="btn btn-outline-warning" for="vk_n">Baskısız</label>
+                        </div>
+                        <small class="text-muted d-block">Baskısız seçilirse bu müşterinin yeni tekliflerinde kalemler baskısız koli ile gelir; iş emrinde sarı uyarı çıkar.</small>
+                    </div>
                     <div class="mb-3">
                         <label for="tasarim_gorseli" class="form-label">Tasarım Görseli</label>
                         {% if customer.tasarim_gorseli %}

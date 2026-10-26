@@ -61,6 +61,10 @@
                 <select class="form-select form-select-sm" id="production_picker_select">
                     <option value="">Bağlantısız (sadece kayıt)</option>
                 </select>
+                {# 2026-10-26: uretimin birden fazla kalemi varsa hangi is emri kalemine #}
+                <select class="form-select form-select-sm mt-1 d-none" id="production_item_picker_select">
+                    <option value="">Kalem seçilmedi</option>
+                </select>
             </div>
         </div>
         <div class="col-md-2">
@@ -299,10 +303,28 @@ var productionPicker = document.getElementById('productionPicker');
 var productionPickerSelect = document.getElementById('production_picker_select');
 var productionIdHidden = document.getElementById('production_id');
 
+var productionItemPicker = document.getElementById('production_item_picker_select');
+var productionItemsById = {};
+
+function fillProductionItemPicker(productionId) {
+    productionItemPicker.innerHTML = '<option value="">Kalem seçilmedi</option>';
+    var items = productionItemsById[productionId] || [];
+    if (items.length < 2) { productionItemPicker.classList.add('d-none'); return; }
+    items.forEach(function (it) {
+        var opt = document.createElement('option');
+        opt.value = it.id;
+        opt.textContent = it.label;
+        productionItemPicker.appendChild(opt);
+    });
+    productionItemPicker.classList.remove('d-none');
+}
+
 function resetProductionPicker() {
     productionPicker.classList.add('d-none');
     productionPickerSelect.innerHTML = '<option value="">Bağlantısız (sadece kayıt)</option>';
     productionIdHidden.value = '';
+    productionItemsById = {};
+    fillProductionItemPicker('');
 }
 
 function loadActiveProductionsForCustomer(customerId) {
@@ -313,6 +335,7 @@ function loadActiveProductionsForCustomer(customerId) {
         .then(function (list) {
             if (!list.length) return;
             list.forEach(function (p) {
+                productionItemsById[p.id] = p.items || [];
                 var opt = document.createElement('option');
                 opt.value = p.id;
                 opt.textContent = 'Üretimde · ' + p.label;
@@ -321,6 +344,7 @@ function loadActiveProductionsForCustomer(customerId) {
             if (list.length === 1) {
                 productionPickerSelect.value = list[0].id;
                 productionIdHidden.value = list[0].id;
+                fillProductionItemPicker(list[0].id);
             }
             productionPicker.classList.remove('d-none');
         })
@@ -329,6 +353,7 @@ function loadActiveProductionsForCustomer(customerId) {
 
 productionPickerSelect.addEventListener('change', function () {
     productionIdHidden.value = this.value;
+    fillProductionItemPicker(this.value);
 });
 
 initCustomerSearch({
@@ -458,6 +483,7 @@ document.getElementById('entryForm').addEventListener('submit', function (e) {
     formData.append('csrf_token', document.getElementById('csrf_token_value').value);
     formData.append('tarih', document.getElementById('entry_tarih').value);
     formData.append('production_id', document.getElementById('production_id').value);
+    formData.append('production_item_id', productionIdHidden.value ? productionItemPicker.value : '');
     formData.append('customer_id', document.getElementById('customer_id').value);
     formData.append('musteri_adi', document.getElementById('customer_search').value.trim());
     formData.append('koli_basi_kg', document.getElementById('entry_koli_basi_kg').value);

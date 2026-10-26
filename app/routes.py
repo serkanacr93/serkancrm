@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, IrsaliyeDegisiklikLog, format_price_tr, TR_AYLAR
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, siparisler, limiter, csrf
 from app.tcmb import fetch_tcmb_rate
@@ -714,6 +714,42 @@ def _parse_termin_gun(raw):
     except ValueError:
         return None
     return val if val > 0 else None
+
+
+def _miktar_tr_basit(value):
+    """/is-emirleri icin TR miktar bicimi ('1.500', '12,5')."""
+    try:
+        v = float(value or 0)
+    except (TypeError, ValueError):
+        return '-'
+    if v == int(v):
+        return f'{int(v):,}'.replace(',', '.')
+    return f'{v:,.2f}'.rstrip('0').rstrip('.').replace(',', '§').replace('.', ',').replace('§', '.')
+
+
+def _parse_kese_gramaj(raw):
+    """2026-10-26: 'Kese numarasi' secimi (100/250/.../2000) - bos/gecersiz
+    -> None ('Ozel olcu' secenegi de bos deger gonderir)."""
+    try:
+        val = int(str(raw or '').strip())
+    except ValueError:
+        return None
+    return val if val > 0 else None
+
+
+def _parse_koli_tipi(raw):
+    """2026-10-26: 'baskisiz' -> 'baskisiz', 'baskili' -> 'baskili', diger
+    her sey (bos, eski formdan gelmeyen alan) -> None (= firma baskili)."""
+    val = str(raw or '').strip().lower()
+    return val if val in ('baskili', 'baskisiz') else None
+
+
+def _kese_olcu_json():
+    """Teklif formundaki 'Kese numarasi' secimi icin KeseGramajKatalog (Ayarlar >
+    Teklif Yardimci'daki AYNI tablo) - kese-koli.js olcu otomatik doldurma ve
+    ters esleme icin kullanir. Yardimci paneller kapali olsa da gonderilir."""
+    return [{'gramaj': k.gramaj, 'en': k.olcu_en, 'boy': k.olcu_boy, 'korugu': k.olcu_korugu, 'aktif': k.aktif}
+            for k in KeseGramajKatalog.query.order_by(KeseGramajKatalog.sira.asc(), KeseGramajKatalog.gramaj.asc()).all()]
 
 
 def _parse_item_para_birimi(form, i, deal_para_birimi):
@@ -2560,6 +2596,7 @@ def register_routes(app):
                 contact_email=request.form.get('contact_email'),
                 address=request.form.get('address'),
                 notes=request.form.get('notes'),
+                varsayilan_koli=_parse_koli_tipi(request.form.get('varsayilan_koli')),
                 owner_user_id=current_user.id
             )
             # PAKET B Is B6 (2026-10-14): isim benzerligi - NON-BLOCKING
@@ -2876,6 +2913,10 @@ def register_routes(app):
             siparis_dongusu = request.form.get('siparis_dongusu_gun')
             if siparis_dongusu:
                 customer.siparis_dongusu_gun = int(siparis_dongusu)
+            # 2026-10-26: varsayilan koli - alan formda varsa (radio) yazilir;
+            # eski formdan/baska yerden gelen POST'ta hic dokunulmaz.
+            if 'varsayilan_koli' in request.form:
+                customer.varsayilan_koli = _parse_koli_tipi(request.form.get('varsayilan_koli'))
 
             tasarim_file = request.files.get('tasarim_gorseli')
             if tasarim_file and tasarim_file.filename:
@@ -3190,6 +3231,8 @@ def register_routes(app):
                         numune_gorseli=numune_path,
                         para_birimi=_parse_item_para_birimi(request.form, i, para_birimi),
                         termin_gun=_parse_termin_gun(request.form.get(f'termin_gun_{i}')),
+                        kese_gramaj=_parse_kese_gramaj(request.form.get(f'kese_gramaj_{i}')),
+                        koli_tipi=_parse_koli_tipi(request.form.get(f'koli_tipi_{i}')),
                         deal_id=deal.id
                     )
                     db.session.add(item)
@@ -3242,6 +3285,7 @@ def register_routes(app):
                              expire_date=datetime.now().date() + timedelta(days=7),
                              teklif_yardimci_enabled=teklif_yardimci.enabled,
                              teklif_yardimci_katalog=_teklif_yardimci_catalog_json(),
+                             kese_olcu=_kese_olcu_json(),
                              company_settings=_get_company_settings())
 
     @app.route('/deals/<int:id>')
@@ -3329,6 +3373,8 @@ def register_routes(app):
                                numune_gorseli=numune_path,
                                para_birimi=_parse_item_para_birimi(request.form, i, para_birimi),
                                termin_gun=_parse_termin_gun(request.form.get(f'termin_gun_{i}')),
+                               kese_gramaj=_parse_kese_gramaj(request.form.get(f'kese_gramaj_{i}')),
+                               koli_tipi=_parse_koli_tipi(request.form.get(f'koli_tipi_{i}')),
                                deal_id=deal.id)
                 db.session.add(item)
                 new_items.append(item)
@@ -3361,6 +3407,7 @@ def register_routes(app):
         return render_template('edit_deal.html', deal=deal,
                              teklif_yardimci_enabled=teklif_yardimci.enabled,
                              teklif_yardimci_katalog=_teklif_yardimci_catalog_json(),
+                             kese_olcu=_kese_olcu_json(),
                              company_settings=_get_company_settings())
 
     @app.route('/deals/<int:id>/delete', methods=['POST'])
@@ -3482,6 +3529,10 @@ def register_routes(app):
                                    urun_tipi=item.urun_tipi,
                                    kagit_cinsi=item.kagit_cinsi, boy=item.boy, en=item.en, renk=item.renk,
                                    para_birimi=item.para_birimi, termin_gun=item.termin_gun,
+                                   # 2026-10-26: korugu ve numune gorseli revizede
+                                   # kayboluyordu - kese no/koli ile birlikte tasiniyor.
+                                   korugu=item.korugu, numune_gorseli=item.numune_gorseli,
+                                   kese_gramaj=item.kese_gramaj, koli_tipi=item.koli_tipi,
                                    teslim_tarihi=item.teslim_tarihi, deal_id=new_deal.id))
         db.session.flush()
         new_deal.calculate_totals()
@@ -4668,9 +4719,22 @@ def register_routes(app):
         productions = [p for p in Production.query.filter(
             Production.deal_id.in_(db.session.query(Deal.id).filter(Deal.customer_id == customer.id))
         ).all() if not p.is_delivered]
+        # 2026-10-26: her uretimin kalemleri de doner - form birden fazla
+        # kalem varsa hangi kaleme yazilacagini sectirebilsin (opsiyonel).
         return jsonify([
-            {'id': p.id, 'label': f'{p.deal.title} - {p.stage_label}'} for p in productions
+            {'id': p.id, 'label': f'{p.deal.title} - {p.stage_label}',
+             'items': [{'id': it.id, 'label': f'IE-{p.id:05d}-{n} · {it.description}'}
+                       for n, it in enumerate(p.uretim_items, 1)]}
+            for p in productions
         ])
+
+    @app.route('/api/customers/<int:id>/varsayilan-koli')
+    @login_required
+    def customer_varsayilan_koli(id):
+        """2026-10-26: teklif formu - musteri secilince yeni kalemlere on-secili
+        gelecek koli tipi ('baskili'/'baskisiz'). Sadece bu tek alani doner."""
+        customer = Customer.query.get_or_404(id)
+        return jsonify({'varsayilan_koli': customer.varsayilan_koli or 'baskili'})
 
     @app.route('/gunluk-uretim/add', methods=['POST'])
     @login_required
@@ -4689,6 +4753,7 @@ def register_routes(app):
         baglantilar nullable)."""
         tarih_raw = request.form.get('tarih', '').strip()
         production_id_raw = request.form.get('production_id', '').strip()
+        production_item_id_raw = request.form.get('production_item_id', '').strip()
         customer_id_raw = request.form.get('customer_id', '').strip()
         musteri_adi_raw = request.form.get('musteri_adi', '').strip()
         koli_basi_kg_raw = request.form.get('koli_basi_kg', '').strip()
@@ -4707,6 +4772,15 @@ def register_routes(app):
             production = Production.query.get(int(production_id_raw))
             if not production:
                 return jsonify({'error': 'Seçilen üretim kaydı bulunamadı.'}), 400
+
+        production_item = None
+        if production_item_id_raw and production:
+            try:
+                production_item = ProductionItem.query.get(int(production_item_id_raw))
+            except ValueError:
+                production_item = None
+            if not production_item or production_item.production_id != production.id:
+                return jsonify({'error': 'Seçilen iş emri kalemi bu üretime ait değil.'}), 400
 
         customer = None
         if customer_id_raw:
@@ -4743,6 +4817,7 @@ def register_routes(app):
                 musteri_adi=musteri_adi,
                 customer_id=customer.id if customer else None,
                 production_id=production.id if production else None,
+                production_item_id=production_item.id if production_item else None,
                 koli_basi_kg=koli_basi_kg,
                 koli_adedi=koli_adedi,
                 toplam_kg=toplam_kg,
@@ -4848,12 +4923,71 @@ def register_routes(app):
         nusha = request.args.get('nusha')
         copy_labels = {'baski': 'Baskı Ustası', 'makine': 'Makine Ustası'}
         copy_label = copy_labels.get(nusha)
-        pdf = generate_is_emri_pdf(production, copy_label=copy_label)
-
         customer_name = _customer_full_name(production.deal.customer)
         safe_name = _safe_filename_part(customer_name)
+        # 2026-10-26: YENI yatay, kalem bazli tasarim varsayilan. Eski dikey
+        # tasarim silinmedi: ?klasik=1 ile hala alinabilir (geri donus yolu).
+        if request.args.get('klasik') == '1':
+            pdf = generate_is_emri_pdf(production, copy_label=copy_label)
+            filename = f'IsEmri_{safe_name}_IE{production.id:05d}.pdf'
+            return send_file(pdf, as_attachment=True, download_name=filename)
+        kalem_id = request.args.get('kalem', type=int)
+        item_ids = None
         filename = f'IsEmri_{safe_name}_IE{production.id:05d}.pdf'
+        if kalem_id:
+            ids = [i.id for i in production.uretim_items]
+            if kalem_id in ids:
+                item_ids = [kalem_id]
+                filename = f'IsEmri_{safe_name}_IE{production.id:05d}-{ids.index(kalem_id) + 1}.pdf'
+        pdf = generate_is_emri_pdf_yatay(production, copy_label=copy_label, item_ids=item_ids)
         return send_file(pdf, as_attachment=True, download_name=filename)
+
+    @app.route('/is-emirleri')
+    @login_required
+    def is_emirleri():
+        """2026-10-26: KALEM BAZLI is emri takip ekrani - her satir bir uretim
+        kalemi (IE-00127-1, -2...). SADECE OKUR: durum/gerceklesen,
+        is_emri_kalem_bilgisi() ile PDF'teki AYNI kuralla hesaplanir
+        (Gunluk Uretim'deki kalem baglantili kg + uretim detayindaki elle
+        girilen uretilen miktar). Guncelleme mevcut uretim detay sayfasindan
+        yapilir - yeni bir yazma yolu acilmadi. Gorunurluk: _apply_deal_visibility."""
+        sekme = request.args.get('durum', 'aktif')
+        q = (request.args.get('q') or '').strip()
+        prod_q = _apply_deal_visibility(Production.query.join(Deal, Production.deal_id == Deal.id)).options(
+            joinedload(Production.deal).joinedload(Deal.customer),
+            joinedload(Production.deal).joinedload(Deal.items),
+            joinedload(Production.items),
+            joinedload(Production.daily_outputs),
+        )
+        if sekme == 'aktif':
+            prod_q = prod_q.filter(Production.status.in_(['uretimde', 'hazir']))
+        productions = prod_q.order_by(Production.created_at.desc()).limit(400).all()
+        try:
+            katalog = KeseGramajKatalog.query.all()
+        except Exception:
+            katalog = []
+        bugun = datetime.now().date()
+        satirlar = []
+        for p in productions:
+            items = p.uretim_items
+            for sira, it in enumerate(items, 1):
+                b = is_emri_kalem_bilgisi(p, it, sira, len(items), katalog)
+                musteri = p.deal.customer.display_name if p.deal and p.deal.customer else '-'
+                if q and q.casefold() not in f"{b['no']} {musteri} {b['urun']}".casefold():
+                    continue
+                termin_renk = None
+                if b['termin'] and b['durum'] not in ('Sevk edildi', 'İptal'):
+                    kalan_gun = (b['termin'] - bugun).days
+                    termin_renk = 'danger' if kalan_gun < 0 else ('warning' if kalan_gun <= 3 else None)
+                satirlar.append({'p': p, 'it': it, 'b': b, 'musteri': musteri, 'termin_renk': termin_renk})
+        sayac = {}
+        for s in satirlar:
+            sayac[s['b']['durum']] = sayac.get(s['b']['durum'], 0) + 1
+        filtre = request.args.get('kalem_durum', '')
+        if filtre:
+            satirlar = [s for s in satirlar if s['b']['durum'] == filtre]
+        return render_template('is_emirleri.html', satirlar=satirlar, sekme=sekme, q=q,
+                               sayac=sayac, filtre=filtre, miktar_tr=_miktar_tr_basit)
 
     @app.route('/production/<int:id>/mark-ready', methods=['POST'])
     @login_required

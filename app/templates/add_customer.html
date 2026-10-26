@@ -116,6 +116,14 @@
                 </div>
                 <div class="card-body">
                     <textarea class="form-control" id="notes" name="notes" rows="3"></textarea>
+                    {# 2026-10-26: yeni tekliflerde kalemlere on-secili gelen koli #}
+                    <label class="form-label mt-3 d-block">Varsayılan koli</label>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <input type="radio" class="btn-check" name="varsayilan_koli" id="vk_b" value="baskili" checked>
+                        <label class="btn btn-outline-secondary" for="vk_b">Firma baskılı</label>
+                        <input type="radio" class="btn-check" name="varsayilan_koli" id="vk_n" value="baskisiz">
+                        <label class="btn btn-outline-warning" for="vk_n">Baskısız</label>
+                    </div>
                 </div>
             </div>
         </div>

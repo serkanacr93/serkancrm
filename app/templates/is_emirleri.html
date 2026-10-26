@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}İş Emirleri - CRM Sistemi{% endblock %}
+
+{# 2026-10-26: KALEM BAZLI is emri takip ekrani (sadece okuma). Her satir bir
+   uretim kalemi = bir is emri sayfasi (IE-00127-1, -2...). Durum ve
+   Gerceklesen, PDF ile AYNI kuralla hesaplanir (is_emri_kalem_bilgisi).
+   Guncelleme mevcut Uretim Detayi sayfasindan yapilir. #}
+{% block content %}
+<style>
+.ie-koli-uyari { background:#FFF3C4; color:#353639; border:1px solid #E8C860; font-weight:600; }
+.ie-kese { background:#353639; color:#FBC213; font-weight:700; }
+.ie-tablo td { vertical-align: middle; }
+@media (max-width: 767.98px) {
+    .ie-tablo thead { display:none; }
+    .ie-tablo tr { display:block; border:1px solid #e4e4e4; border-left:4px solid #FBC213; border-radius:6px; margin-bottom:10px; padding:6px 8px; background:#fff; }
+    .ie-tablo td { display:flex; justify-content:space-between; gap:8px; border:0; padding:3px 0; }
+    .ie-tablo td::before { content: attr(data-et); color:#888; font-size:.78rem; flex:0 0 auto; }
+}
+</style>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h2 class="mb-0"><i class="bi bi-clipboard-check"></i> İş Emirleri <small class="text-muted fs-6">kalem bazlı</small></h2>
+    <form class="d-flex gap-2" method="get">
+        <input type="hidden" name="durum" value="{{ sekme }}">
+        <input type="search" class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Müşteri, ürün veya IE no">
+        <button class="btn btn-sm btn-outline-dark" type="submit"><i class="bi bi-search"></i></button>
+    </form>
+</div>
+
+<ul class="nav nav-tabs mb-2">
+    <li class="nav-item"><a class="nav-link {{ 'active' if sekme == 'aktif' }}" href="{{ url_for('is_emirleri', durum='aktif', q=q) }}">Açık iş emirleri</a></li>
+    <li class="nav-item"><a class="nav-link {{ 'active' if sekme == 'tumu' }}" href="{{ url_for('is_emirleri', durum='tumu', q=q) }}">Tümü</a></li>
+</ul>
+<div class="d-flex flex-wrap gap-1 mb-3">
+    <a class="btn btn-sm {{ 'btn-dark' if not filtre else 'btn-outline-secondary' }}" href="{{ url_for('is_emirleri', durum=sekme, q=q) }}">Hepsi</a>
+    {% for d in ['Bekliyor', 'Üretimde', 'Hazır', 'Sevk edildi'] %}
+    <a class="btn btn-sm {{ 'btn-dark' if filtre == d else 'btn-outline-secondary' }}" href="{{ url_for('is_emirleri', durum=sekme, q=q, kalem_durum=d) }}">{{ d }} <span class="badge bg-secondary">{{ sayac.get(d, 0) }}</span></a>
+    {% endfor %}
+</div>
+
+{% if satirlar %}
+<div class="table-responsive">
+<table class="table table-hover ie-tablo">
+    <thead class="table-dark">
+        <tr>
+            <th>İş emri</th><th>Müşteri</th><th>Ürün</th><th>Koli</th>
+            <th class="text-end">Planlanan</th><th class="text-end">Gerçekleşen</th><th class="text-end">Kalan</th>
+            <th>Termin</th><th>Durum</th><th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for s in satirlar %}{% set b = s.b %}
+        <tr>
+            <td data-et="İş emri"><strong>{{ b.no }}</strong></td>
+            <td data-et="Müşteri">{{ s.musteri }}</td>
+            <td data-et="Ürün">
+                <span>{{ b.urun }}</span>
+                {% if b.kese_gramaj %}<span class="badge ie-kese ms-1">{{ b.kese_gramaj }} gr</span>{% endif %}
+            </td>
+            <td data-et="Koli">
+                {% if b.koli_baskisiz %}<span class="badge ie-koli-uyari">⚠ Baskısız</span>{% else %}<span class="text-muted small">Firma baskılı</span>{% endif %}
+            </td>
+            <td data-et="Planlanan" class="text-end">{{ miktar_tr(b.planlanan) }} {{ b.birim }}</td>
+            <td data-et="Gerçekleşen" class="text-end">{{ miktar_tr(b.gerceklesen) if b.gerceklesen else '-' }}{{ ' ' ~ b.birim if b.gerceklesen }}</td>
+            <td data-et="Kalan" class="text-end">{{ miktar_tr(b.kalan) }} {{ b.birim }}</td>
+            <td data-et="Termin">
+                {% if b.termin %}<span class="{{ 'text-danger fw-bold' if s.termin_renk == 'danger' else ('text-warning fw-bold' if s.termin_renk == 'warning' else '') }}">{{ b.termin.strftime('%d.%m.%Y') }}</span>{% else %}-{% endif %}
+            </td>
+            <td data-et="Durum">
+                {% set renk = {'Bekliyor': 'secondary', 'Üretimde': 'primary', 'Hazır': 'success', 'Sevk edildi': 'dark', 'İptal': 'danger'} %}
+                <span class="badge bg-{{ renk.get(b.durum, 'secondary') }}">{{ b.durum }}</span>
+            </td>
+            <td data-et="" class="text-nowrap">
+                <a class="btn btn-sm btn-outline-dark" href="{{ url_for('production_is_emri_pdf', id=s.p.id, kalem=s.it.id) }}" title="Bu kalemin iş emri PDF'i"><i class="bi bi-printer"></i> PDF</a>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('production_detail', id=s.p.id) }}" title="Üretilen miktar ve durumu güncelle"><i class="bi bi-pencil"></i> Güncelle</a>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+<p class="text-muted small">Gerçekleşen: Günlük Üretim'de bu kaleme bağlanan kg toplamı ile üretim detayında girilen üretilen miktarın büyüğü. Termin: kalem/teklif termin süresi (iş günü, sipariş tarihinden), yoksa teslim tarihi.</p>
+{% else %}
+<div class="alert alert-light border">Bu filtrede iş emri yok.</div>
+{% endif %}
+{% endblock %}

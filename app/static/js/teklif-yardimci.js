@@ -51,6 +51,8 @@
             setVal('en', data.en);
             setVal('korugu', data.korugu);
             setVal('renk', data.renk);
+            // 2026-10-26: panelden gelen olcuye gore kese numarasini sec
+            if (window.keseKoliEslestir) window.keseKoliEslestir(row.closest('.teklif-kart'));
         }
         qtyInput.focus();
         return { qtyInput: qtyInput, priceInput: priceInput };

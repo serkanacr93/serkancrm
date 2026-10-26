@@ -225,6 +225,9 @@
                     <div class="col"><input type="date" class="form-control form-control-sm" name="teslim_tarihi_{{ loop.index0 }}" value="{{ item.teslim_tarihi.strftime('%Y-%m-%d') if item.teslim_tarihi else '' }}" title="Teslim Tarihi"></div>
                     {# Eski Tablo'da termin kutusu yok - mevcut degeri kaybolmasin diye gizli tasinir #}
                     <input type="hidden" name="termin_gun_{{ loop.index0 }}" value="{{ item.termin_gun or '' }}">
+                    {# 2026-10-26: kese no / koli de Eski Tablo'da gizli tasinir #}
+                    <input type="hidden" name="kese_gramaj_{{ loop.index0 }}" value="{{ item.kese_gramaj or '' }}">
+                    <input type="hidden" name="koli_tipi_{{ loop.index0 }}" value="{{ item.koli_tipi or '' }}">
                     <div class="col">
                         {% if item.numune_gorseli %}
                         <img src="{{ url_for('static', filename=item.numune_gorseli) }}" alt="Numune" style="height:31px;border:1px solid #dee2e6;border-radius:3px;vertical-align:middle;margin-right:4px;">
@@ -585,6 +588,7 @@ function buildTeklifKartHtml(idx) {
             '<div class="tk-f tk-en"><label class="tk-label">En</label><input type="text" class="form-control form-control-sm" name="en_' + idx + '" placeholder="En"></div>' +
             '<div class="tk-f tk-boy"><label class="tk-label">Boy</label><input type="text" class="form-control form-control-sm" name="boy_' + idx + '" placeholder="Boy"></div>' +
             '<div class="tk-f tk-korugu"><label class="tk-label">Körük</label><input type="text" class="form-control form-control-sm" name="korugu_' + idx + '" placeholder="Körük"></div>' +
+            (window.keseKoliHtml ? window.keseKoliHtml(idx) : '') +
             '<div class="tk-f tk-teslim"><div class="tk-teslim-ic">' +
                 '<div class="tk-alt"><label class="tk-label">Teslim Tarihi</label><input type="date" class="form-control form-control-sm" name="teslim_tarihi_' + idx + '"></div>' +
                 '<div class="tk-alt tk-alt-termin"><label class="tk-label">Termin (iş günü)</label><input type="number" class="form-control form-control-sm" name="termin_gun_' + idx + '" min="1" step="1" placeholder="15"></div>' +
@@ -677,4 +681,6 @@ window.TEKLIF_YARDIMCI_CSRF = {{ csrf_token()|tojson }};
 <script src="{{ asset_url('js/teklif-yardimci.js') }}"></script>
 {% endif %}
 <script src="{{ asset_url('js/doviz-ile-gir.js') }}"></script>
+<script>window.KESE_OLCU = {{ (kese_olcu or [])|tojson }};</script>
+<script src="{{ asset_url('js/kese-koli.js') }}"></script>
 {% endblock %}

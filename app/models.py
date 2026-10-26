@@ -168,6 +168,9 @@ class Customer(db.Model):
     # Musterinin varsayilan tasarim gorseli - dosya yolu (static/uploads/tasarimlar/...),
     # is emri PDF'inde gosterilir, uretim bazinda edit_production'dan override edilebilir.
     tasarim_gorseli = db.Column(db.String(300), nullable=True)
+    # 2026-10-26 (Is Emri): yeni teklif kalemlerine on-secili gelen koli tipi
+    # ('baskili' / 'baskisiz'). NULL = firma baskili (varsayilan).
+    varsayilan_koli = db.Column(db.String(20), nullable=True)
     status = db.Column(db.String(20), default='aktif', index=True)
     siparis_dongusu_gun = db.Column(db.Integer, default=120, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -595,6 +598,16 @@ class DealItem(db.Model):
     # teslim_tarihi/expected_close gosterimi kullanilir. Olcu icin YENI kolon
     # ACILMADI - mevcut en/boy/korugu (serbest metin) kullaniliyor.
     termin_gun = db.Column(db.Integer, nullable=True)
+
+    # 2026-10-26 (Is Emri yatay tasarim): kese numarasi (KeseGramajKatalog.
+    # gramaj'in KOPYASI - FK degil) ve koli tipi ('baskili'/'baskisiz',
+    # NULL = firma baskili). Ikisi de opsiyonel, eski kayitlarda NULL.
+    kese_gramaj = db.Column(db.Integer, nullable=True)
+    koli_tipi = db.Column(db.String(20), nullable=True)
+
+    @property
+    def koli_baskisiz(self):
+        return self.koli_tipi == 'baskisiz'
 
     @property
     def kur(self):
@@ -1392,6 +1405,10 @@ class DailyProductionOutput(db.Model):
     customer = db.relationship('Customer')
     user = db.relationship('User')
     production = db.relationship('Production', backref='daily_outputs')
+    # 2026-10-26: opsiyonel - girisi is emrinin TEK BIR KALEMINE baglar
+    # (/is-emirleri takip ekranindaki 'Gerceklesen' bu baglantidan hesaplanir).
+    production_item_id = db.Column(db.Integer, db.ForeignKey('production_item.id'), nullable=True, index=True)
+    production_item = db.relationship('ProductionItem', backref='daily_outputs')
 
 class DailyProductionPhoto(db.Model):
     """Is 4 - Gunluk Uretim fotograf arsivi: bir TARIHE bagli (tekil satira

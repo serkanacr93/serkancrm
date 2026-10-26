@@ -402,6 +402,7 @@ a:hover {
     grid-template-areas:
         "urun urun urun kagit renk tip"
         "en boy korugu teslim teslim numune"
+        "kesekoli kesekoli kesekoli . . ."
         "miktar birim fiyat fiyat toplam toplam";
     gap: 8px 10px;
 }
@@ -428,6 +429,11 @@ a:hover {
 .tk-alt { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 .tk-alt-termin { flex: 0 0 74px; }
 .tk-numune { grid-area: numune; }
+/* 2026-10-26: kese numarasi + koli tipi */
+.tk-kesekoli { grid-area: kesekoli; }
+.tk-kesekoli-ic { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.tk-alt-kese { flex: 0 0 140px; }
+.tk-alt-koli { flex: 0 0 auto; }
 .tk-miktar { grid-area: miktar; }
 .tk-birim { grid-area: birim; }
 .tk-fiyat { grid-area: fiyat; }
@@ -444,7 +450,7 @@ a:hover {
         grid-template-columns: 1fr;
         grid-template-areas:
             "urun" "kagit" "renk" "tip"
-            "en" "boy" "korugu" "teslim" "numune"
+            "en" "boy" "korugu" "teslim" "numune" "kesekoli"
             "miktar" "birim" "fiyat" "parabirimi" "toplam";
         padding: 44px 14px 14px 14px;
     }

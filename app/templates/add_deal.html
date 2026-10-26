@@ -418,6 +418,7 @@ initCustomerSearch({
     resultsId: 'customer_results',
     allowQuickAdd: true,
     onSelect: function (c) {
+        if (window.keseKoliMusteriVarsayilan) window.keseKoliMusteriVarsayilan(c.id);
         var missingBox = document.getElementById('missing_info_box');
         var missing = [];
         if (!c.company_name) missing.push('firma ünvanı');
@@ -472,6 +473,7 @@ function buildTeklifKartHtml(idx) {
             '<div class="tk-f tk-en"><label class="tk-label">En</label><input type="text" class="form-control form-control-sm" name="en_' + idx + '" placeholder="En"></div>' +
             '<div class="tk-f tk-boy"><label class="tk-label">Boy</label><input type="text" class="form-control form-control-sm" name="boy_' + idx + '" placeholder="Boy"></div>' +
             '<div class="tk-f tk-korugu"><label class="tk-label">Körük</label><input type="text" class="form-control form-control-sm" name="korugu_' + idx + '" placeholder="Körük"></div>' +
+            (window.keseKoliHtml ? window.keseKoliHtml(idx) : '') +
             '<div class="tk-f tk-teslim"><div class="tk-teslim-ic">' +
                 '<div class="tk-alt"><label class="tk-label">Teslim Tarihi</label><input type="date" class="form-control form-control-sm" name="teslim_tarihi_' + idx + '"></div>' +
                 '<div class="tk-alt tk-alt-termin"><label class="tk-label">Termin (iş günü)</label><input type="number" class="form-control form-control-sm" name="termin_gun_' + idx + '" min="1" step="1" placeholder="15"></div>' +
@@ -851,4 +853,6 @@ window.TEKLIF_YARDIMCI_CSRF = {{ csrf_token()|tojson }};
 <script src="{{ asset_url('js/teklif-yardimci.js') }}"></script>
 {% endif %}
 <script src="{{ asset_url('js/doviz-ile-gir.js') }}"></script>
+<script>window.KESE_OLCU = {{ (kese_olcu or [])|tojson }};</script>
+<script src="{{ asset_url('js/kese-koli.js') }}"></script>
 {% endblock %}
