@@ -129,7 +129,8 @@
                     <div id="on_odeme_box" style="display:none;">
                         <div class="mb-2">
                             <label class="form-label small mb-1">Ön Ödeme Tutarı</label>
-                            <input type="number" step="any" min="0" class="form-control form-control-sm" id="on_odeme_tutari" name="on_odeme_tutari">
+                            <input type="text" inputmode="decimal" class="form-control form-control-sm" id="on_odeme_tutari" name="on_odeme_tutari" placeholder="Örn: 5.000 veya 5000,50">
+                            <div class="form-text">İşaretliyken tutar zorunlu — boş bırakılırsa belge oluşturulmaz.</div>
                         </div>
                         <div class="mb-2">
                             <label class="form-label small mb-1">Ödeme Tarihi</label>
@@ -244,7 +245,7 @@ function calcAll() {
 
 function updateKalanBakiyePreview(grandTotal) {
     var onOdemeChecked = document.getElementById('on_odeme_alindi').checked;
-    var onOdemeTutari = onOdemeChecked ? (parseFloat(document.getElementById('on_odeme_tutari').value) || 0) : 0;
+    var onOdemeTutari = onOdemeChecked ? (onOdemeSayi(document.getElementById('on_odeme_tutari').value) || 0) : 0;
     var kalan = grandTotal - onOdemeTutari;
     document.getElementById('kalan_bakiye_preview').textContent = fmt(kalan);
 }
@@ -282,7 +283,14 @@ document.addEventListener('click', function (e) {
     }
 });
 
+// 2026-10-27: TR tutar ('10.000,01') + isaretliyken zorunlu
+function onOdemeSayi(s) {
+    s = String(s || '').replace(/\s|₺/g, '');
+    if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+    var n = parseFloat(s); return isNaN(n) ? 0 : n;
+}
 document.getElementById('on_odeme_alindi').addEventListener('change', function () {
+    document.getElementById('on_odeme_tutari').required = this.checked;
     document.getElementById('on_odeme_box').style.display = this.checked ? 'block' : 'none';
     calcAll();
 });

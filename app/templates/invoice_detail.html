@@ -187,6 +187,21 @@
                 </div>
                 {% endif %}
 
+                {% if siparis_odemeleri %}
+                {# 2026-10-27: siparise alinmis ama bu faturaya baglanmamis odemeler #}
+                <div class="alert alert-warning py-2 small mb-3">
+                    <i class="bi bi-link-45deg"></i> <strong>Bu siparişe alınmış, faturaya bağlanmamış ödeme var:</strong>
+                    {% for p in siparis_odemeleri %}
+                    <form method="POST" action="{{ url_for('invoice_odeme_bagla', id=invoice.id) }}" class="d-flex flex-wrap align-items-center gap-2 mt-1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="payment_id" value="{{ p.id }}">
+                        <span>{{ p.payment_date.strftime('%d.%m.%Y') if p.payment_date else '-' }} · <strong>{{ p.amount|para_goster(invoice.para_birimi) }}</strong>{% if p.notes %} · {{ p.notes }}{% endif %}</span>
+                        <button type="submit" class="btn btn-sm btn-dark py-0">Bu faturaya bağla</button>
+                    </form>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
                 {% if invoice.remaining_amount > 0.01 %}
                 <a href="{{ url_for('add_payment', invoice_id=invoice.id) }}" class="btn btn-success w-100">
                     <i class="bi bi-plus-circle"></i> Ödeme Ekle

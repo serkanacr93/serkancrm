@@ -885,6 +885,22 @@ def _log_irsaliye_degisiklik(irsaliye, invoice, aciklama, onceki, sonraki):
         sonraki_json=json.dumps(sonraki, ensure_ascii=False, default=str),
     ))
 
+def _on_odeme_tutar_oku(form):
+    """2026-10-27: 'On Odeme Alindi' kutusu + tutar. TR bicimini de kabul
+    eder ('10.000,01', '10000,01', '10000.01'). Donus: (isaretli, tutar|None).
+    Eskiden tutar bos/gecersizse odeme SESSIZCE olusmuyordu - fatura
+    'Odenmedi' gorunuyordu (FAT-00019)."""
+    if form.get('on_odeme_alindi') != 'on':
+        return False, None
+    s = (form.get('on_odeme_tutari') or '').strip().replace(' ', '').replace('₺', '')
+    if ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    try:
+        tutar = float(s)
+    except ValueError:
+        return True, None
+    return True, (tutar if tutar > 0 else None)
+
 def _create_prepayment_if_requested(invoice, form, user_id):
     """Is 2: fatura olusturma formunda 'On Odeme Alindi' isaretlenmisse,
     faturaya bagli ilk Payment kaydini ('Ön Ödeme' etiketiyle) otomatik
@@ -892,18 +908,14 @@ def _create_prepayment_if_requested(invoice, form, user_id):
     'alacak' otomasyonuyla AYNI mantik burada tekrarlanir (ayri/ikinci bir
     hesaplama kaynagi olusturmamak icin invoice_detail'deki bakiye tablosu
     da dogrudan Payment kayitlarindan besleniyor)."""
-    if form.get('on_odeme_alindi') != 'on':
-        return
-    amount_raw = (form.get('on_odeme_tutari') or '').strip()
-    if not amount_raw:
-        return
-    amount = float(amount_raw)
-    if amount <= 0:
+    isaretli, amount = _on_odeme_tutar_oku(form)
+    if not isaretli or not amount:
         return
     payment_date = datetime.strptime(form['on_odeme_tarihi'], '%Y-%m-%d').date() if form.get('on_odeme_tarihi') else datetime.now().date()
     payment = Payment(
         customer_id=invoice.customer_id,
         invoice_id=invoice.id,
+        deal_id=invoice.deal_id,  # 2026-10-27: siparise de bagli (Takip Modu ayni odemeyi gorur)
         amount=amount,
         payment_date=payment_date,
         payment_method=form.get('on_odeme_yontemi') or None,
@@ -6477,6 +6489,12 @@ def register_routes(app):
             flash('Bu faturayı görüntüleme yetkiniz yok.', 'danger')
             return redirect(url_for('invoices'))
 
+        # 2026-10-27: siparise bagli ama HICBIR faturaya baglanmamis odemeler -
+        # 'Bu faturaya bagla' onerisi (tiklanmadan baglanmaz).
+        siparis_odemeleri = Payment.query.filter(
+            Payment.deal_id == invoice.deal_id, Payment.invoice_id.is_(None), Payment.status == 'odendi'
+        ).order_by(Payment.payment_date).all() if (invoice.deal_id and invoice.type == 'fatura') else []
+
         bagli_irsaliye = ManualIrsaliye.query.filter_by(invoice_id=invoice.id).first()
         fark_var_mi = _irsaliye_fatura_farkli_mi(bagli_irsaliye, invoice) if bagli_irsaliye else False
 
@@ -6512,7 +6530,29 @@ def register_routes(app):
                 })
 
         return render_template('invoice_detail.html', invoice=invoice, ledger_rows=ledger_rows,
-                                bagli_irsaliye=bagli_irsaliye, fark_var_mi=fark_var_mi)
+                                bagli_irsaliye=bagli_irsaliye, fark_var_mi=fark_var_mi,
+                                siparis_odemeleri=siparis_odemeleri)
+
+    @app.route('/invoices/<int:id>/odeme-bagla', methods=['POST'])
+    @login_required
+    def invoice_odeme_bagla(id):
+        """2026-10-27: siparise bagli ama faturasiz bir odemeyi BU faturaya
+        baglar (tutar/tarih/durum DEGISMEZ, sadece invoice_id dolar).
+        Kullanici tiklayinca calisir."""
+        invoice = Invoice.query.get_or_404(id)
+        owner_id = invoice.owner_id
+        if owner_id is not None and not current_user.is_admin and owner_id != current_user.id:
+            flash('Bu faturada işlem yetkiniz yok.', 'danger')
+            return redirect(url_for('invoices'))
+        payment = Payment.query.get_or_404(request.form.get('payment_id', type=int))
+        if not invoice.deal_id or payment.deal_id != invoice.deal_id or payment.invoice_id is not None:
+            flash('Bu ödeme bu faturaya bağlanamaz (başka siparişe ya da faturaya bağlı).', 'warning')
+            return redirect(url_for('invoice_detail', id=invoice.id))
+        payment.invoice_id = invoice.id
+        db.session.commit()
+        _sync_payment_reminders_for_today(customer_ids=[invoice.customer_id])
+        flash(f'{format_price_tr(payment.amount)} ödeme {invoice.display_no} faturasına bağlandı.', 'success')
+        return redirect(url_for('invoice_detail', id=invoice.id))
 
     @app.route('/invoices/<int:id>/edit', methods=['GET', 'POST'])
     @login_required
@@ -6642,6 +6682,10 @@ def register_routes(app):
 
         if request.method == 'POST':
             inv_type = request.form.get('type', 'fatura')
+            _oo_isaretli, _oo_tutar = _on_odeme_tutar_oku(request.form)
+            if _oo_isaretli and not _oo_tutar:
+                flash('"Ön Ödeme Alındı" işaretli ama tutar girilmemiş ya da geçersiz — belge oluşturulmadı. Tutarı yazıp tekrar deneyin.', 'danger')
+                return redirect(url_for('create_invoice_from_deal', id=id))
 
             # Is 3: eksik musteri bilgisi (firma unvani/vergi no) ayni formdan
             # tamamlanabiliyor - fatura olusturmadan once musteri kaydina yazilir.
@@ -6749,6 +6793,10 @@ def register_routes(app):
             customer_id = request.form.get('customer_id')
             if not customer_id:
                 flash('Lütfen bir müşteri seçin.', 'danger')
+                return render_template('add_invoice.html', today=datetime.now().date())
+            _oo_isaretli, _oo_tutar = _on_odeme_tutar_oku(request.form)
+            if _oo_isaretli and not _oo_tutar:
+                flash('"Ön Ödeme Alındı" işaretli ama tutar girilmemiş ya da geçersiz — fatura oluşturulmadı. Tutarı yazıp tekrar deneyin.', 'danger')
                 return render_template('add_invoice.html', today=datetime.now().date())
 
             new_company_name = request.form.get('customer_company_name', '').strip()
