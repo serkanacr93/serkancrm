@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, IrsaliyeDegisiklikLog, format_price_tr, TR_AYLAR
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, is_emri_kalemleri, generate_siparis_dosyasi_pdf, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, is_emri_kalemleri, generate_siparis_dosyasi_pdf, generate_toplu_is_emri_pdf, generate_is_emri_kontrol_listesi_pdf, TOPLU_PARCA, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, siparisler, limiter, csrf
 from app.tcmb import fetch_tcmb_rate
@@ -782,6 +782,26 @@ def _onay_odeme_onerisi(deal):
         'bakiye_kaynak': bakiye_kaynak,
         'ozet': ozet,
     }
+
+
+def _form_satir_indeksleri(form, alan='desc'):
+    """2026-10-27: desc_0, desc_2, desc_5 gibi ARALI numaralari da toplar.
+    Eski 'while desc_i in form' dongusu ortadan bir satir silinince (ya da
+    secilmeyen satir gonderilmeyince) sonraki tum satirlari sessizce atliyordu."""
+    idx = set()
+    for k in form.keys():
+        m = re.fullmatch(rf'{alan}_(\d+)', k)
+        if m:
+            idx.add(int(m.group(1)))
+    return sorted(idx)
+
+
+def _int_or_none(raw):
+    try:
+        v = int(str(raw or '').strip())
+        return v if v > 0 else None
+    except ValueError:
+        return None
 
 
 def _parse_kese_gramaj(raw):
@@ -4436,7 +4456,25 @@ def register_routes(app):
         daily_outputs = DailyProductionOutput.query.filter_by(production_id=id) \
             .order_by(DailyProductionOutput.tarih.desc(), DailyProductionOutput.created_at.desc()).all()
         daily_outputs_total_kg = sum(o.toplam_kg for o in daily_outputs)
-        return render_template('production_detail.html', production=production, shipments=shipments,
+        # 2026-10-27 (Veri akisi 1): Hazir formunda uretilen miktar Gunluk
+        # Uretim'den on-dolsun (is emri/takip ekraniyla AYNI hesap).
+        gunluk_oneri = {}
+        try:
+            _kalemler = is_emri_kalemleri(production)
+            for _n, _it in enumerate(_kalemler, 1):
+                if _it.urun_tipi == 'ticaret':
+                    continue
+                _b = is_emri_kalem_bilgisi(production, _it, _n, len(_kalemler))
+                if _b['gerceklesen']:
+                    gunluk_oneri[_it.id] = _b['gerceklesen']
+        except Exception:
+            gunluk_oneri = {}
+        try:
+            from app.kalem_belge import siparis_kalem_durumu
+            kalem_belge = siparis_kalem_durumu(production.deal, production)
+        except Exception:
+            kalem_belge = []
+        return render_template('production_detail.html', production=production, shipments=shipments, gunluk_oneri=gunluk_oneri, kalem_belge=kalem_belge,
                                 today=datetime.now().date(), stages=PRODUCTION_STAGES,
                                 ticaret_stages=TICARET_STAGES, daily_outputs=daily_outputs,
                                 daily_outputs_total_kg=daily_outputs_total_kg, carriers=CARRIER_OPTIONS)
@@ -4791,6 +4829,36 @@ def register_routes(app):
             for p in productions
         ])
 
+    @app.route('/api/customers/<int:id>/acik-siparisler')
+    @login_required
+    def customer_acik_siparisler(id):
+        """2026-10-27 (Veri akisi 2): manuel irsaliye formu - musterinin
+        teslim edilmemis siparisleri ve kalemleri (siparis / hazir / irsaliyesi
+        kesilen / onerilen miktar, fiyat). Sadece okur."""
+        from app.kalem_belge import siparis_kalem_durumu
+        customer = Customer.query.get_or_404(id)
+        q = Deal.query.filter(Deal.customer_id == customer.id, Deal.stage == 'kazanilan')
+        if not current_user.is_admin:
+            q = q.filter(Deal.user_id == current_user.id)
+        sonuc = []
+        for d in q.order_by(Deal.id.desc()).limit(20).all():
+            p = d.production
+            if p is None or p.is_delivered or p.status == 'iptal':
+                continue
+            kalemler = []
+            for k in siparis_kalem_durumu(d, p):
+                di = k['deal_item']
+                tl_fiyat = di.unit_price if (d.para_birimi or 'TRY') == 'TRY' and not di.para_birimi else None
+                kalemler.append({
+                    'deal_item_id': di.id, 'aciklama': di.description, 'birim': di.unit,
+                    'siparis': k['siparis'], 'hazir': k['hazir'], 'irsaliye': k['irsaliye'],
+                    'oneri': k['oneri_irsaliye'], 'fiyat': tl_fiyat,
+                })
+            sonuc.append({'deal_id': d.id, 'no': d.display_no,
+                          'tarih': (p.start_date or d.deal_date).strftime('%d.%m.%Y') if (p.start_date or d.deal_date) else '',
+                          'durum': p.stage_label, 'kdv': d.vat_rate, 'kalemler': kalemler})
+        return jsonify(sonuc)
+
     @app.route('/api/customers/<int:id>/varsayilan-koli')
     @login_required
     def customer_varsayilan_koli(id):
@@ -5019,6 +5087,44 @@ def register_routes(app):
         return send_file(pdf, as_attachment=True,
                          download_name=f'SiparisDosyasi_{safe_name}_{production.deal.display_no}_IE{production.id:05d}.pdf')
 
+    def _acik_uretimler_toplu():
+        """Acik (uretimde/hazir) uretimler, eski -> yeni; toplu PDF icin tum
+        iliskiler TEK seferde yuklenir (Neon gecikmesi - sorgu sayisi az olsun)."""
+        return _apply_deal_visibility(Production.query.join(Deal, Production.deal_id == Deal.id)).options(
+            joinedload(Production.deal).joinedload(Deal.customer),
+            joinedload(Production.deal).joinedload(Deal.items),
+            joinedload(Production.deal).joinedload(Deal.seller),
+            joinedload(Production.items).joinedload(ProductionItem.daily_outputs),
+            joinedload(Production.daily_outputs),
+        ).filter(Production.status.in_(['uretimde', 'hazir'])).order_by(Production.created_at.asc(), Production.id.asc()).all()
+
+    @app.route('/is-emirleri/kontrol-listesi-pdf')
+    @login_required
+    def is_emirleri_kontrol_listesi_pdf():
+        """2026-10-27: acik siparislerin TUM is emirleri icin sadece kontrol
+        listesi (hizli, gorselsiz)."""
+        pdf = generate_is_emri_kontrol_listesi_pdf(_acik_uretimler_toplu())
+        return send_file(pdf, as_attachment=True,
+                         download_name=f"Is_Emri_Kontrol_Listesi_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf")
+
+    @app.route('/is-emirleri/toplu-pdf')
+    @login_required
+    def is_emirleri_toplu_pdf():
+        """2026-10-27: acik siparislerin is emirleri, TOPLU_PARCA'lik paketler
+        halinde (?parca=1,2,...) - canli 30 sn istek sinirini asmamak icin.
+        Her paketin basinda o paketin kontrol listesi. Sadece okur."""
+        prods = _acik_uretimler_toplu()
+        parca = max(1, request.args.get('parca', 1, type=int))
+        bas = (parca - 1) * TOPLU_PARCA
+        secim = prods[bas:bas + TOPLU_PARCA]
+        if not secim:
+            flash('Bu pakette sipariş yok.', 'info')
+            return redirect(url_for('is_emirleri'))
+        son = bas + len(secim)
+        pdf = generate_toplu_is_emri_pdf(secim, ek_baslik=f' · Paket {parca} (sipariş {bas + 1}–{son} / {len(prods)})')
+        return send_file(pdf, as_attachment=True,
+                         download_name=f"Is_Emirleri_Paket{parca}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf")
+
     @app.route('/is-emirleri')
     @login_required
     def is_emirleri():
@@ -5063,8 +5169,12 @@ def register_routes(app):
         filtre = request.args.get('kalem_durum', '')
         if filtre:
             satirlar = [s for s in satirlar if s['b']['durum'] == filtre]
+        acik_sayi = len({p.id for p in productions if p.status in ('uretimde', 'hazir')}) if sekme == 'aktif' else 0
+        paketler = [(i + 1, i * TOPLU_PARCA + 1, min((i + 1) * TOPLU_PARCA, acik_sayi))
+                    for i in range((acik_sayi + TOPLU_PARCA - 1) // TOPLU_PARCA)]
         return render_template('is_emirleri.html', satirlar=satirlar, sekme=sekme, q=q,
-                               sayac=sayac, filtre=filtre, miktar_tr=_miktar_tr_basit)
+                               sayac=sayac, filtre=filtre, miktar_tr=_miktar_tr_basit,
+                               acik_siparis_sayisi=acik_sayi, paketler=paketler)
 
     @app.route('/production/<int:id>/mark-ready', methods=['POST'])
     @login_required
@@ -5394,23 +5504,33 @@ def register_routes(app):
                     vat_rate=float(request.form.get('vat_rate', 20)),
                     status='sevk_edildi'
                 )
+                # 2026-10-27 (Veri akisi 2): "Bu siparisten doldur" ile gelindiyse
+                # siparis ve kalem baglantisi (musterinin kendi siparisi olmali).
+                bagli_deal = None
+                siparis_raw = _int_or_none(request.form.get('deal_id'))
+                if siparis_raw:
+                    bagli_deal = Deal.query.get(siparis_raw)
+                    if not bagli_deal or bagli_deal.customer_id != int(customer_id):
+                        bagli_deal = None
+                manual_irsaliye.deal_id = bagli_deal.id if bagli_deal else None
+                gecerli_kalem_idleri = {di.id for di in bagli_deal.items} if bagli_deal else set()
                 db.session.add(manual_irsaliye)
                 db.session.flush()
 
-                i = 0
-                while f'desc_{i}' in request.form:
+                for i in _form_satir_indeksleri(request.form):
                     desc = request.form.get(f'desc_{i}', '').strip()
                     qty = request.form.get(f'qty_{i}', '').strip()
                     price_raw = request.form.get(f'price_{i}', '').strip()
+                    did = _int_or_none(request.form.get(f'deal_item_id_{i}'))
                     if desc and qty:
                         db.session.add(ManualIrsaliyeItem(
                             manual_irsaliye_id=manual_irsaliye.id,
                             description=desc,
                             quantity=float(qty),
                             unit=request.form.get(f'unit_{i}', 'adet'),
-                            unit_price=float(price_raw) if price_raw else 0
+                            unit_price=float(price_raw) if price_raw else 0,
+                            deal_item_id=did if did in gecerli_kalem_idleri else None
                         ))
-                    i += 1
 
                 db.session.flush()
 
@@ -5424,7 +5544,7 @@ def register_routes(app):
                     auto_invoice = Invoice(
                         invoice_no=_next_invoice_no(),
                         type='fatura',
-                        deal_id=None,
+                        deal_id=manual_irsaliye.deal_id,
                         customer_id=manual_irsaliye.customer_id,
                         user_id=current_user.id,
                         date=manual_irsaliye.ship_date or datetime.now().date(),
@@ -5440,7 +5560,8 @@ def register_routes(app):
                             quantity=item.quantity,
                             unit=item.unit,
                             unit_price=item.unit_price or 0,
-                            total_price=item.total_price
+                            total_price=item.total_price,
+                            deal_item_id=item.deal_item_id
                         ))
                     db.session.flush()
                     auto_invoice.calculate_totals()
@@ -6458,21 +6579,29 @@ def register_routes(app):
                 db.session.add(invoice)
                 db.session.flush()
 
-                # Teklif kalemlerini kopyala, manuel girilen kg/adet ile güncelle
-                i = 0
-                while f'desc_{i}' in request.form:
-                    qty = float(request.form.get(f'qty_{i}', 0))
-                    price = float(request.form.get(f'price_{i}', 0))
+                # Teklif kalemlerini kopyala, manuel girilen kg/adet ile güncelle.
+                # 2026-10-27 (Veri akisi 2): secilmeyen teklif kalemi (formda
+                # disabled -> hic gonderilmez) atlanir; kalem teklif kalemine
+                # deal_item_id ile baglanir (kalan takibi). Arali numaralar desteklenir.
+                gecerli_kalem_idleri = {di.id for di in deal.items}
+                eklenen = 0
+                for i in _form_satir_indeksleri(request.form):
+                    qty = float(request.form.get(f'qty_{i}', 0) or 0)
+                    price = float(request.form.get(f'price_{i}', 0) or 0)
+                    did = _int_or_none(request.form.get(f'deal_item_id_{i}'))
                     item = InvoiceItem(
                         invoice_id=invoice.id,
                         description=request.form[f'desc_{i}'],
                         quantity=qty,
                         unit=request.form.get(f'unit_{i}', 'adet'),
                         unit_price=price,
-                        total_price=qty * price
+                        total_price=qty * price,
+                        deal_item_id=did if did in gecerli_kalem_idleri else None
                     )
                     db.session.add(item)
-                    i += 1
+                    eklenen += 1
+                if not eklenen:
+                    raise ValueError('kalem secilmedi')
 
                 db.session.flush()
                 invoice.calculate_totals()
@@ -6499,7 +6628,15 @@ def register_routes(app):
             return redirect(url_for('invoice_detail', id=invoice.id))
 
         unlinked_payments = Payment.query.filter_by(deal_id=deal.id, invoice_id=None).all()
-        return render_template('create_invoice_from_deal.html', deal=deal, unlinked_payments=unlinked_payments, today=datetime.now().date())
+        from app.kalem_belge import siparis_kalem_durumu
+        try:
+            kalem_durum = {k['id']: k for k in siparis_kalem_durumu(deal)}
+        except Exception:
+            kalem_durum = {}
+        return render_template('create_invoice_from_deal.html', deal=deal, unlinked_payments=unlinked_payments,
+                               today=datetime.now().date(), kalem_durum=kalem_durum,
+                               secili_kalem=request.args.get('kalem', type=int),
+                               secili_tur=request.args.get('tur') if request.args.get('tur') in ('fatura', 'irsaliye') else None)
 
     @app.route('/invoices/add', methods=['GET', 'POST'])
     @login_required

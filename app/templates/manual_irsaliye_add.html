@@ -30,6 +30,9 @@
                             <div id="customer_results" class="list-group position-absolute w-100" style="z-index: 1000; max-height: 250px; overflow-y: auto; display: none;"></div>
                         </div>
                     </div>
+                    {# 2026-10-27 (Veri akisi 2): musteri secilince acik siparisler - irsaliye siparisten dolar #}
+                    <input type="hidden" id="deal_id" name="deal_id" value="">
+                    <div id="acik_siparisler" class="mb-3" style="display:none"></div>
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <label for="ship_date" class="form-label">Gönderim Tarihi</label>
@@ -168,7 +171,95 @@ initCustomerSearch({
     inputId: 'customer_search',
     hiddenIdInputId: 'customer_id',
     resultsId: 'customer_results',
-    allowQuickAdd: true
+    allowQuickAdd: true,
+    onSelect: function (c) { acikSiparisleriYukle(c.id); },
+    onClear: function () { acikSiparisleriTemizle(); }
+});
+
+// ===== 2026-10-27 (Veri akisi 2): musterinin acik siparislerinden doldurma =====
+var ACIK_SIPARISLER = [];
+function trSayiIrs(n) { return (Math.round((n || 0) * 1000) / 1000).toLocaleString('tr-TR'); }
+function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function acikSiparisleriTemizle() {
+    ACIK_SIPARISLER = [];
+    document.getElementById('acik_siparisler').style.display = 'none';
+    document.getElementById('acik_siparisler').innerHTML = '';
+    document.getElementById('deal_id').value = '';
+}
+function acikSiparisleriYukle(musteriId) {
+    acikSiparisleriTemizle();
+    if (!musteriId) return;
+    fetch('/api/customers/' + musteriId + '/acik-siparisler', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (liste) {
+            ACIK_SIPARISLER = liste || [];
+            if (!ACIK_SIPARISLER.length) return;
+            var html = '<div class="small fw-bold mb-1">Bu müşterinin açık siparişleri</div>';
+            ACIK_SIPARISLER.forEach(function (s, i) {
+                html += '<div class="border rounded p-2 mb-2" style="border-left:4px solid #0d6efd !important;background:#F7FAFE" data-sip="' + i + '">' +
+                    '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">' +
+                    '<span><strong>' + escHtml(s.no) + '</strong> · ' + escHtml(s.tarih) + ' · <span class="badge bg-secondary">' + escHtml(s.durum) + '</span></span>' +
+                    '<button type="button" class="btn btn-sm btn-primary sip-doldur" data-sip="' + i + '"><i class="bi bi-box-arrow-in-down"></i> Bu siparişten doldur</button></div>' +
+                    '<div class="small text-muted mt-1">' + s.kalemler.map(function (k) {
+                        var hazir = (k.hazir !== null && k.hazir !== undefined) ? ' · hazır <b>' + trSayiIrs(k.hazir) + '</b>' : '';
+                        return escHtml(k.aciklama) + ' — sipariş ' + trSayiIrs(k.siparis) + ' ' + escHtml(k.birim) + hazir + ' · irsaliyesi kesilen ' + trSayiIrs(k.irsaliye);
+                    }).join('<br>') + '</div></div>';
+            });
+            html += '<button type="button" class="btn btn-sm btn-outline-secondary" id="sip-siparissiz">Siparişsiz devam et (elle)</button>';
+            var kutu = document.getElementById('acik_siparisler');
+            kutu.innerHTML = html;
+            kutu.style.display = 'block';
+        })
+        .catch(function () {});
+}
+function siparistenDoldur(i) {
+    var s = ACIK_SIPARISLER[i];
+    if (!s) return;
+    var tbody = document.querySelector('#items-table tbody');
+    tbody.innerHTML = '';
+    var n = 0;
+    s.kalemler.forEach(function (k) {
+        if (!(k.oneri > 0)) return;
+        var row = document.createElement('tr');
+        row.className = 'item-row';
+        var birimler = ['adet', 'kg', 'mt', 'lt', 'm2', 'set'];
+        row.innerHTML =
+            '<td><input type="text" class="form-control form-control-sm" name="desc_' + n + '" value="' + escHtml(k.aciklama) + '" required>' +
+            '<input type="hidden" name="deal_item_id_' + n + '" value="' + k.deal_item_id + '"></td>' +
+            '<td><input type="number" class="form-control form-control-sm item-qty" name="qty_' + n + '" min="0" step="0.01" value="' + (Math.round(k.oneri * 1000) / 1000) + '" required>' +
+            '<small class="text-success">' + (k.hazir ? 'hazır − kesilen' : 'kalan') + '</small></td>' +
+            '<td><select class="form-select form-select-sm" name="unit_' + n + '">' + birimler.map(function (b) {
+                return '<option value="' + b + '"' + (b === k.birim ? ' selected' : '') + '>' + (b === 'm2' ? 'm²' : b.charAt(0).toUpperCase() + b.slice(1)) + '</option>';
+            }).join('') + '</select></td>' +
+            '<td><input type="number" class="form-control form-control-sm item-price" name="price_' + n + '" min="0" step="any" placeholder="Opsiyonel" value="' + (k.fiyat !== null && k.fiyat !== undefined ? k.fiyat : '') + '">' +
+            (k.fiyat === null ? '<small class="text-muted">dövizli – elle</small>' : '<small class="text-success">tekliften</small>') + '</td>' +
+            '<td><input type="text" class="form-control form-control-sm item-total" readonly></td>' +
+            '<td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="bi bi-trash"></i></button></td>';
+        tbody.appendChild(row);
+        n++;
+    });
+    if (!n) { alert('Bu siparişte irsaliyesi kesilecek kalan miktar yok.'); acikSiparisleriYukle(document.getElementById('customer_id').value); return; }
+    itemCount = n;
+    document.getElementById('deal_id').value = s.deal_id;
+    if (s.kdv !== null && s.kdv !== undefined && document.getElementById('vat_rate')) {
+        var vr = document.getElementById('vat_rate');
+        if ([].some.call(vr.options || [], function (o) { return parseFloat(o.value) === parseFloat(s.kdv); })) vr.value = String(s.kdv);
+    }
+    document.querySelectorAll('#acik_siparisler [data-sip]').forEach(function (el) {
+        if (el.classList.contains('sip-doldur')) return;
+        el.style.borderLeftColor = (parseInt(el.dataset.sip, 10) === i) ? '#198754' : '#0d6efd';
+        el.style.background = (parseInt(el.dataset.sip, 10) === i) ? '#F1FAF3' : '#F7FAFE';
+    });
+    attachItemEvents();
+    calculateIrsaliyeTotals();
+}
+document.addEventListener('click', function (e) {
+    var b = e.target.closest('.sip-doldur');
+    if (b) { siparistenDoldur(parseInt(b.dataset.sip, 10)); return; }
+    if (e.target.id === 'sip-siparissiz') {
+        document.getElementById('deal_id').value = '';
+        document.getElementById('acik_siparisler').style.display = 'none';
+    }
 });
 
 document.getElementById('add-item').addEventListener('click', function() {

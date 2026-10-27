@@ -916,6 +916,8 @@ class ManualIrsaliye(db.Model):
     # KURAL: bir irsaliyeye fatura baglandiysa ikinci fatura olusturulamaz,
     # bu alan o kontrolun kaynagi.
     invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=True)
+    # 2026-10-27 (Veri akisi 2): siparisten doldurulduysa bagli siparis (FK DEGIL).
+    deal_id = db.Column(db.Integer, nullable=True, index=True)
 
     customer = db.relationship('Customer', backref='manual_irsaliyeler')
     user = db.relationship('User')
@@ -976,6 +978,8 @@ class ManualIrsaliyeItem(db.Model):
     unit = db.Column(db.String(20), default='adet')
     # Is 5: opsiyonel birim fiyat - NULL/0 ise bu kalem "fiyatsiz" sayilir.
     unit_price = db.Column(db.Float, nullable=True, default=0)
+    # 2026-10-27 (Veri akisi 2): hangi teklif kalemine ait (FK DEGIL).
+    deal_item_id = db.Column(db.Integer, nullable=True, index=True)
 
     @property
     def total_price(self):
@@ -1104,6 +1108,9 @@ class InvoiceItem(db.Model):
     unit = db.Column(db.String(20), default='adet')
     unit_price = db.Column(db.Float, nullable=False)
     total_price = db.Column(db.Float, nullable=False)
+    # 2026-10-27 (Veri akisi 2): hangi teklif kalemine ait (FK DEGIL - bkz.
+    # migration e6b1c9a7d2f4). NULL = eski kayit / serbest ek kalem.
+    deal_item_id = db.Column(db.Integer, nullable=True, index=True)
 
 class Reminder(db.Model):
     id = db.Column(db.Integer, primary_key=True)

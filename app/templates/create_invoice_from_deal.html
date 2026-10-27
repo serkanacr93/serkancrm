@@ -31,6 +31,7 @@
                         <table class="table table-bordered" id="items-table">
                             <thead class="table-dark">
                                 <tr>
+                                    <th style="width:40px" title="Bu belgeye dahil">Seç</th>
                                     <th>Açıklama</th>
                                     <th style="width:120px">Miktar (kg/adet)</th>
                                     <th style="width:100px">Birim</th>
@@ -41,12 +42,25 @@
                             </thead>
                             <tbody>
                                 {% for item in deal.items %}
-                                <tr>
+                                {# 2026-10-27 (Veri akisi 2): kalem secimi + daha once kesilen / kalan #}
+                                {% set kd = (kalem_durum or {}).get(item.id) %}
+                                <tr class="teklif-kalem-row" data-siparis="{{ item.quantity }}"
+                                    data-kalan-fatura="{{ kd.kalan_fatura if kd else item.quantity }}"
+                                    data-kalan-irsaliye="{{ kd.kalan_irsaliye if kd else item.quantity }}"
+                                    data-onceki-fatura="{{ kd.fatura if kd else 0 }}" data-onceki-irsaliye="{{ kd.irsaliye if kd else 0 }}"
+                                    data-belge-fatura="{{ (kd.fatura_belgeler|join(', ')) if kd else '' }}" data-belge-irsaliye="{{ (kd.irsaliye_belgeler|join(', ')) if kd else '' }}"
+                                    data-deal-item-id="{{ item.id }}">
+                                    <td class="text-center align-middle">
+                                        <input type="checkbox" class="form-check-input kalem-sec" checked>
+                                        <input type="hidden" name="deal_item_id_{{ loop.index0 }}" value="{{ item.id }}">
+                                    </td>
                                     <td>
                                         <input type="text" class="form-control" name="desc_{{ loop.index0 }}" value="{{ item.description }}" readonly>
+                                        <small class="kalem-onceki text-muted"></small>
                                     </td>
                                     <td>
                                         <input type="number" step="0.001" class="form-control qty-input" name="qty_{{ loop.index0 }}" value="{{ item.quantity }}" required>
+                                        <small class="kalem-uyari"></small>
                                     </td>
                                     <td>
                                         <input type="text" class="form-control" name="unit_{{ loop.index0 }}" value="{{ item.unit }}" readonly>
@@ -63,19 +77,23 @@
                             </tbody>
                             <tfoot>
                                 <tr class="table-light">
-                                    <td colspan="5" class="text-end"><strong>Ara Toplam:</strong></td>
+                                    <td colspan="6" class="text-end"><strong>Ara Toplam:</strong></td>
                                     <td><span id="subtotal">{{ "{:,.2f}".format(deal.subtotal) }} {{ deal.para_birimi_sembol }}</span></td>
                                 </tr>
                                 <tr class="table-light">
-                                    <td colspan="5" class="text-end">KDV (%{{ deal.vat_rate }}):</td>
+                                    <td colspan="6" class="text-end">KDV (%{{ deal.vat_rate }}):</td>
                                     <td><span id="vat_amount">{{ "{:,.2f}".format(deal.vat_amount) }} {{ deal.para_birimi_sembol }}</span></td>
                                 </tr>
                                 <tr class="table-success">
-                                    <td colspan="5" class="text-end"><strong>TOPLAM:</strong></td>
+                                    <td colspan="6" class="text-end"><strong>TOPLAM:</strong></td>
                                     <td><span id="total" class="fw-bold">{{ "{:,.2f}".format(deal.value) }} {{ deal.para_birimi_sembol }}</span></td>
                                 </tr>
                             </tfoot>
                         </table>
+                    </div>
+                    <div id="fazla_onay_box" class="alert alert-danger py-2 small mb-0" style="display:none">
+                        <input type="checkbox" class="form-check-input me-1" id="fazla_onay">
+                        <label for="fazla_onay">Kalanı %10'dan fazla aşan miktarı <strong>onaylıyorum</strong> (fazla üretim / müşteri kabul etti).</label>
                     </div>
                 </div>
             </div>
@@ -89,9 +107,9 @@
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label">Belge Türü</label>
-                        <select class="form-select" name="type" required>
-                            <option value="fatura">Fatura</option>
-                            <option value="irsaliye">İrsaliye</option>
+                        <select class="form-select" name="type" id="belge_turu" required>
+                            <option value="fatura" {{ 'selected' if secili_tur == 'fatura' }}>Fatura</option>
+                            <option value="irsaliye" {{ 'selected' if secili_tur == 'irsaliye' }}>İrsaliye</option>
                         </select>
                     </div>
                     <div class="mb-3">
@@ -203,6 +221,8 @@ function renumberItemRows() {
 }
 
 function calcRow(r) {
+    var sec = r.querySelector('.kalem-sec');
+    if (sec && !sec.checked) { r.querySelector('.row-total').textContent = fmt(0); return 0; }
     var q = parseFloat(r.querySelector('.qty-input').value) || 0;
     var p = parseFloat(r.querySelector('.price-input').value) || 0;
     var t = q * p;
@@ -241,6 +261,7 @@ document.getElementById('add-extra-item').addEventListener('click', function () 
     var row = document.createElement('tr');
     row.className = 'extra-item-row';
     row.innerHTML =
+        '<td></td>' +
         '<td><input type="text" class="form-control" name="desc_' + extraItemCount + '" required></td>' +
         '<td><input type="number" step="0.001" class="form-control qty-input" name="qty_' + extraItemCount + '" required></td>' +
         '<td><input type="text" class="form-control" name="unit_' + extraItemCount + '" value="adet"></td>' +
@@ -267,12 +288,86 @@ document.getElementById('on_odeme_alindi').addEventListener('change', function (
 });
 document.getElementById('on_odeme_tutari').addEventListener('input', calcAll);
 
+// ===== 2026-10-27 (Veri akisi 2): kalem secimi, kalan, fazla miktar uyarisi =====
+var SECILI_KALEM = {{ (secili_kalem or none)|tojson }};
+function trSayi(n) { return (Math.round(n * 1000) / 1000).toLocaleString('tr-TR'); }
+function belgeTuru() { return document.getElementById('belge_turu').value; }
+function kalemSatirlari() { return document.querySelectorAll('tr.teklif-kalem-row'); }
+function satirAyarla(r) {
+    var sec = r.querySelector('.kalem-sec');
+    r.querySelectorAll('input[name], select[name]').forEach(function (el) { el.disabled = !sec.checked; });
+    r.style.opacity = sec.checked ? '1' : '0.45';
+}
+function oncekiYaz(r) {
+    var tur = belgeTuru();
+    var onceki = parseFloat(r.dataset['onceki' + (tur === 'fatura' ? 'Fatura' : 'Irsaliye')]) || 0;
+    var belge = r.dataset['belge' + (tur === 'fatura' ? 'Fatura' : 'Irsaliye')];
+    var kalan = parseFloat(r.dataset['kalan' + (tur === 'fatura' ? 'Fatura' : 'Irsaliye')]) || 0;
+    var el = r.querySelector('.kalem-onceki');
+    if (!onceki) { el.textContent = ''; return kalan; }
+    el.textContent = 'Daha önce ' + (tur === 'fatura' ? 'faturalanan' : 'irsaliyesi kesilen') + ': ' + trSayi(onceki) + (belge ? ' (' + belge + ')' : '') + ' · kalan ' + trSayi(kalan);
+    return kalan;
+}
+function uyariYaz(r) {
+    var el = r.querySelector('.kalem-uyari');
+    var sec = r.querySelector('.kalem-sec');
+    var q = parseFloat(r.querySelector('.qty-input').value) || 0;
+    var kalan = parseFloat(r.dataset['kalan' + (belgeTuru() === 'fatura' ? 'Fatura' : 'Irsaliye')]) || 0;
+    r.dataset.fazla = '';
+    if (!sec.checked || q <= kalan + 0.0005) { el.textContent = ''; el.className = 'kalem-uyari'; return; }
+    if (kalan > 0 && q <= kalan * 1.10 + 0.0005) {
+        el.textContent = 'Kalandan fazla (tolerans içinde)'; el.className = 'kalem-uyari text-warning fw-bold';
+    } else {
+        el.textContent = 'Kalanı %10\'dan fazla aşıyor'; el.className = 'kalem-uyari text-danger fw-bold'; r.dataset.fazla = '1';
+    }
+    fazlaKutusu();
+}
+function fazlaKutusu() {
+    var var_ = Array.prototype.some.call(kalemSatirlari(), function (r) { return r.dataset.fazla === '1'; });
+    document.getElementById('fazla_onay_box').style.display = var_ ? 'block' : 'none';
+}
+function turDegisti(ilk) {
+    kalemSatirlari().forEach(function (r) {
+        var kalan = oncekiYaz(r);
+        var sec = r.querySelector('.kalem-sec');
+        var qty = r.querySelector('.qty-input');
+        var onceki = parseFloat(r.dataset['onceki' + (belgeTuru() === 'fatura' ? 'Fatura' : 'Irsaliye')]) || 0;
+        if (!r.dataset.elle) {
+            if (onceki > 0) qty.value = Math.round(kalan * 1000) / 1000;
+            if (SECILI_KALEM) sec.checked = (parseInt(r.dataset.dealItemId, 10) === SECILI_KALEM);
+            else if (onceki > 0 && kalan <= 0) sec.checked = false;
+        }
+        satirAyarla(r); uyariYaz(r);
+    });
+    fazlaKutusu(); calcAll();
+}
+document.getElementById('belge_turu').addEventListener('change', function () { turDegisti(false); });
+document.addEventListener('change', function (e) {
+    if (e.target.classList.contains('kalem-sec')) {
+        var r = e.target.closest('tr'); r.dataset.elle = '1'; satirAyarla(r); uyariYaz(r); fazlaKutusu(); calcAll();
+    }
+});
+document.addEventListener('input', function (e) {
+    if (e.target.classList.contains('qty-input')) {
+        var r = e.target.closest('tr.teklif-kalem-row'); if (r) { r.dataset.elle = '1'; uyariYaz(r); fazlaKutusu(); }
+    }
+});
+
 attachRowEvents();
+turDegisti(true);
 calcAll();
 
 // Cift-tiklama korumasi: form gonderilince buton devre disi birakilir -
 // gonderim zaten baslamis oldugu icin bu sadece IKINCI tikla(n)mayi engeller.
-document.querySelector('form').addEventListener('submit', function () {
+document.querySelector('form').addEventListener('submit', function (e) {
+    var secili = Array.prototype.filter.call(document.querySelectorAll('#items-table tbody tr'), function (r) {
+        var s = r.querySelector('.kalem-sec'); return !s || s.checked;
+    });
+    if (!secili.length) { e.preventDefault(); alert('En az bir kalem seçin.'); return; }
+    var fazlaVar = Array.prototype.some.call(kalemSatirlari(), function (r) { return r.dataset.fazla === '1'; });
+    if (fazlaVar && !document.getElementById('fazla_onay').checked) {
+        e.preventDefault(); alert('Kalanı %10\'dan fazla aşan kalem var: "Fazla miktarı onaylıyorum" kutusunu işaretleyin veya miktarı düzeltin.'); return;
+    }
     var btn = this.querySelector('button[type="submit"]');
     if (btn) {
         btn.disabled = true;

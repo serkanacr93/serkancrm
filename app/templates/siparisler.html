@@ -71,7 +71,15 @@
                     <td>{{ r.miktar|round(0)|int if r.miktar else '-' }} {{ r.birim or '' }}</td>
                     <td>{{ r.tutar_tl|para_goster }}</td>
                     <td>{{ r.tarih.strftime('%d.%m.%Y') if r.tarih else '-' }}</td>
-                    <td>{% if r.durum_label %}<span class="sp-pill sp-pill-{{ r.durum_renk }}">{{ r.durum_label }}</span>{% endif %}</td>
+                    <td>{% if r.durum_label %}<span class="sp-pill sp-pill-{{ r.durum_renk }}">{{ r.durum_label }}</span>{% endif %}
+                        {# 2026-10-27: uretim ilerlemesi (Gunluk Uretim + elle girilen) #}
+                        {% if r.ilerleme %}
+                        <div style="margin-top:4px;min-width:110px">
+                            <div style="height:5px;background:#eee;border-radius:3px;overflow:hidden"><div style="height:100%;width:{{ r.ilerleme.yuzde|round(0) }}%;background:{{ '#198754' if r.ilerleme.yuzde >= 99.5 else '#0d6efd' }}"></div></div>
+                            <small class="text-muted">{% if r.ilerleme.birim %}{{ '{:,.0f}'.format(r.ilerleme.gerc).replace(',', '.') }} / {{ '{:,.0f}'.format(r.ilerleme.plan).replace(',', '.') }} {{ r.ilerleme.birim }}{% else %}%{{ r.ilerleme.yuzde|round(0)|int }} üretildi{% endif %}</small>
+                        </div>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% else %}
                 <tr><td colspan="6" class="text-muted text-center py-4">Sipariş bulunmuyor.</td></tr>

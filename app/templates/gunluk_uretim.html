@@ -63,8 +63,9 @@
                 </select>
                 {# 2026-10-26: uretimin birden fazla kalemi varsa hangi is emri kalemine #}
                 <select class="form-select form-select-sm mt-1 d-none" id="production_item_picker_select">
-                    <option value="">Kalem seçilmedi</option>
+                    <option value="">— Hangi kalem? —</option>
                 </select>
+                <div class="gu-mini text-muted">Müşterinin açık siparişi var: bu üretim hangi siparişe ait?</div>
             </div>
         </div>
         <div class="col-md-2">
@@ -307,7 +308,7 @@ var productionItemPicker = document.getElementById('production_item_picker_selec
 var productionItemsById = {};
 
 function fillProductionItemPicker(productionId) {
-    productionItemPicker.innerHTML = '<option value="">Kalem seçilmedi</option>';
+    productionItemPicker.innerHTML = '<option value="">— Hangi kalem? —</option><option value="genel">Kalem ayrımı yok (genel)</option>';
     var items = productionItemsById[productionId] || [];
     if (items.length < 2) { productionItemPicker.classList.add('d-none'); return; }
     items.forEach(function (it) {
@@ -319,9 +320,11 @@ function fillProductionItemPicker(productionId) {
     productionItemPicker.classList.remove('d-none');
 }
 
+// 2026-10-27 (Veri akisi 1): musterinin acik siparisi varsa secim ZORUNLU -
+// "Siparise bagli degil" bilincli secilmeli (bos birakilinca kayit yapilmaz).
 function resetProductionPicker() {
     productionPicker.classList.add('d-none');
-    productionPickerSelect.innerHTML = '<option value="">Bağlantısız (sadece kayıt)</option>';
+    productionPickerSelect.innerHTML = '<option value="">— Hangi siparişe ait? —</option>';
     productionIdHidden.value = '';
     productionItemsById = {};
     fillProductionItemPicker('');
@@ -341,6 +344,10 @@ function loadActiveProductionsForCustomer(customerId) {
                 opt.textContent = 'Üretimde · ' + p.label;
                 productionPickerSelect.appendChild(opt);
             });
+            var yok = document.createElement('option');
+            yok.value = 'yok';
+            yok.textContent = 'Siparişe bağlı değil (stok / sipariş dışı)';
+            productionPickerSelect.appendChild(yok);
             if (list.length === 1) {
                 productionPickerSelect.value = list[0].id;
                 productionIdHidden.value = list[0].id;
@@ -352,8 +359,8 @@ function loadActiveProductionsForCustomer(customerId) {
 }
 
 productionPickerSelect.addEventListener('change', function () {
-    productionIdHidden.value = this.value;
-    fillProductionItemPicker(this.value);
+    productionIdHidden.value = (this.value === 'yok') ? '' : this.value;
+    fillProductionItemPicker(this.value === 'yok' ? '' : this.value);
 });
 
 initCustomerSearch({
@@ -478,12 +485,25 @@ document.getElementById('entryForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var errorBox = document.getElementById('entryErrorBox');
     errorBox.classList.add('d-none');
+    // 2026-10-27: acik siparisi olan musteride siparis / kalem secimi zorunlu
+    if (!productionPicker.classList.contains('d-none') && productionPickerSelect.value === '') {
+        errorBox.textContent = 'Bu müşterinin açık siparişi var: üretimin hangi siparişe ait olduğunu seçin (değilse "Siparişe bağlı değil").';
+        errorBox.classList.remove('d-none');
+        productionPickerSelect.focus();
+        return;
+    }
+    if (!productionItemPicker.classList.contains('d-none') && productionItemPicker.value === '') {
+        errorBox.textContent = 'Bu siparişte birden fazla ürün var: hangi kaleme ait olduğunu seçin (ya da "Kalem ayrımı yok").';
+        errorBox.classList.remove('d-none');
+        productionItemPicker.focus();
+        return;
+    }
 
     var formData = new FormData();
     formData.append('csrf_token', document.getElementById('csrf_token_value').value);
     formData.append('tarih', document.getElementById('entry_tarih').value);
     formData.append('production_id', document.getElementById('production_id').value);
-    formData.append('production_item_id', productionIdHidden.value ? productionItemPicker.value : '');
+    formData.append('production_item_id', (productionIdHidden.value && productionItemPicker.value !== 'genel') ? productionItemPicker.value : '');
     formData.append('customer_id', document.getElementById('customer_id').value);
     formData.append('musteri_adi', document.getElementById('customer_search').value.trim());
     formData.append('koli_basi_kg', document.getElementById('entry_koli_basi_kg').value);

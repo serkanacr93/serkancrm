@@ -21,6 +21,20 @@
 </style>
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <h2 class="mb-0"><i class="bi bi-clipboard-check"></i> İş Emirleri <small class="text-muted fs-6">kalem bazlı</small></h2>
+    {% if acik_siparis_sayisi %}
+    {# 2026-10-27: toplu yazdirma - kontrol listesi hizli; is emirleri 15'erli paket (canli 30 sn siniri) #}
+    <div class="btn-group btn-group-sm flex-wrap" role="group">
+        <a class="btn btn-dark" style="color:#FBC213" href="{{ url_for('is_emirleri_kontrol_listesi_pdf') }}"
+           title="Açık {{ acik_siparis_sayisi }} siparişin tüm iş emirleri - tek sayfalık liste">
+            <i class="bi bi-list-check"></i> Kontrol listesi ({{ acik_siparis_sayisi }} sipariş)
+        </a>
+        {% for n, a, b in paketler %}
+        <a class="btn btn-outline-dark" href="{{ url_for('is_emirleri_toplu_pdf', parca=n) }}" title="Sipariş {{ a }}–{{ b }} iş emirleri">
+            <i class="bi bi-printer"></i> {{ a }}–{{ b }}
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
     <form class="d-flex gap-2" method="get">
         <input type="hidden" name="durum" value="{{ sekme }}">
         <input type="search" class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Müşteri, ürün veya IE no">

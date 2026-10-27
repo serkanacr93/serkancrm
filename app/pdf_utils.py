@@ -2441,7 +2441,58 @@ def _ie_vitrin_buyuk(c, x, y, w, h, gorsel_yolu, etiket, en_txt, boy_txt):
 _IE_HEDEF_PX = 1400  # ~12 cm kutuda ~300 dpi
 
 
+def _ie_logo_reader(company):
+    logo_buf = _logo_for_pdf_yeni(company.logo_data) if company.logo_data else None
+    if not logo_buf:
+        return None
+    try:
+        return ImageReader(logo_buf)
+    except Exception:
+        return None
+
+
+# 2026-10-27: toplu PDF sirasinda dolu - ayni gorsel bir kez islenir, daha
+# kucuk hedef cozunurluk (cikti boyutu + sure). Tekli PDF'te None (degisiklik yok).
+_IE_TOPLU = None
+
+
 def _vitrin_gorsel_yukle_buyuk(path_rel):
+    if _IE_TOPLU is not None:
+        onb = _IE_TOPLU['gorsel']
+        if path_rel not in onb:
+            onb[path_rel] = _toplu_gorsel_yukle(path_rel, _IE_TOPLU['px'])
+        return onb[path_rel]
+    return _vitrin_gorsel_yukle_buyuk_ham(path_rel, _IE_HEDEF_PX)
+
+
+def _toplu_gorsel_yukle(path_rel, hedef_px):
+    """Toplu PDF icin hizli/kucuk gorsel: JPEG'i dogrudan dusuk olcekte
+    acar (draft), kucultur, JPEG kalite 80 ile gomer. Tekli is emri ve teklif
+    PDF'i bunu KULLANMAZ (onlar tam kalite)."""
+    path = path_rel
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', path_rel)
+    try:
+        from PIL import Image as PILImage, ImageOps
+        im = PILImage.open(path)
+        try:
+            im.draft('RGB', (hedef_px, hedef_px))
+        except Exception:
+            pass
+        im = ImageOps.exif_transpose(im)
+        im.thumbnail((hedef_px, hedef_px), PILImage.BILINEAR)
+        out = BytesIO()
+        if im.mode in ('RGBA', 'LA', 'P'):
+            im.convert('RGBA').save(out, 'PNG', optimize=False)
+        else:
+            im.convert('RGB').save(out, 'JPEG', quality=80)
+        out.seek(0)
+        return ImageReader(out), im.size[0], im.size[1]
+    except Exception:
+        return None
+
+
+def _vitrin_gorsel_yukle_buyuk_ham(path_rel, hedef_px):
     """Is emri sag yarisi icin: _vitrin_gorsel_yukle ile ayni kalite kurali,
     ama daha buyuk hedef (uzun kenar en fazla ~1400 px - orijinal kucukse
     ASLA buyutulmez)."""
@@ -2451,7 +2502,7 @@ def _vitrin_gorsel_yukle_buyuk(path_rel):
     global _VITRIN_HEDEF_PX
     eski = _VITRIN_HEDEF_PX
     try:
-        _VITRIN_HEDEF_PX = _IE_HEDEF_PX
+        _VITRIN_HEDEF_PX = hedef_px
         return _vitrin_gorsel_yukle(path)
     finally:
         _VITRIN_HEDEF_PX = eski
@@ -2484,18 +2535,24 @@ def _ie_uyari_ucgen(c, x, y, s):
     c.restoreState()
 
 
-def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
+def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None, _c=None, _ortak=None):
     """YENI is emri: A4 YATAY, her uretim kalemi AYRI SAYFA (IE-00127-1, -2...).
     item_ids verilirse sadece o ProductionItem'lar basilir (tek kalem yazdirma).
-    Fiyat bilgisi ICERMEZ. Veritabanina hicbir sey YAZMAZ."""
+    Fiyat bilgisi ICERMEZ. Veritabanina hicbir sey YAZMAZ.
+    2026-10-27 (toplu hiz): _c verilirse sayfalar O canvas'a cizilir (toplu PDF
+    tek canvas'ta uretilir, PDF birlestirme yok); _ortak = {'katalog','company',
+    'logo_reader'} bir kez hesaplanip tum siparislerde kullanilir."""
     from reportlab.lib.pagesizes import landscape
     from app.models import KeseGramajKatalog
-    try:
-        katalog = KeseGramajKatalog.query.all()
-    except Exception:
-        katalog = []
-
-    company = _get_company_settings_for_pdf()
+    if _ortak is not None:
+        katalog = _ortak['katalog']
+        company = _ortak['company']
+    else:
+        try:
+            katalog = KeseGramajKatalog.query.all()
+        except Exception:
+            katalog = []
+        company = _get_company_settings_for_pdf()
     deal = production.deal
     customer = deal.customer
     musteri = _clean_for_pdf(customer.company_name) if customer.company_name else \
@@ -2511,23 +2568,22 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
     PW, PH = landscape(A4)
     M = 1.1 * cm
     CW = PW - 2 * M
-    buf = BytesIO()
-    c = _PDFCanvas(buf, pagesize=(PW, PH))
-    c.setTitle(f'İş Emri IE-{production.id:05d}')
+    buf = None
+    if _c is None:
+        buf = BytesIO()
+        c = _PDFCanvas(buf, pagesize=(PW, PH))
+        c.setTitle(f'İş Emri IE-{production.id:05d}')
+    else:
+        c = _c
 
     etiket_st = ParagraphStyle('IEEt', fontName='Vera', fontSize=6.6, leading=8, textColor=_IE_ETIKET_GRI)
     deger_st = ParagraphStyle('IEDeger', fontName='Vera-Bold', fontSize=9.5, leading=11.5, textColor=_Y_ANTRASIT)
     not_st = ParagraphStyle('IENot', fontName='Vera', fontSize=8.5, leading=10.5, textColor=colors.HexColor('#333333'))
 
-    logo_buf = None
-    if company.logo_data:
-        logo_buf = _logo_for_pdf_yeni(company.logo_data)
-    logo_reader = None
-    if logo_buf:
-        try:
-            logo_reader = ImageReader(logo_buf)
-        except Exception:
-            logo_reader = None
+    if _ortak is not None:
+        logo_reader = _ortak.get('logo_reader')
+    else:
+        logo_reader = _ie_logo_reader(company)
 
     # 2026-10-26 (2): siparis bilgileri (2. serit) - fiyat/odeme YOK (atolye kagidi)
     seller = getattr(deal, 'seller', None)
@@ -2877,6 +2933,8 @@ def generate_is_emri_pdf_yatay(production, copy_label=None, item_ids=None):
 
         c.showPage()
 
+    if _c is not None:
+        return None
     c.save()
     buf.seek(0)
     return buf
@@ -3100,6 +3158,129 @@ def generate_siparis_dosyasi_pdf(production):
     w.write(out)
     out.seek(0)
     return out
+
+
+# ===== 2026-10-27: TOPLU IS EMRI - kontrol listesi + tum acik siparislerin is emirleri (tek PDF) =====
+
+def _ie_ortak():
+    """Toplu uretimde bir kez hesaplanan ortak veriler."""
+    from app.models import KeseGramajKatalog
+    try:
+        katalog = KeseGramajKatalog.query.all()
+    except Exception:
+        katalog = []
+    company = _get_company_settings_for_pdf()
+    return {'katalog': katalog, 'company': company, 'logo_reader': _ie_logo_reader(company)}
+
+
+def _kontrol_listesi_ciz(c, productions, ortak, ek_baslik=''):
+    from reportlab.lib.pagesizes import landscape
+    katalog, company = ortak['katalog'], ortak['company']
+    satirlar = []
+    for p in productions:
+        kalemler = is_emri_kalemleri(p)
+        cust = p.deal.customer
+        musteri = (cust.company_name or f"{cust.first_name or ''} {cust.last_name or ''}").strip()
+        for n, it in enumerate(kalemler, 1):
+            b = is_emri_kalem_bilgisi(p, it, n, len(kalemler), katalog)
+            satirlar.append((b['no'], musteri, b['urun'] + (' (tedarik)' if b['tip'] == 'ticaret' else ''),
+                             f"{_miktar_tr(b['planlanan'])} {b['birim']}" if b['planlanan'] else '-',
+                             b['termin'].strftime('%d.%m.%Y') if b['termin'] else '-', b['durum']))
+    PW, PH = landscape(A4)
+    M = 1.1 * cm
+    kol = [('İŞ EMRİ', 3.2), ('MÜŞTERİ', 6.0), ('ÜRÜN', 6.8), ('PLANLANAN', 2.6), ('TERMİN', 2.3), ('DURUM', 2.6), ('KONTROL', 1.7), ('SİSTEMDE', 1.9)]
+    rh = 0.62 * cm
+    sayfa_basi = int((PH - 2 * M - 2.6 * cm) // rh)
+    sayfalar = [satirlar[i:i + sayfa_basi] for i in range(0, max(len(satirlar), 1), sayfa_basi)] or [[]]
+    for sn, grup in enumerate(sayfalar, 1):
+        y = PH - M
+        c.setFillColor(_Y_ANTRASIT)
+        c.setFont('Vera-Bold', 15)
+        c.drawString(M, y - 0.5 * cm, 'İŞ EMRİ KONTROL LİSTESİ' + ek_baslik)
+        c.setFont('Vera', 9)
+        c.setFillColor(colors.HexColor('#555555'))
+        c.drawRightString(PW - M, y - 0.5 * cm,
+                          f"{datetime.now().strftime('%d.%m.%Y %H:%M')} · {len(productions)} sipariş · {len(satirlar)} iş emri · Sayfa {sn}/{len(sayfalar)}")
+        c.setStrokeColor(_Y_SARI)
+        c.setLineWidth(3)
+        c.line(M, y - 0.85 * cm, PW - M, y - 0.85 * cm)
+        y -= 1.3 * cm
+        x = M
+        c.setFillColor(_Y_ANTRASIT)
+        c.rect(M, y - rh, PW - 2 * M, rh, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont('Vera-Bold', 7.5)
+        for ad, w in kol:
+            c.drawString(x + 4, y - rh / 2 - 2.5, ad)
+            x += w * cm
+        y -= rh
+        for i, s in enumerate(grup):
+            if i % 2:
+                c.setFillColor(colors.HexColor('#F7F6F2'))
+                c.rect(M, y - rh, PW - 2 * M, rh, fill=1, stroke=0)
+            x = M
+            for j, (ad, w) in enumerate(kol):
+                if j < len(s):
+                    font = 'Vera-Bold' if j == 0 else 'Vera'
+                    txt, sz = _ie_metin_sigdir(c, str(s[j]), font, 8.5, w * cm - 8, 6)
+                    c.setFillColor(_Y_ANTRASIT)
+                    c.setFont(font, sz)
+                    c.drawString(x + 4, y - rh / 2 - 3, txt)
+                else:
+                    c.setStrokeColor(_Y_ANTRASIT)
+                    c.setLineWidth(0.8)
+                    c.rect(x + (w * cm - 10) / 2, y - rh / 2 - 5, 10, 10, fill=0, stroke=1)
+                x += w * cm
+            c.setStrokeColor(_Y_CIZGI_GRI)
+            c.setLineWidth(0.4)
+            c.line(M, y - rh, PW - M, y - rh)
+            y -= rh
+        if not grup:
+            c.setFont('Vera', 10)
+            c.setFillColor(colors.HexColor('#777777'))
+            c.drawString(M, y - 0.8 * cm, 'Açık iş emri yok.')
+        c.setFont('Vera', 7)
+        c.setFillColor(_Y_MIKRO)
+        c.drawString(M, 0.6 * cm, f"{company.company_name or 'Lema Ambalaj'} · dahili kontrol listesi · fiyat bilgisi içermez")
+        c.showPage()
+
+
+def generate_is_emri_kontrol_listesi_pdf(productions):
+    """Sadece kontrol listesi (hizli - gorsel/is emri sayfasi yok)."""
+    from reportlab.lib.pagesizes import landscape
+    buf = BytesIO()
+    c = _PDFCanvas(buf, pagesize=landscape(A4))
+    c.setTitle('İş Emri Kontrol Listesi')
+    _kontrol_listesi_ciz(c, productions, _ie_ortak())
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+TOPLU_PARCA = 15  # bir PDF'te en fazla bu kadar siparis (canli 30 sn sinirina karsi)
+_TOPLU_GORSEL_PX = 640
+
+
+def generate_toplu_is_emri_pdf(productions, ek_baslik=''):
+    """Verilen siparislerin is emri sayfalari TEK canvas'ta (PDF birlestirme
+    yok); basta o paketin kontrol listesi. Ortak veriler bir kez, gorseller
+    bir kez ve daha kucuk cozunurlukte islenir. Veritabanina YAZMAZ."""
+    global _IE_TOPLU
+    from reportlab.lib.pagesizes import landscape
+    ortak = _ie_ortak()
+    buf = BytesIO()
+    c = _PDFCanvas(buf, pagesize=landscape(A4))
+    c.setTitle('İş Emirleri' + ek_baslik)
+    _IE_TOPLU = {'gorsel': {}, 'px': _TOPLU_GORSEL_PX}
+    try:
+        _kontrol_listesi_ciz(c, productions, ortak, ek_baslik)
+        for p in productions:
+            generate_is_emri_pdf_yatay(p, _c=c, _ortak=ortak)
+    finally:
+        _IE_TOPLU = None
+    c.save()
+    buf.seek(0)
+    return buf
 
 
 def _escape_xml(s):

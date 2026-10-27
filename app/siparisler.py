@@ -120,6 +120,50 @@ def _siparis_row_dict(deal):
     }
 
 
+def _ilerleme_ekle(rows):
+    """2026-10-27 (Veri akisi 1): SADECE gosterilen sayfadaki siparisler icin
+    uretim ilerlemesi ('480 / 500 kg'). Is emri ve /is-emirleri ile AYNI hesap
+    (Gunluk Uretim kalem/uretim baglantisi + elle girilen uretilen miktar).
+    Sidebar/ozet hesaplarina EKLENMEZ (performans). Hata olursa sessizce atlar."""
+    if not rows:
+        return rows
+    try:
+        from app.models import ProductionItem
+        from app.pdf_utils import is_emri_kalemleri, is_emri_kalem_bilgisi
+        ids = [r['id'] for r in rows]
+        prods = Production.query.filter(Production.deal_id.in_(ids)).options(
+            joinedload(Production.items).joinedload(ProductionItem.daily_outputs),
+            joinedload(Production.daily_outputs),
+            joinedload(Production.deal).joinedload(Deal.items),
+        ).all()
+        by_deal = {p.deal_id: p for p in prods}
+        for r in rows:
+            p = by_deal.get(r['id'])
+            r['ilerleme'] = None
+            if not p or r.get('durum_key') not in ('uretimde', 'pesinat_bekliyor', 'sevkiyata_hazir'):
+                continue
+            kalemler = is_emri_kalemleri(p)
+            plan = {}
+            gerc = {}
+            for n, it in enumerate(kalemler, 1):
+                if it.urun_tipi == 'ticaret':
+                    continue
+                b = is_emri_kalem_bilgisi(p, it, n, len(kalemler))
+                plan[b['birim']] = plan.get(b['birim'], 0) + (b['planlanan'] or 0)
+                gerc[b['birim']] = gerc.get(b['birim'], 0) + min(b['gerceklesen'] or 0, b['planlanan'] or 0)
+            if not plan or not sum(plan.values()):
+                continue
+            yuzde = sum(gerc.values()) / sum(plan.values()) * 100 if len(plan) == 1 else \
+                sum((gerc[k] / plan[k]) for k in plan if plan[k]) / len(plan) * 100
+            birim = next(iter(plan)) if len(plan) == 1 else None
+            r['ilerleme'] = {'yuzde': max(0, min(100, yuzde)), 'birim': birim,
+                             'gerc': gerc.get(birim) if birim else None, 'plan': plan.get(birim) if birim else None}
+    except Exception:
+        for r in rows:
+            r.setdefault('ilerleme', None)
+    return rows
+
+
 def teklif_siparis_sayilari(scope_user_id):
     """(toplam_teklif, siparis_sayisi, donusum_yuzdesi) - 'Verilen teklif'
     ve 'Siparise donen' Komuta Merkezi kutulari icin. TEK sorgu (GROUP BY
@@ -269,7 +313,7 @@ def siparisler_sayfa_verisi(scope_user_id, mod, ay_param, page=1, per_page=50):
         # Sayfalama (Python tarafinda - aylik liste zaten kucuk bir kume)
         total = len(rows)
         start = (page - 1) * per_page
-        page_rows = rows[start:start + per_page]
+        page_rows = _ilerleme_ekle(rows[start:start + per_page])
         return {
             'kpis': kpis, 'rows': page_rows, 'total': total, 'page': page,
             'pages': max(1, (total + per_page - 1) // per_page),
@@ -298,7 +342,7 @@ def siparisler_sayfa_verisi(scope_user_id, mod, ay_param, page=1, per_page=50):
     }
     total = len(rows)
     start = (page - 1) * per_page
-    page_rows = rows[start:start + per_page]
+    page_rows = _ilerleme_ekle(rows[start:start + per_page])
     return {
         'kpis': kpis, 'rows': page_rows, 'total': total, 'page': page,
         'pages': max(1, (total + per_page - 1) // per_page),
