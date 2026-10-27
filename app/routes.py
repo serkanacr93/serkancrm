@@ -6531,7 +6531,64 @@ def register_routes(app):
 
         return render_template('invoice_detail.html', invoice=invoice, ledger_rows=ledger_rows,
                                 bagli_irsaliye=bagli_irsaliye, fark_var_mi=fark_var_mi,
-                                siparis_odemeleri=siparis_odemeleri)
+                                siparis_odemeleri=siparis_odemeleri,
+                                silme_engeli=_fatura_silme_engeli(invoice) if current_user.is_admin else None)
+
+    def _fatura_silme_engeli(invoice):
+        """2026-10-27 (Fatura Sil): silinemiyorsa nedenini (str), silinebiliyorsa
+        None doner. Odemesi bagli fatura SILINMEZ (gercek tahsilat korunur)."""
+        if invoice.muhasebeye_gonderildi:
+            return 'Muhasebeye gönderildi olarak işaretli — önce işareti kaldırın.'
+        odemeler = Payment.query.filter_by(invoice_id=invoice.id).all()
+        if odemeler:
+            ozet = ', '.join(f"{p.payment_date.strftime('%d.%m.%Y') if p.payment_date else '-'} · {format_price_tr(p.amount)}"
+                             + (f' · "{p.notes}"' if p.notes else '') for p in odemeler[:3])
+            return (f'Bu faturaya bağlı {len(odemeler)} ödeme var ({ozet}). Önce ödemeyi Ödemeler sayfasından silin — '
+                    'ödeme gerçekse fatura silinmemeli.')
+        kapanis = HistoricalClosureLog.query.filter(
+            HistoricalClosureLog.created_invoice_id == invoice.id, HistoricalClosureLog.reverted_at.is_(None)).first()
+        if kapanis:
+            return 'Bu fatura Geçmiş Kayıt Düzeltme ile oluşturuldu — oradan geri alın.'
+        return None
+
+    @app.route('/invoices/<int:id>/delete', methods=['POST'])
+    @admin_required
+    def delete_invoice(id):
+        """2026-10-27 (Fatura Sil): mukerrer/yanlis faturayi KALICI siler.
+        Sadece yonetici; odemesi bagliysa, muhasebeye gonderildiyse veya gecmis
+        kayit kapanisiyla olustuysa SILINMEZ. Onay icin fatura numarasi
+        yazilmalidir. Kalemler birlikte silinir; bagli manuel irsaliyenin
+        SADECE fatura bagi kaldirilir (irsaliye silinmez). Cari bakiye ve
+        siparis 'faturalanan' miktarlari canli hesaplandigi icin kendiliginden
+        duser. Silinen faturanin ozeti uygulama loguna yazilir."""
+        invoice = Invoice.query.get_or_404(id)
+        no = invoice.display_no
+        donus = url_for('invoice_detail', id=invoice.id)
+        engel = _fatura_silme_engeli(invoice)
+        if engel:
+            flash(f'{no} silinemedi: {engel}', 'danger')
+            return redirect(donus)
+        if (request.form.get('onay_no') or '').strip().upper() != no.upper():
+            flash(f'Onay için fatura numarasını ({no}) aynen yazmalısınız — silinmedi.', 'danger')
+            return redirect(donus)
+        deal_id, customer_id = invoice.deal_id, invoice.customer_id
+        ozet = {'id': invoice.id, 'no': no, 'type': invoice.type, 'deal_id': deal_id, 'customer_id': customer_id,
+                'tarih': str(invoice.date), 'total': invoice.total,
+                'kalemler': [(it.description, it.quantity, it.unit, it.unit_price) for it in invoice.items],
+                'silen': current_user.username}
+        for irs in ManualIrsaliye.query.filter_by(invoice_id=invoice.id).all():
+            irs.invoice_id = None
+        for log in IrsaliyeDegisiklikLog.query.filter_by(invoice_id=invoice.id).all():
+            log.invoice_id = None
+        for r in PaymentReminder.query.filter(PaymentReminder.source_type == 'invoice', PaymentReminder.source_id == invoice.id,
+                                              PaymentReminder.status.notin_(HATIRLATMA_KAPALI)).all():
+            r.status = 'askida'
+        db.session.delete(invoice)
+        db.session.commit()
+        app.logger.warning('FATURA SILINDI: %s', json.dumps(ozet, ensure_ascii=False, default=str))
+        _sync_payment_reminders_for_today(customer_ids=[customer_id])
+        flash(f'{no} kalıcı olarak silindi.', 'success')
+        return redirect(url_for('deal_detail', id=deal_id) if deal_id else url_for('invoices'))
 
     @app.route('/invoices/<int:id>/odeme-bagla', methods=['POST'])
     @login_required

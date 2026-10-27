@@ -250,6 +250,51 @@
             </div>
         </div>
         {% endif %}
+
+        {# 2026-10-27 (Fatura Sil): sadece yonetici; odemesi bagliysa kapali #}
+        {% if current_user.is_admin %}
+        <div class="card mb-4 border-danger">
+            <div class="card-body py-2">
+                {% if silme_engeli %}
+                <button type="button" class="btn btn-outline-secondary w-100" disabled><i class="bi bi-trash"></i> Faturayı Sil</button>
+                <div class="alert alert-danger py-2 small mt-2 mb-0">{{ silme_engeli }}</div>
+                {% else %}
+                <button type="button" class="btn btn-outline-danger w-100" data-bs-toggle="modal" data-bs-target="#faturaSilModal"><i class="bi bi-trash"></i> Faturayı Sil</button>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
+
+{% if current_user.is_admin and not silme_engeli %}
+<div class="modal fade" id="faturaSilModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" action="{{ url_for('delete_invoice', id=invoice.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">{{ invoice.display_no }} silinsin mi?</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <p class="small mb-2">
+                        {{ invoice.customer.display_name if invoice.customer else '-' }}{% if invoice.deal %} · {{ invoice.deal.display_no }}{% endif %} ·
+                        <strong>{{ invoice.total|para_goster(invoice.para_birimi) }}</strong> · {{ invoice.items|length }} kalem
+                    </p>
+                    <p class="small text-danger mb-2">Silinen fatura <strong>geri alınamaz</strong>. Cari bakiye ve siparişin "faturalanan" miktarı kendiliğinden düşer.{% if bagli_irsaliye %} {{ bagli_irsaliye.display_no }} irsaliyesiyle bağı kaldırılır (irsaliye silinmez).{% endif %}</p>
+                    <label class="form-label small">Onay için <strong>{{ invoice.display_no }}</strong> yazın</label>
+                    <input type="text" class="form-control" name="onay_no" id="faturaSilOnay" autocomplete="off">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-danger" id="faturaSilBtn" disabled>Kalıcı olarak sil</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+document.getElementById('faturaSilOnay').addEventListener('input', function () {
+    document.getElementById('faturaSilBtn').disabled = this.value.trim().toUpperCase() !== '{{ invoice.display_no }}'.toUpperCase();
+});
+</script>
+{% endif %}
 {% endblock %}
