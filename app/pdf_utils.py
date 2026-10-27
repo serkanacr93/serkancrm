@@ -2262,6 +2262,18 @@ def is_emri_kalem_bilgisi(production, pitem, sira, toplam, katalog=None):
                 kg += sum((o.toplam_kg or 0) for o in (production.daily_outputs or [])
                           if getattr(o, 'production_item_id', None) is None)
             gerceklesen = max(gerceklesen, kg)
+    # 2026-10-27 (Sevk/fatura korumalari): musteriye GONDERILEN mal uretilmis
+    # sayilir - gunluk uretim girilmeden acil sevk edilen koliler "Kalan"i
+    # sisirmesin. Toplanmaz, en buyugu alinir (ayni koli iki kez sayilmaz).
+    uretim_kaydi = gerceklesen
+    gonderilen = 0
+    if pitem is not None and di is not None and (not pitem.unit or not di.unit or pitem.unit == di.unit):
+        try:
+            from app.kalem_belge import gonderilen_haritasi
+            gonderilen = (gonderilen_haritasi(production).get(di.id) or {}).get('toplam', 0) or 0
+        except Exception:
+            gonderilen = 0
+    gerceklesen = max(gerceklesen, gonderilen)
 
     termin = None
     termin_gun = (getattr(di, 'termin_gun', None) if di else None) or getattr(deal, 'varsayilan_termin_gun', None)
@@ -2317,6 +2329,8 @@ def is_emri_kalem_bilgisi(production, pitem, sira, toplam, katalog=None):
         'baski': _ie_temiz(pitem.baski_bilgisi if pitem is not None else None) or _ie_temiz(di.renk if di else None),
         'birim': birim,
         'planlanan': planlanan, 'gerceklesen': gerceklesen,
+        'uretim_kaydi': uretim_kaydi if tip != 'ticaret' else 0, 'gonderilen': gonderilen,
+        'gunluk_eksik': bool(tip != 'ticaret' and gonderilen > (uretim_kaydi or 0) + 0.0005),
         'kalan': max((planlanan or 0) - (gerceklesen or 0), 0),
         'termin': termin, 'durum': durum,
         'koli_baskisiz': bool(di is not None and getattr(di, 'koli_tipi', None) == 'baskisiz'),
@@ -3251,10 +3265,20 @@ def generate_is_emri_kontrol_listesi_pdf(productions):
     buf = BytesIO()
     c = _PDFCanvas(buf, pagesize=landscape(A4))
     c.setTitle('İş Emri Kontrol Listesi')
+    _gonderilen_onyukle_guvenli(productions)
     _kontrol_listesi_ciz(c, productions, _ie_ortak())
     c.save()
     buf.seek(0)
     return buf
+
+
+def _gonderilen_onyukle_guvenli(productions):
+    """2026-10-27: gonderilen miktarlar toplu ekranlarda tek seferde yuklensin."""
+    try:
+        from app.kalem_belge import gonderilen_onyukle
+        gonderilen_onyukle(productions)
+    except Exception:
+        pass
 
 
 TOPLU_PARCA = 15  # bir PDF'te en fazla bu kadar siparis (canli 30 sn sinirina karsi)
@@ -3272,6 +3296,7 @@ def generate_toplu_is_emri_pdf(productions, ek_baslik=''):
     c = _PDFCanvas(buf, pagesize=landscape(A4))
     c.setTitle('İş Emirleri' + ek_baslik)
     _IE_TOPLU = {'gorsel': {}, 'px': _TOPLU_GORSEL_PX}
+    _gonderilen_onyukle_guvenli(productions)
     try:
         _kontrol_listesi_ciz(c, productions, ortak, ek_baslik)
         for p in productions:

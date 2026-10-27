@@ -32,6 +32,14 @@
         <a href="{{ url_for('production_siparis_dosyasi_pdf', id=production.id) }}" class="btn btn-warning" title="Kapak + onaylı teklif + tüm iş emirleri tek PDF">
             <i class="bi bi-folder2-open"></i> Sipariş Dosyası
         </a>
+        {% if production.deal.stage == 'kazanilan' %}
+        {# 2026-10-27: ayni urunlerle yeni teklif (eski siparis degismez) #}
+        <form method="POST" action="{{ url_for('tekrar_siparis', id=production.deal.id) }}" class="d-inline"
+              onsubmit="return confirm('{{ production.deal.display_no }} kopyalanıp yeni teklif açılsın mı? (Eski sipariş değişmez)')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-dark" style="color:#FBC213" title="Aynı kalemlerle yeni teklif aç"><i class="bi bi-arrow-repeat"></i> Tekrar Sipariş</button>
+        </form>
+        {% endif %}
         <a href="{{ url_for('deal_detail', id=production.deal.id) }}" class="btn btn-outline-info">
             <i class="bi bi-file-earmark-text"></i> Teklif Detayı
         </a>
@@ -285,16 +293,19 @@
             <div class="card-body p-0">
                 <div class="table-responsive">
                 <table class="table table-sm mb-0 align-middle">
-                    <thead class="table-light"><tr><th>Ürün</th><th class="text-end">Sipariş</th><th>İrsaliye</th><th>Fatura</th><th></th></tr></thead>
+                    <thead class="table-light"><tr><th>Ürün</th><th class="text-end">Sipariş</th><th title="İrsaliye + sevkiyat (aynı mal iki kez sayılmaz)">Gönderilen</th><th>Fatura</th><th></th></tr></thead>
                     <tbody>
                     {% for k in kalem_belge %}
-                    {% set _ip = (k.irsaliye / k.siparis * 100) if k.siparis else 0 %}
+                    {% set _ip = ((k.gonderilen if k.gonderilen is defined else k.irsaliye) / k.siparis * 100) if k.siparis else 0 %}
                     {% set _fp = (k.fatura / k.siparis * 100) if k.siparis else 0 %}
                     <tr>
-                        <td>{{ k.aciklama }}</td>
+                        <td>{{ k.aciklama }}
+                            {% if k.gunluk_eksik %}<div class="small text-warning fw-bold">⚠ {{ '%g'|format(k.gonderilen|round(3)) }} {{ k.birim }} gönderildi, günlük üretimde {{ '%g'|format((k.uretim_kaydi or 0)|round(3)) }} — günlük üretimi girin</div>{% endif %}
+                            {% if k.fatura > (k.fatura_ust or 0) + 0.0005 and k.fatura_ust_kaynak != 'sipariş' %}<div class="small text-danger fw-bold">⚠ Faturalanan {{ '%g'|format(k.fatura|round(3)) }} &gt; {{ k.fatura_ust_kaynak }} {{ '%g'|format(k.fatura_ust|round(3)) }} — fazla faturalama</div>{% endif %}
+                        </td>
                         <td class="text-end text-nowrap">{{ '%g'|format(k.siparis) }} {{ k.birim }}</td>
                         <td style="min-width:110px">
-                            <small class="{{ 'text-success fw-bold' if _ip >= 99.5 else 'text-warning fw-bold' }}">{{ '%g'|format(k.irsaliye|round(3)) }} / {{ '%g'|format(k.siparis) }}{{ ' ✓' if _ip >= 99.5 }}</small>
+                            <small class="{{ 'text-success fw-bold' if _ip >= 99.5 else 'text-warning fw-bold' }}">{{ '%g'|format((k.gonderilen if k.gonderilen is defined else k.irsaliye)|round(3)) }} / {{ '%g'|format(k.siparis) }}{{ ' ✓' if _ip >= 99.5 }}</small>
                             <div style="height:5px;background:#eee;border-radius:3px;overflow:hidden"><div style="height:100%;width:{{ [_ip, 100]|min }}%;background:{{ '#198754' if _ip >= 99.5 else '#C77700' }}"></div></div>
                         </td>
                         <td style="min-width:110px">

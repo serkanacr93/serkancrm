@@ -32,6 +32,7 @@
                     </div>
                     {# 2026-10-27 (Veri akisi 2): musteri secilince acik siparisler - irsaliye siparisten dolar #}
                     <input type="hidden" id="deal_id" name="deal_id" value="">
+                    <input type="hidden" id="siparis_karari" name="siparis_karari" value="">
                     <div id="acik_siparisler" class="mb-3" style="display:none"></div>
                     <div class="row">
                         <div class="col-md-4 mb-3">
@@ -185,6 +186,7 @@ function acikSiparisleriTemizle() {
     document.getElementById('acik_siparisler').style.display = 'none';
     document.getElementById('acik_siparisler').innerHTML = '';
     document.getElementById('deal_id').value = '';
+    document.getElementById('siparis_karari').value = '';
 }
 function acikSiparisleriYukle(musteriId) {
     acikSiparisleriTemizle();
@@ -205,7 +207,8 @@ function acikSiparisleriYukle(musteriId) {
                         return escHtml(k.aciklama) + ' — sipariş ' + trSayiIrs(k.siparis) + ' ' + escHtml(k.birim) + hazir + ' · irsaliyesi kesilen ' + trSayiIrs(k.irsaliye);
                     }).join('<br>') + '</div></div>';
             });
-            html += '<button type="button" class="btn btn-sm btn-outline-secondary" id="sip-siparissiz">Siparişsiz devam et (elle)</button>';
+            html += '<div class="small text-danger fw-bold mb-1" id="sip-karar-uyari">Bu müşterinin açık siparişi var — gönderim hangi siparişten? Seçmeden irsaliye kaydedilmez.</div>' +
+                '<button type="button" class="btn btn-sm btn-outline-secondary" id="sip-siparissiz">Siparişe ait değil (stok / numune) — elle gir</button>';
             var kutu = document.getElementById('acik_siparisler');
             kutu.innerHTML = html;
             kutu.style.display = 'block';
@@ -228,9 +231,9 @@ function siparistenDoldur(i) {
             '<input type="hidden" name="deal_item_id_' + n + '" value="' + k.deal_item_id + '"></td>' +
             '<td><input type="number" class="form-control form-control-sm item-qty" name="qty_' + n + '" min="0" step="0.01" value="' + (Math.round(k.oneri * 1000) / 1000) + '" required>' +
             '<small class="text-success">' + (k.hazir ? 'hazır − kesilen' : 'kalan') + '</small></td>' +
-            '<td><select class="form-select form-select-sm" name="unit_' + n + '">' + birimler.map(function (b) {
-                return '<option value="' + b + '"' + (b === k.birim ? ' selected' : '') + '>' + (b === 'm2' ? 'm²' : b.charAt(0).toUpperCase() + b.slice(1)) + '</option>';
-            }).join('') + '</select></td>' +
+            // 2026-10-27: siparis kalemine bagli satirda birim kilitli (kalemden)
+            '<td><input type="text" class="form-control form-control-sm" name="unit_' + n + '" value="' + escHtml(k.birim || 'adet') + '" readonly title="Birim sipariş kaleminden gelir">' +
+            '<small class="text-muted">' + (k.birim === 'kg' ? 'koli değil, kg yazın' : 'sipariş birimi') + '</small></td>' +
             '<td><input type="number" class="form-control form-control-sm item-price" name="price_' + n + '" min="0" step="any" placeholder="Opsiyonel" value="' + (k.fiyat !== null && k.fiyat !== undefined ? k.fiyat : '') + '">' +
             (k.fiyat === null ? '<small class="text-muted">dövizli – elle</small>' : '<small class="text-success">tekliften</small>') + '</td>' +
             '<td><input type="text" class="form-control form-control-sm item-total" readonly></td>' +
@@ -241,6 +244,8 @@ function siparistenDoldur(i) {
     if (!n) { alert('Bu siparişte irsaliyesi kesilecek kalan miktar yok.'); acikSiparisleriYukle(document.getElementById('customer_id').value); return; }
     itemCount = n;
     document.getElementById('deal_id').value = s.deal_id;
+    document.getElementById('siparis_karari').value = 'siparis';
+    var ku = document.getElementById('sip-karar-uyari'); if (ku) ku.style.display = 'none';
     if (s.kdv !== null && s.kdv !== undefined && document.getElementById('vat_rate')) {
         var vr = document.getElementById('vat_rate');
         if ([].some.call(vr.options || [], function (o) { return parseFloat(o.value) === parseFloat(s.kdv); })) vr.value = String(s.kdv);
@@ -258,6 +263,7 @@ document.addEventListener('click', function (e) {
     if (b) { siparistenDoldur(parseInt(b.dataset.sip, 10)); return; }
     if (e.target.id === 'sip-siparissiz') {
         document.getElementById('deal_id').value = '';
+        document.getElementById('siparis_karari').value = 'siparissiz';
         document.getElementById('acik_siparisler').style.display = 'none';
     }
 });
@@ -332,7 +338,14 @@ function calculateIrsaliyeTotals() {
 attachItemEvents();
 calculateIrsaliyeTotals();
 
-document.querySelector('form').addEventListener('submit', function () {
+document.querySelector('form').addEventListener('submit', function (e) {
+    // 2026-10-27: acik siparisi olan musteride karar zorunlu
+    if (ACIK_SIPARISLER.length && !document.getElementById('siparis_karari').value) {
+        e.preventDefault();
+        alert('Bu müşterinin açık siparişi var. "Bu siparişten doldur" ya da "Siparişe ait değil" seçin.');
+        var k = document.getElementById('acik_siparisler'); if (k) k.scrollIntoView({ behavior: 'smooth' });
+        return;
+    }
     var btn = this.querySelector('button[type="submit"]');
     if (btn) {
         btn.disabled = true;

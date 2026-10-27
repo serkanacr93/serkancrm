@@ -61,7 +61,7 @@
     <div class="card-body sp-table-wrap">
         <table class="table table-hover mb-0">
             <thead class="table-dark">
-                <tr><th>Müşteri</th><th>Ürün</th><th>Miktar</th><th>Tutar</th><th>Tarih</th><th>Durum</th></tr>
+                <tr><th>Müşteri</th><th>Ürün</th><th>Miktar</th><th>Tutar</th><th>Tarih</th><th>Durum</th><th></th></tr>
             </thead>
             <tbody>
                 {% for r in rows %}
@@ -80,9 +80,17 @@
                         </div>
                         {% endif %}
                     </td>
+                    <td onclick="event.stopPropagation()" class="text-nowrap">
+                        {# 2026-10-27: Tekrar Siparis - ayni kalemlerle yeni teklif #}
+                        <form method="POST" action="{{ url_for('tekrar_siparis', id=r.id) }}" class="d-inline"
+                              onsubmit="return confirm('Bu sipariş kopyalanıp yeni teklif açılsın mı? (Eski sipariş değişmez)')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-dark" title="Tekrar Sipariş: aynı kalemlerle yeni teklif"><i class="bi bi-arrow-repeat"></i></button>
+                        </form>
+                    </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="text-muted text-center py-4">Sipariş bulunmuyor.</td></tr>
+                <tr><td colspan="7" class="text-muted text-center py-4">Sipariş bulunmuyor.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

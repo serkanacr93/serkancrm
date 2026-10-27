@@ -81,7 +81,8 @@
             <td data-et="Gerçekleşen" class="text-end text-muted">—</td>
             <td data-et="Kalan" class="text-end text-muted">—</td>
             {% else %}
-            <td data-et="Gerçekleşen" class="text-end">{{ miktar_tr(b.gerceklesen) if b.gerceklesen else '-' }}{{ ' ' ~ b.birim if b.gerceklesen }}</td>
+            <td data-et="Gerçekleşen" class="text-end">{{ miktar_tr(b.gerceklesen) if b.gerceklesen else '-' }}{{ ' ' ~ b.birim if b.gerceklesen }}
+                {% if b.gunluk_eksik %}<div class="small text-warning fw-bold" title="Gönderilen mal üretilmiş sayıldı">⚠ günlük üretim eksik ({{ miktar_tr(b.uretim_kaydi) }} kayıtlı)</div>{% endif %}</td>
             <td data-et="Kalan" class="text-end">{{ miktar_tr(b.kalan) }} {{ b.birim }}</td>
             {% endif %}
             <td data-et="Termin">
@@ -101,7 +102,7 @@
     </tbody>
 </table>
 </div>
-<p class="text-muted small">Gerçekleşen: Günlük Üretim'de bu kaleme bağlanan kg toplamı ile üretim detayında girilen üretilen miktarın büyüğü. Termin: kalem/teklif termin süresi (iş günü, sipariş tarihinden), yoksa teslim tarihi.</p>
+<p class="text-muted small">Gerçekleşen: Günlük Üretim'de bu kaleme bağlanan kg toplamı, üretim detayında girilen üretilen miktar ve müşteriye gönderilen miktarın en büyüğü. Termin: kalem/teklif termin süresi (iş günü, sipariş tarihinden), yoksa teslim tarihi.</p>
 {% else %}
 <div class="alert alert-light border">Bu filtrede iş emri yok.</div>
 {% endif %}

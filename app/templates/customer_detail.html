@@ -261,10 +261,17 @@
                                                 <span class="text-muted small">-</span>
                                             {% endif %}
                                         </td>
-                                        <td>
+                                        <td class="text-nowrap">
                                             <a href="{{ url_for('deal_pdf', id=deal.id) }}" class="btn btn-sm btn-outline-info" target="_blank">
                                                 <i class="bi bi-file-pdf"></i>
                                             </a>
+                                            {% if deal.stage == 'kazanilan' %}
+                                            <form method="POST" action="{{ url_for('tekrar_siparis', id=deal.id) }}" class="d-inline"
+                                                  onsubmit="return confirm('{{ deal.display_no }} kopyalanıp yeni teklif açılsın mı? (Eski sipariş değişmez)')">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="btn btn-sm btn-dark" style="color:#FBC213" title="Tekrar Sipariş: aynı kalemlerle yeni teklif"><i class="bi bi-arrow-repeat"></i></button>
+                                            </form>
+                                            {% endif %}
                                         </td>
                                     </tr>
                                     {% endfor %}

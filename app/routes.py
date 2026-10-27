@@ -3702,6 +3702,115 @@ def register_routes(app):
         flash(f'Revize teklif oluşturuldu! KDV dahil: {new_deal.value:,.2f} ₺', 'success')
         return redirect(url_for('deal_detail', id=new_deal.id))
 
+    _TEKRAR_ISARET = re.compile(r"Tekrar sipariş: TKL-\d+'den kopyalandı \(#(\d+)\)")
+
+    @app.route('/deals/<int:id>/tekrar-siparis', methods=['POST'])
+    @login_required
+    def tekrar_siparis(id):
+        """2026-10-27 (Tekrar Siparis): kazanilan bir siparisin kopyasini YENI
+        TEKLIF olarak acar (eski siparis DEGISMEZ). Kopyalanan: musteri,
+        kalemler (miktar, fiyat, olcu, kagit, kese no, koli, termin, numune
+        gorseli), odeme SEKLI (pesinat orani/vade). Kopyalanmayan: odeme
+        TARIHLERI (yeni siparis daha acilmadan 'gecikmis' gorunmesin), kalem
+        teslim tarihi, beklenen kapanis. Dovizli tekliflerde kur bugunun
+        TCMB kuruyla yenilenir (alinamazsa eski kur + uyari). Kaynak, ic
+        nota '(#id)' isaretiyle yazilir - onayda eski uretimin tasarim
+        gorseli yeni uretime bu isaretle tasinir. Yeni teklif teklif olarak
+        kalir; duzenleme ekrani acilir."""
+        deal = Deal.query.get_or_404(id)
+        if not current_user.is_admin and deal.user_id != current_user.id:
+            flash('Bu sipariş için tekrar sipariş açma yetkiniz yok.', 'danger')
+            return redirect(request.referrer or url_for('siparisler_sayfa'))
+        if deal.stage != 'kazanilan':
+            flash('Tekrar sipariş sadece onaylanmış (kazanılan) siparişlerden açılabilir.', 'warning')
+            return redirect(request.referrer or url_for('siparisler_sayfa'))
+        # cift tiklama korumasi
+        son = Deal.query.filter(Deal.customer_id == deal.customer_id,
+                                Deal.created_at >= datetime.utcnow() - timedelta(seconds=30)).first()
+        if son and son.id != deal.id:
+            flash(f'{son.display_no} az önce zaten oluşturuldu.', 'info')
+            return redirect(url_for('edit_deal', id=son.id))
+
+        today = datetime.now().date()
+        uyarilar = []
+        kullanilan_kur, kur_usd, kur_eur, kur_tarihi, kur_turu = (deal.kullanilan_kur, deal.kur_usd, deal.kur_eur,
+                                                                   deal.kur_tarihi, deal.kur_turu)
+        if deal.para_birimi and deal.para_birimi != 'TRY':
+            k = fetch_tcmb_rate(deal.para_birimi)
+            if k:
+                kullanilan_kur = k
+            else:
+                uyarilar.append(f'{deal.para_birimi} kuru TCMB\'den alınamadı — eski kur kaldı, kontrol edin.')
+        kalem_dovizleri = {i.para_birimi for i in deal.items if i.para_birimi and i.para_birimi != 'TRY'}
+        if kalem_dovizleri:
+            yeni_usd = fetch_tcmb_rate('USD') if 'USD' in kalem_dovizleri else kur_usd
+            yeni_eur = fetch_tcmb_rate('EUR') if 'EUR' in kalem_dovizleri else kur_eur
+            if ('USD' in kalem_dovizleri and not yeni_usd) or ('EUR' in kalem_dovizleri and not yeni_eur):
+                uyarilar.append('Kalem dövizi kuru TCMB\'den alınamadı — eski kur kaldı, kontrol edin.')
+            else:
+                kur_usd, kur_eur, kur_tarihi, kur_turu = yeni_usd, yeni_eur, today, 'tcmb'
+
+        # Odeme sekli: yapisal alan yoksa (eski onaylilar) orandan uretilir.
+        pesinat_tipi, pesinat_deger = deal.pesinat_tipi, deal.pesinat_deger
+        if not pesinat_tipi and deal.pesinat_orani is not None:
+            pesinat_tipi = 'yok' if deal.pesinat_orani == 0 else 'yuzde'
+            pesinat_deger = None if deal.pesinat_orani == 0 else deal.pesinat_orani
+        isaret = f"Tekrar sipariş: {deal.display_no}'den kopyalandı (#{deal.id})."
+        try:
+            yeni = Deal(
+                deal_no=_next_deal_no(), title=_customer_full_name(deal.customer) if deal.customer else deal.title,
+                stage='teklif', probability=deal.probability, deal_date=today, expected_close=None,
+                valid_until=today + timedelta(days=7), vat_rate=deal.vat_rate, notes=deal.notes,
+                ic_not=(isaret + (f' {deal.ic_not}' if deal.ic_not else '')),
+                vade_gun=deal.vade_gun, pesinat=deal.pesinat, bakiye_odemesi=deal.bakiye_odemesi,
+                odeme_vade_gun=deal.odeme_vade_gun, pesinat_tipi=pesinat_tipi, pesinat_deger=pesinat_deger,
+                bakiye_zamani=deal.bakiye_zamani, odeme_yontemi=deal.odeme_yontemi,
+                pesinat_tarihi=None, bakiye_tarihi=None,
+                para_birimi=deal.para_birimi or 'TRY', kullanilan_kur=kullanilan_kur,
+                kur_usd=kur_usd, kur_eur=kur_eur, kur_tarihi=kur_tarihi, kur_turu=kur_turu,
+                varsayilan_termin_gun=deal.varsayilan_termin_gun,
+                customer_id=deal.customer_id, user_id=current_user.id,
+            )
+            db.session.add(yeni)
+            db.session.flush()
+            yeni_kalemler = []
+            for item in sorted(deal.items, key=lambda x: x.id):
+                k = DealItem(description=item.description, quantity=item.quantity, unit=item.unit,
+                             unit_price=item.unit_price, total_price=(item.quantity or 0) * (item.unit_price or 0),
+                             urun_tipi=item.urun_tipi, kagit_cinsi=item.kagit_cinsi, boy=item.boy, en=item.en,
+                             korugu=item.korugu, renk=item.renk, teslim_tarihi=None,
+                             numune_gorseli=item.numune_gorseli, para_birimi=item.para_birimi,
+                             termin_gun=item.termin_gun, kese_gramaj=item.kese_gramaj, koli_tipi=item.koli_tipi,
+                             deal_id=yeni.id)
+                db.session.add(k)
+                yeni_kalemler.append(k)
+            db.session.flush()
+            yeni.calculate_totals(items=yeni_kalemler)
+            # pesinat_orani teklif asamasinda yapisal alandan senkronlanir
+            if pesinat_tipi == 'yok':
+                yeni.pesinat_orani = 0.0
+            elif pesinat_tipi == 'yuzde' and pesinat_deger is not None:
+                yeni.pesinat_orani = float(pesinat_deger)
+            elif pesinat_tipi == 'tutar' and pesinat_deger is not None and yeni.value:
+                yeni.pesinat_orani = float(pesinat_deger) / yeni.value * 100
+            db.session.add(Reminder(
+                customer_id=yeni.customer_id, deal_id=yeni.id, title=f'Teklif Süresi Doluyor: {yeni.title}',
+                message=f'{yeni.display_no} teklifinin geçerlilik süresi {yeni.valid_until.strftime("%d.%m.%Y")} tarihinde doluyor.',
+                remind_date=yeni.valid_until - timedelta(days=1)))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            flash('Tekrar sipariş oluşturulurken bir hata oluştu, hiçbir değişiklik kaydedilmedi.', 'danger')
+            return redirect(request.referrer or url_for('siparisler_sayfa'))
+
+        eski_tarih = (deal.deal_date or (deal.created_at.date() if deal.created_at else None))
+        flash(f'{yeni.display_no} tekrar sipariş teklifi oluşturuldu ({deal.display_no} kopyası). '
+              f'Fiyatlar {eski_tarih.strftime("%d.%m.%Y") if eski_tarih else "eski"} tarihli siparişten alındı — '
+              f'güncel mi kontrol edip kaydedin. Ödeme tarihleri onayda sorulacak.', 'warning')
+        for u in uyarilar:
+            flash(u, 'warning')
+        return redirect(url_for('edit_deal', id=yeni.id))
+
     @app.route('/deals/<int:id>/approve', methods=['GET', 'POST'])
     @login_required
     def approve_deal(id):
@@ -3761,6 +3870,13 @@ def register_routes(app):
 
                 production = Production(deal_id=deal.id, status='uretimde', start_date=datetime.now().date(),
                                          due_date=deal.expected_close)
+                # 2026-10-27 (Tekrar Siparis): kaynak siparisin uretimindeki
+                # ozel tasarim gorseli (override) yeni uretime tasinir.
+                _m = _TEKRAR_ISARET.search(deal.ic_not or '')
+                if _m:
+                    _kaynak = Deal.query.get(int(_m.group(1)))
+                    if _kaynak and _kaynak.production and _kaynak.production.tasarim_gorseli_override:
+                        production.tasarim_gorseli_override = _kaynak.production.tasarim_gorseli_override
                 db.session.add(production)
                 db.session.flush()
 
@@ -4941,6 +5057,40 @@ def register_routes(app):
             for p in productions
         ])
 
+    def _sevk_fatura_uyarilari(deal):
+        """2026-10-27 (Sevk/fatura korumalari): kayit SONRASI uyarilar (engel
+        degil) - (1) gonderilen > gunluk uretim kaydi: gunluk uretim eksik,
+        (2) faturalanan > gonderilen/uretilen: fazla faturalama."""
+        from app.kalem_belge import siparis_kalem_durumu, gonderilen_cache_temizle
+        mesajlar = []
+        try:
+            gonderilen_cache_temizle()
+            for k in siparis_kalem_durumu(deal):
+                if k.get('gunluk_eksik'):
+                    mesajlar.append(f"{k['aciklama']}: {_miktar_tr_basit(k['gonderilen'])} {k['birim']} gönderildi ama günlük üretimde "
+                                    f"{_miktar_tr_basit(k['uretim_kaydi'] or 0)} {k['birim']} kayıtlı — günlük üretimi girin "
+                                    "(gönderilen koliler dahil).")
+                if k['fatura'] > (k['fatura_ust'] or 0) + 0.0005 and k['fatura_ust_kaynak'] != 'sipariş':
+                    mesajlar.append(f"{k['aciklama']}: toplam {_miktar_tr_basit(k['fatura'])} {k['birim']} faturalandı, "
+                                    f"{k['fatura_ust_kaynak']} {_miktar_tr_basit(k['fatura_ust'])} {k['birim']} — fazla faturalama olabilir, kontrol edin.")
+        except Exception:
+            pass
+        return mesajlar
+
+    def _acik_siparis_dealleri(customer_id):
+        """Musterinin teslim edilmemis (acik) siparisleri - manuel irsaliye
+        paneli ve 'siparis secimi zorunlu' kontrolu AYNI listeyi kullanir."""
+        q = Deal.query.filter(Deal.customer_id == customer_id, Deal.stage == 'kazanilan')
+        if not current_user.is_admin:
+            q = q.filter(Deal.user_id == current_user.id)
+        sonuc = []
+        for d in q.order_by(Deal.id.desc()).limit(20).all():
+            p = d.production
+            if p is None or p.is_delivered or p.status == 'iptal':
+                continue
+            sonuc.append((d, p))
+        return sonuc
+
     @app.route('/api/customers/<int:id>/acik-siparisler')
     @login_required
     def customer_acik_siparisler(id):
@@ -4949,14 +5099,8 @@ def register_routes(app):
         kesilen / onerilen miktar, fiyat). Sadece okur."""
         from app.kalem_belge import siparis_kalem_durumu
         customer = Customer.query.get_or_404(id)
-        q = Deal.query.filter(Deal.customer_id == customer.id, Deal.stage == 'kazanilan')
-        if not current_user.is_admin:
-            q = q.filter(Deal.user_id == current_user.id)
         sonuc = []
-        for d in q.order_by(Deal.id.desc()).limit(20).all():
-            p = d.production
-            if p is None or p.is_delivered or p.status == 'iptal':
-                continue
+        for d, p in _acik_siparis_dealleri(customer.id):
             kalemler = []
             for k in siparis_kalem_durumu(d, p):
                 di = k['deal_item']
@@ -5263,6 +5407,11 @@ def register_routes(app):
             katalog = []
         bugun = datetime.now().date()
         satirlar = []
+        try:
+            from app.kalem_belge import gonderilen_onyukle
+            gonderilen_onyukle(productions)
+        except Exception:
+            pass
         for p in productions:
             items = is_emri_kalemleri(p)
             for sira, it in enumerate(items, 1):
@@ -5331,6 +5480,20 @@ def register_routes(app):
         flash('Üretim "Hazır" olarak işaretlendi!', 'success')
         return redirect(url_for('production_detail', id=id))
 
+    def _sevk_kalan_miktar(production):
+        """2026-10-27 (Sevk korumasi): {production_item_id: (bu sevkiyatta
+        sayilacak, daha once gonderilen)}. Daha once manuel irsaliyeyle ya da
+        onceki sevkiyatla giden mal tekrar gonderilmis SAYILMAZ - sadece
+        'uretilen - onceden gonderilen' kadar."""
+        from app.kalem_belge import gonderilen_ozeti
+        oz = gonderilen_ozeti([it.deal_item_id for it in production.items if it.deal_item_id])
+        sonuc = {}
+        for it in production.items:
+            o = oz.get(it.deal_item_id) if it.deal_item_id else None
+            onceden = (o['manuel'] + o['sevkiyat']) if o else 0.0
+            sonuc[it.id] = (max((it.produced_quantity or 0) - onceden, 0.0), onceden)
+        return sonuc
+
     @app.route('/production/<int:id>/gonderildi-isaretle', methods=['POST'])
     @login_required
     def production_gonderildi_isaretle(id):
@@ -5364,6 +5527,8 @@ def register_routes(app):
         tracking_number = request.form.get('tracking_number', '').strip() or None
         estimated_delivery_date_raw = request.form.get('estimated_delivery_date', '').strip()
         create_irsaliye = request.form.get('irsaliye_ekle') == 'on'
+        kalan_sevk = _sevk_kalan_miktar(production)
+        onceden_toplam = sum(v[1] for v in kalan_sevk.values())
 
         try:
             today = datetime.now().date()
@@ -5380,10 +5545,11 @@ def register_routes(app):
             db.session.add(shipment)
             db.session.flush()
             for item in production.items:
-                if item.produced_quantity and item.produced_quantity > 0:
+                miktar = kalan_sevk.get(item.id, (item.produced_quantity or 0, 0))[0]
+                if miktar and miktar > 0:
                     db.session.add(ShipmentItem(
                         shipment_id=shipment.id, production_item_id=item.id,
-                        description=item.description, quantity=item.produced_quantity, unit=item.unit
+                        description=item.description, quantity=miktar, unit=item.unit
                     ))
 
             if create_irsaliye:
@@ -5397,10 +5563,11 @@ def register_routes(app):
                     db.session.add(irsaliye)
                     db.session.flush()
                     for item in production.items:
-                        if item.produced_quantity and item.produced_quantity > 0:
+                        miktar = kalan_sevk.get(item.id, (item.produced_quantity or 0, 0))[0]
+                        if miktar and miktar > 0:
                             db.session.add(InvoiceItem(
                                 invoice_id=irsaliye.id, description=item.description,
-                                quantity=item.produced_quantity, unit=item.unit,
+                                quantity=miktar, unit=item.unit,
                                 unit_price=0, total_price=0
                             ))
                     db.session.flush()
@@ -5414,6 +5581,9 @@ def register_routes(app):
             return redirect(url_for('production_detail', id=id))
 
         flash('Üretim gönderildi olarak işaretlendi!', 'success')
+        if onceden_toplam > 0.0005:
+            flash(f'Bu siparişten daha önce {_miktar_tr_basit(onceden_toplam)} irsaliyeyle/sevkiyatla gönderilmişti — '
+                  'bu sevkiyata sadece kalan miktar yazıldı (aynı mal iki kez sayılmadı).', 'info')
         return redirect(url_for('production_detail', id=id))
 
     @app.route('/production/<int:id>/create-shipment', methods=['GET', 'POST'])
@@ -5470,13 +5640,17 @@ def register_routes(app):
 
                 # Sevkiyat kalemleri, uretimde kaydedilen gercek uretilen adetten
                 # otomatik olusturulur - fiyat/kg tekrar sorulmaz (Is C).
+                # 2026-10-27: daha once (manuel irsaliye / onceki sevkiyat) giden
+                # miktar dusulur - ayni mal iki kez gonderilmis sayilmaz.
+                kalan_sevk = _sevk_kalan_miktar(production)
                 for item in production.items:
-                    if item.produced_quantity and item.produced_quantity > 0:
+                    miktar = kalan_sevk.get(item.id, (item.produced_quantity or 0, 0))[0]
+                    if miktar and miktar > 0:
                         db.session.add(ShipmentItem(
                             shipment_id=shipment.id,
                             production_item_id=item.id,
                             description=item.description,
-                            quantity=item.produced_quantity,
+                            quantity=miktar,
                             unit=item.unit
                         ))
 
@@ -5592,6 +5766,13 @@ def register_routes(app):
             if not customer_id:
                 flash('Lütfen bir müşteri seçin.', 'danger')
                 return render_template('manual_irsaliye_add.html', carriers=CARRIER_OPTIONS, today=datetime.now().date())
+            # 2026-10-27 (Sevk korumasi): musterinin acik siparisi varsa irsaliye
+            # "Bu siparisten doldur" ya da bilincli "Siparise ait degil" secilmeden
+            # kaydedilmez (Gunluk Uretim'deki zorunlu secimle ayni mantik).
+            if not _int_or_none(request.form.get('deal_id')) and request.form.get('siparis_karari') != 'siparissiz' \
+                    and str(customer_id).isdigit() and _acik_siparis_dealleri(int(customer_id)):
+                flash('Bu müşterinin açık siparişi var: "Bu siparişten doldur" ya da "Siparişe ait değil" seçin — irsaliye oluşturulmadı.', 'danger')
+                return render_template('manual_irsaliye_add.html', carriers=CARRIER_OPTIONS, today=datetime.now().date())
 
             # Cift-tiklama korumasi: ayni musteri icin birkac saniye once
             # zaten bir ManualIrsaliye olusmussa yeni kayit acmak yerine
@@ -5626,6 +5807,7 @@ def register_routes(app):
                         bagli_deal = None
                 manual_irsaliye.deal_id = bagli_deal.id if bagli_deal else None
                 gecerli_kalem_idleri = {di.id for di in bagli_deal.items} if bagli_deal else set()
+                kalem_birimleri = {di.id: di.unit for di in bagli_deal.items} if bagli_deal else {}
                 db.session.add(manual_irsaliye)
                 db.session.flush()
 
@@ -5639,7 +5821,10 @@ def register_routes(app):
                             manual_irsaliye_id=manual_irsaliye.id,
                             description=desc,
                             quantity=float(qty),
-                            unit=request.form.get(f'unit_{i}', 'adet'),
+                            # 2026-10-27: siparis kalemine bagli satirda birim
+                            # kalemden gelir (3 koli -> 3 kg karisikligi olmasin)
+                            unit=(kalem_birimleri.get(did) if did in gecerli_kalem_idleri and kalem_birimleri.get(did)
+                                  else request.form.get(f'unit_{i}', 'adet')),
                             unit_price=float(price_raw) if price_raw else 0,
                             deal_item_id=did if did in gecerli_kalem_idleri else None
                         ))
@@ -5689,6 +5874,9 @@ def register_routes(app):
                 flash(f'{manual_irsaliye.display_no} manuel irsaliyesi oluşturuldu ve {auto_invoice.display_no} dahili fatura otomatik oluşturuldu!', 'success')
             else:
                 flash(f'{manual_irsaliye.display_no} manuel irsaliyesi oluşturuldu!', 'success')
+            if manual_irsaliye.deal_id:
+                for m in _sevk_fatura_uyarilari(Deal.query.get(manual_irsaliye.deal_id)):
+                    flash('⚠ ' + m, 'warning')
             return redirect(url_for('manual_irsaliye_detail', id=manual_irsaliye.id))
 
         return render_template('manual_irsaliye_add.html', carriers=CARRIER_OPTIONS, today=datetime.now().date())
@@ -6826,6 +7014,8 @@ def register_routes(app):
                 return redirect(url_for('create_invoice_from_deal', id=id))
 
             flash(f'{invoice.display_no} - {inv_type} başarıyla oluşturuldu!', 'success')
+            for m in _sevk_fatura_uyarilari(deal):
+                flash('⚠ ' + m, 'warning')
             return redirect(url_for('invoice_detail', id=invoice.id))
 
         unlinked_payments = Payment.query.filter_by(deal_id=deal.id, invoice_id=None).all()
@@ -6834,7 +7024,13 @@ def register_routes(app):
             kalem_durum = {k['id']: k for k in siparis_kalem_durumu(deal)}
         except Exception:
             kalem_durum = {}
+        # 2026-10-27 (Tekrar Siparis): siparis tutari kadar zaten fatura
+        # kesildiyse uyar (kalem kalem kismi faturada CIKMAZ).
+        faturalanan = sum(inv.total or 0 for inv in deal.invoices if inv.type == 'fatura')
+        zaten_faturali = {'toplam': faturalanan, 'belgeler': [inv.display_no for inv in deal.invoices if inv.type == 'fatura']} \
+            if (deal.value and faturalanan >= deal.value - 0.01) else None
         return render_template('create_invoice_from_deal.html', deal=deal, unlinked_payments=unlinked_payments,
+                               zaten_faturali=zaten_faturali,
                                today=datetime.now().date(), kalem_durum=kalem_durum,
                                secili_kalem=request.args.get('kalem', type=int),
                                secili_tur=request.args.get('tur') if request.args.get('tur') in ('fatura', 'irsaliye') else None)
@@ -7325,6 +7521,19 @@ def register_routes(app):
             if not hedef_deal and form_invoice_id:
                 _inv = Invoice.query.get(form_invoice_id)
                 hedef_deal = _inv.deal if _inv and _inv.deal_id else None
+
+            # 2026-10-27 (Odeme korumasi): musterinin odemesi bekleyen siparisi
+            # varsa siparis (ya da bilincli "Siparise bagli degil") secilmeden
+            # kaydedilmez - siparise baglanmayan odeme hatirlatmayi kapatmaz.
+            if not form_deal_id and not form_invoice_id and not reminder and 'siparis_sec' not in request.form:
+                _bekleyen = [d for d in Deal.query.filter_by(customer_id=customer_id, stage='kazanilan').all()
+                             if d.outstanding_amount > 0.01]
+                if _bekleyen:
+                    flash('Bu müşterinin ödemesi bekleyen siparişi var: "Bu ödeme hangi siparişe?" kısmından siparişi '
+                          'ya da "Siparişe bağlı değil"i seçin — ödeme kaydedilmedi.', 'danger')
+                    return render_template('add_payment.html', today=datetime.now().date(),
+                                            prefill_customer=Customer.query.get(customer_id), prefill_invoice=None,
+                                            form_data=request.form)
 
             # Is 3 + 2026-10-27: mukerrer odeme koruma. Eskiden sadece son
             # 30 SANIYE bakiliyordu (Gur Kuruyemis'teki iki ayri 13.560 TL

@@ -23,6 +23,7 @@
                 <form method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     {% if onay_gerek %}<input type="hidden" name="confirm_duplicate" value="1"><input type="hidden" name="confirm_fazla" value="1">{% endif %}
+                    {% if form_data and 'siparis_sec' in form_data and not form_data.deal_id %}<input type="hidden" name="siparis_sec" value="">{% endif %}
                     {% if form_data and form_data.payment_reminder_id %}<input type="hidden" name="payment_reminder_id" value="{{ form_data.payment_reminder_id }}">{% endif %}
                     <input type="hidden" id="invoice_id" name="invoice_id" value="{{ form_data.invoice_id if form_data else (prefill_invoice.id if prefill_invoice else '') }}">
                     <input type="hidden" id="deal_id" name="deal_id" value="{{ form_data.deal_id if form_data else '' }}">
@@ -51,7 +52,7 @@
                     {# 2026-10-27 (Odeme paketi): odeme hangi siparise - siparisin tek odeme satirini kapatir/azaltir #}
                     {% if not prefill_invoice %}
                     <div class="mb-3 d-none" id="siparis_panel" style="border:1px solid #E8C860;background:#FFF8DC;border-radius:6px;padding:8px 10px;">
-                        <div class="fw-bold mb-1">Bu ödeme hangi siparişe? <span class="small text-muted fw-normal">(müşterinin ödemesi bekleyen siparişleri)</span></div>
+                        <div class="fw-bold mb-1">Bu ödeme hangi siparişe? <span class="text-danger">*</span> <span class="small text-muted fw-normal">(müşterinin ödemesi bekleyen siparişleri — seçim zorunlu)</span></div>
                         <div id="siparis_liste"></div>
                         <div class="form-check mt-1">
                             <input class="form-check-input" type="radio" name="siparis_sec" id="siparis_yok" value="">
@@ -300,6 +301,16 @@ if (linkedSelect) {
         }
     });
 }
+
+// 2026-10-27: odemesi bekleyen siparis varsa secim zorunlu
+document.querySelector('form').addEventListener('submit', function (e) {
+    var panel = document.getElementById('siparis_panel');
+    if (panel && !panel.classList.contains('d-none') && !document.querySelector('input[name="siparis_sec"]:checked, input[type="hidden"][name="siparis_sec"]') && !invoiceIdInput.value) {
+        e.preventDefault();
+        alert('Bu müşterinin ödemesi bekleyen siparişi var. "Bu ödeme hangi siparişe?" kısmından siparişi ya da "Siparişe bağlı değil"i seçin.');
+        panel.scrollIntoView({ behavior: 'smooth' });
+    }
+});
 
 initCustomerSearch({
     inputId: 'customer_search', hiddenIdInputId: 'customer_id', resultsId: 'customer_results',

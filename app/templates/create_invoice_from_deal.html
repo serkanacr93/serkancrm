@@ -14,6 +14,25 @@
     Aşağıdaki miktar ve birim fiyatları tekliften otomatik geldi, ihtiyaca göre düzenleyebilirsiniz.
 </div>
 
+{% if zaten_faturali %}
+{# 2026-10-27 (Tekrar Siparis): siparis tutari kadar fatura zaten kesilmis #}
+<div class="alert alert-warning" id="zatenFaturaliUyari">
+    <i class="bi bi-exclamation-triangle"></i>
+    <strong>{{ deal.display_no }} zaten faturalanmış</strong>
+    ({{ zaten_faturali.belgeler|join(', ') }} · toplam {{ zaten_faturali.toplam|para_goster(deal.para_birimi) }}, sipariş {{ deal.value|para_goster(deal.para_birimi) }}).
+    Bu <strong>yeni bir teslimatsa</strong> eski siparişe fatura kesmeyin — tekrar sipariş açın.
+    <div class="d-flex flex-wrap gap-2 mt-2">
+        {% if deal.stage == 'kazanilan' %}
+        <form method="POST" action="{{ url_for('tekrar_siparis', id=deal.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-dark" style="color:#FBC213"><i class="bi bi-arrow-repeat"></i> Tekrar Sipariş aç</button>
+        </form>
+        {% endif %}
+        <button type="button" class="btn btn-sm btn-outline-dark" onclick="document.getElementById('zatenFaturaliUyari').remove()">Yine de bu siparişe fatura kes</button>
+    </div>
+</div>
+{% endif %}
+
 <form method="POST">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="row">
@@ -44,10 +63,14 @@
                                 {% for item in deal.items %}
                                 {# 2026-10-27 (Veri akisi 2): kalem secimi + daha once kesilen / kalan #}
                                 {% set kd = (kalem_durum or {}).get(item.id) %}
+                                {# 2026-10-27 (Sevk/fatura korumalari): fatura ust siniri = gonderilen/uretilen; irsaliye kalani = siparis - gonderilen #}
                                 <tr class="teklif-kalem-row" data-siparis="{{ item.quantity }}"
-                                    data-kalan-fatura="{{ kd.kalan_fatura if kd else item.quantity }}"
-                                    data-kalan-irsaliye="{{ kd.kalan_irsaliye if kd else item.quantity }}"
-                                    data-onceki-fatura="{{ kd.fatura if kd else 0 }}" data-onceki-irsaliye="{{ kd.irsaliye if kd else 0 }}"
+                                    data-kalan-fatura="{{ kd.kalan_fatura_gercek if kd else item.quantity }}"
+                                    data-kalan-irsaliye="{{ kd.kalan_gonderim if kd else item.quantity }}"
+                                    data-oneri-irsaliye="{{ kd.oneri_irsaliye if kd else item.quantity }}"
+                                    data-ust="{{ kd.fatura_ust if kd else item.quantity }}" data-ust-kaynak="{{ kd.fatura_ust_kaynak if kd else 'sipariş' }}"
+                                    data-uretim="{{ kd.uretim_kaydi if (kd and kd.uretim_kaydi is not none) else '' }}" data-gonderilen="{{ kd.gonderilen if kd else 0 }}"
+                                    data-onceki-fatura="{{ kd.fatura if kd else 0 }}" data-onceki-irsaliye="{{ kd.gonderilen if kd else 0 }}"
                                     data-belge-fatura="{{ (kd.fatura_belgeler|join(', ')) if kd else '' }}" data-belge-irsaliye="{{ (kd.irsaliye_belgeler|join(', ')) if kd else '' }}"
                                     data-deal-item-id="{{ item.id }}">
                                     <td class="text-center align-middle">
@@ -93,7 +116,7 @@
                     </div>
                     <div id="fazla_onay_box" class="alert alert-danger py-2 small mb-0" style="display:none">
                         <input type="checkbox" class="form-check-input me-1" id="fazla_onay">
-                        <label for="fazla_onay">Kalanı %10'dan fazla aşan miktarı <strong>onaylıyorum</strong> (fazla üretim / müşteri kabul etti).</label>
+                        <label for="fazla_onay">Kırmızı uyarıdaki fazla miktarı <strong>onaylıyorum</strong> (müşteri kabul etti / bilerek kesiyorum).</label>
                     </div>
                 </div>
             </div>
@@ -313,7 +336,8 @@ function oncekiYaz(r) {
     var kalan = parseFloat(r.dataset['kalan' + (tur === 'fatura' ? 'Fatura' : 'Irsaliye')]) || 0;
     var el = r.querySelector('.kalem-onceki');
     if (!onceki) { el.textContent = ''; return kalan; }
-    el.textContent = 'Daha önce ' + (tur === 'fatura' ? 'faturalanan' : 'irsaliyesi kesilen') + ': ' + trSayi(onceki) + (belge ? ' (' + belge + ')' : '') + ' · kalan ' + trSayi(kalan);
+    el.textContent = 'Daha önce ' + (tur === 'fatura' ? 'faturalanan' : 'gönderilen') + ': ' + trSayi(onceki) + (belge ? ' (' + belge + ')' : '') + ' · kalan ' + trSayi(kalan) +
+        (tur === 'fatura' && r.dataset.ustKaynak !== 'sipariş' ? ' (' + r.dataset.ustKaynak + ' ' + trSayi(parseFloat(r.dataset.ust) || 0) + ')' : '');
     return kalan;
 }
 function uyariYaz(r) {
@@ -322,6 +346,19 @@ function uyariYaz(r) {
     var q = parseFloat(r.querySelector('.qty-input').value) || 0;
     var kalan = parseFloat(r.dataset['kalan' + (belgeTuru() === 'fatura' ? 'Fatura' : 'Irsaliye')]) || 0;
     r.dataset.fazla = '';
+    // 2026-10-27: faturada ust sinir gonderilen/uretilen ise asim KIRMIZI (onay ister)
+    if (sec.checked && belgeTuru() === 'fatura' && r.dataset.ustKaynak !== 'sipariş' && q > kalan + 0.0005) {
+        var oncekiF = parseFloat(r.dataset.oncekiFatura) || 0;
+        el.textContent = r.dataset.ustKaynak.charAt(0).toUpperCase() + r.dataset.ustKaynak.slice(1) + ' ' + trSayi(parseFloat(r.dataset.ust) || 0) +
+            ', bu faturayla toplam faturalanan ' + trSayi(oncekiF + q) + ' olacak';
+        el.className = 'kalem-uyari text-danger fw-bold'; r.dataset.fazla = '1'; fazlaKutusu(); return;
+    }
+    // irsaliye: gunluk uretimden fazla gonderim -> sadece hatirlatma (engel degil)
+    if (sec.checked && belgeTuru() === 'irsaliye' && r.dataset.uretim !== '' &&
+        (parseFloat(r.dataset.gonderilen) || 0) + q > (parseFloat(r.dataset.uretim) || 0) + 0.0005 && q <= kalan + 0.0005) {
+        el.textContent = 'Günlük üretimde ' + trSayi(parseFloat(r.dataset.uretim) || 0) + ' kayıtlı — günlük üretimi sonra girin';
+        el.className = 'kalem-uyari text-warning fw-bold'; return;
+    }
     if (!sec.checked || q <= kalan + 0.0005) { el.textContent = ''; el.className = 'kalem-uyari'; return; }
     if (kalan > 0 && q <= kalan * 1.10 + 0.0005) {
         el.textContent = 'Kalandan fazla (tolerans içinde)'; el.className = 'kalem-uyari text-warning fw-bold';
@@ -340,10 +377,13 @@ function turDegisti(ilk) {
         var sec = r.querySelector('.kalem-sec');
         var qty = r.querySelector('.qty-input');
         var onceki = parseFloat(r.dataset['onceki' + (belgeTuru() === 'fatura' ? 'Fatura' : 'Irsaliye')]) || 0;
+        // 2026-10-27: fatura gonderilen/uretilen kalanla, irsaliye stoktaki (uretilen - gonderilen) ile dolar
+        var hedef = belgeTuru() === 'fatura' ? kalan : (parseFloat(r.dataset.oneriIrsaliye) || 0);
+        var bilgiVar = onceki > 0 || r.dataset.ustKaynak !== 'sipariş';
         if (!r.dataset.elle) {
-            if (onceki > 0) qty.value = Math.round(kalan * 1000) / 1000;
+            if (bilgiVar) qty.value = Math.round(hedef * 1000) / 1000;
             if (SECILI_KALEM) sec.checked = (parseInt(r.dataset.dealItemId, 10) === SECILI_KALEM);
-            else if (onceki > 0 && kalan <= 0) sec.checked = false;
+            else sec.checked = !(bilgiVar && hedef <= 0.0005);
         }
         satirAyarla(r); uyariYaz(r);
     });
@@ -374,7 +414,7 @@ document.querySelector('form').addEventListener('submit', function (e) {
     if (!secili.length) { e.preventDefault(); alert('En az bir kalem seçin.'); return; }
     var fazlaVar = Array.prototype.some.call(kalemSatirlari(), function (r) { return r.dataset.fazla === '1'; });
     if (fazlaVar && !document.getElementById('fazla_onay').checked) {
-        e.preventDefault(); alert('Kalanı %10\'dan fazla aşan kalem var: "Fazla miktarı onaylıyorum" kutusunu işaretleyin veya miktarı düzeltin.'); return;
+        e.preventDefault(); alert('Kırmızı uyarılı kalem var (gönderilenden/kalandan fazla). Kutuyu işaretleyip onaylayın veya miktarı düzeltin.'); return;
     }
     var btn = this.querySelector('button[type="submit"]');
     if (btn) {

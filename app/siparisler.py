@@ -140,6 +140,11 @@ def _ilerleme_ekle(rows):
             joinedload(Production.deal).joinedload(Deal.items),
         ).all()
         by_deal = {p.deal_id: p for p in prods}
+        try:
+            from app.kalem_belge import gonderilen_onyukle
+            gonderilen_onyukle(prods)
+        except Exception:
+            pass
         for r in rows:
             p = by_deal.get(r['id'])
             r['ilerleme'] = None
