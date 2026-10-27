@@ -834,7 +834,16 @@ function updateOdemeSekli(grandTotal, sym) {
 
 attachEvents();
 
-document.querySelector('form').addEventListener('submit', function () {
+document.querySelector('form').addEventListener('submit', function (e) {
+    // 2026-10-27: musteri secilmeden kaydedilince sunucu 500 veriyordu
+    var mid = document.getElementById('customer_id');
+    if (mid && !mid.value) {
+        e.preventDefault();
+        alert('Lütfen önce listeden bir müşteri seçin (ya da hızlı ekleyin).');
+        var s = document.getElementById('customer_search');
+        if (s) s.focus();
+        return;
+    }
     var btn = this.querySelector('button[type="submit"]');
     if (btn) {
         btn.disabled = true;

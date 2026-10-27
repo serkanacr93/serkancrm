@@ -767,13 +767,13 @@ def _onay_odeme_onerisi(deal):
 
     zaman_tr = {'vade_sonunda': 'vade sonunda', 'teslimde': 'teslimde', 'yukleme_oncesi': 'yükleme öncesi'}.get(zaman)
     if deal.pesinat_tipi == 'tutar' and deal.pesinat_deger is not None:
-        pes_ozet = f"{format_price_tr(float(deal.pesinat_deger))} ₺ peşin"
+        pes_ozet = f"{format_price_tr(float(deal.pesinat_deger))} peşin"
     elif oran is not None:
         pes_ozet = f"%{oran:g} peşin" if oran else 'peşinatsız'
     else:
         pes_ozet = None
     ozet = ', '.join(x for x in [pes_ozet, f'bakiye {zaman_tr}' if zaman_tr else None,
-                                 f'vade {vade} gün' if deal.odeme_vade_gun is not None else None] if x)
+                                 f'vade {vade} gün' if deal.odeme_vade_gun else None] if x)
     return {
         'pesinat_orani': (f'{oran:.2f}'.rstrip('0').rstrip('.') if oran is not None else ''),
         'pesinat_tutari': tutar,
@@ -3199,7 +3199,12 @@ def register_routes(app):
             # Otomatik sıralı teklif numarası
             next_no = _next_deal_no()
 
-            customer = Customer.query.get_or_404(int(request.form['customer_id']))
+            # 2026-10-27: musteri secilmeden gelirse 500 yerine anlasilir uyari
+            customer_id_raw = (request.form.get('customer_id') or '').strip()
+            if not customer_id_raw.isdigit():
+                flash('Teklif kaydedilmedi: listeden bir müşteri seçilmedi. Lütfen müşteriyi seçip tekrar deneyin.', 'danger')
+                return redirect(url_for('add_deal'))
+            customer = Customer.query.get_or_404(int(customer_id_raw))
             _apply_customer_updates_from_form(customer, request.form)
             # Is 3: teklif basligi artik her zaman musterinin tam (temizlenmis)
             # adi - eski kisaltma+tarih+sirano mantigi (orn. "MEHMET-01.07-1")
