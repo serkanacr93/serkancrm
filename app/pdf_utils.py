@@ -2174,6 +2174,17 @@ def addan_detaylar(ad):
     return sonuc
 
 
+def _ayrintili_malzeme(alan, addan):
+    """2026-10-27: kalemin malzeme alani dolu ama urun adindaki malzemenin
+    BIR PARCASIYSA (alan 'gold', ad 'seffaf gold metalize') daha ayrintili
+    olan yazilir. Alan farkli bir sey soyluyorsa ('Kraft') alan kazanir."""
+    if not alan:
+        return addan
+    if addan and _tr_lower(alan) in _tr_lower(addan) and len(addan) > len(alan):
+        return addan
+    return alan
+
+
 def is_emri_kalemleri(production):
     """2026-10-26 (2): is emrine giren TUM kalemler - uretim VE ticaret
     (ticaret kalemleri 'TEDARIK' is emri olarak basilir, artik atlanmaz).
@@ -2298,7 +2309,7 @@ def is_emri_kalem_bilgisi(production, pitem, sira, toplam, katalog=None):
         'deal_item': di,
         'urun': (pitem.description if pitem is not None else '-'),
         'kese_gramaj': kese_gramaj_bul(di, katalog),
-        'kagit': _ie_temiz(pitem.kagit_tipi if pitem is not None else None) or _ie_temiz(di.kagit_cinsi if di else None) or addan['malzeme'],
+        'kagit': _ayrintili_malzeme(_ie_temiz(pitem.kagit_tipi if pitem is not None else None) or _ie_temiz(di.kagit_cinsi if di else None), addan['malzeme']),
         'ozellik': addan['ozellik'],
         'gramaj': _ie_temiz(pitem.gramaj if pitem is not None else None),
         'olcu': olcu,

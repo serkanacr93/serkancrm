@@ -36,24 +36,35 @@
                     <i class="bi bi-calendar-check"></i> Ödeme Takvimi <span class="text-danger">*</span>
                 </div>
                 <div class="card-body">
+                    {% if oneri and not form_data %}
+                    {# 2026-10-27: teklifte girilen odeme sekli on-doldurma - alanlar duzenlenebilir #}
+                    <div class="alert alert-success py-2 small mb-3">
+                        <i class="bi bi-check-circle"></i> Tekliften alındı{% if oneri.ozet %}: <strong>{{ oneri.ozet }}</strong>{% endif %}. Kontrol edip gerekirse değiştirin.
+                    </div>
+                    {% elif not form_data %}
+                    <div class="alert alert-warning py-2 small mb-3">
+                        <i class="bi bi-exclamation-triangle"></i> Bu teklifte ödeme şekli girilmemiş — aşağıyı doldurun.
+                    </div>
+                    {% endif %}
                     <p class="small text-muted">Üretime aktarmadan önce müşteriyle kesinleşen ödeme planı girilmelidir - zorunludur.</p>
                     <div class="mb-3">
                         <label for="pesinat_orani" class="form-label">Peşinat Oranı (%) <span class="text-danger">*</span></label>
                         <input type="number" step="0.01" min="0" max="100" class="form-control" id="pesinat_orani"
                                name="pesinat_orani" placeholder="Örn: 50"
-                               value="{{ form_data.pesinat_orani if form_data else '' }}" required>
-                        <small class="text-muted">Toplam {{ "{:,.2f}".format(deal.value) }} ₺ üzerinden peşinat tutarı hesaplanır.</small>
+                               value="{{ form_data.pesinat_orani if form_data else (oneri.pesinat_orani if oneri else '') }}" required>
+                        <small class="text-muted">Toplam {{ "{:,.2f}".format(deal.value) }} ₺ üzerinden peşinat tutarı hesaplanır.{% if oneri and oneri.pesinat_tutari is not none and not form_data %} <span class="text-success">Tekliften: ≈ {{ "{:,.2f}".format(oneri.pesinat_tutari) }} ₺</span>{% endif %}</small>
                     </div>
                     <div class="mb-3">
                         <label for="pesinat_tarihi" class="form-label">Peşinat Ödeme Tarihi <span class="text-danger">*</span></label>
                         <input type="date" class="form-control" id="pesinat_tarihi" name="pesinat_tarihi"
-                               value="{{ form_data.pesinat_tarihi if form_data else '' }}" required>
+                               value="{{ form_data.pesinat_tarihi if form_data else (oneri.pesinat_tarihi if oneri else '') }}" required>
                         <small class="text-muted">Peşinat zaten alındıysa gerçekleşen tarihi, alınmadıysa beklenen tarihi girin.</small>
                     </div>
                     <div class="mb-0">
                         <label for="bakiye_tarihi" class="form-label">Bakiye Ödeme Tarihi (Beklenen) <span class="text-danger">*</span></label>
                         <input type="date" class="form-control" id="bakiye_tarihi" name="bakiye_tarihi"
-                               value="{{ form_data.bakiye_tarihi if form_data else '' }}" required>
+                               value="{{ form_data.bakiye_tarihi if form_data else (oneri.bakiye_tarihi if oneri else '') }}" required>
+                        {% if oneri and oneri.bakiye_kaynak and oneri.bakiye_tarihi and not form_data %}<small class="text-success">Hesaplama: {{ oneri.bakiye_kaynak }}</small>{% endif %}
                     </div>
                 </div>
             </div>

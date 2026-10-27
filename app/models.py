@@ -901,6 +901,10 @@ class ManualIrsaliye(db.Model):
     carrier = db.Column(db.String(100))
     estimated_delivery_date = db.Column(db.Date, nullable=True)
     actual_delivery_date = db.Column(db.Date, nullable=True)
+    # 2026-10-27: yeni manuel irsaliyeler 'sevk_edildi' ile acilir (irsaliye
+    # zaten mal yola cikarken kesiliyor). Kolon varsayilani DEGISTIRILMEDI
+    # (sema degisikligi yok) - deger route'ta verilir; eski 'hazirlaniyor'
+    # kayitlar status_label'da 'Sevk Edildi' gorunur, veri degismez.
     status = db.Column(db.String(30), default='hazirlaniyor')
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -942,7 +946,17 @@ class ManualIrsaliye(db.Model):
 
     @property
     def status_label(self):
+        # Manuel irsaliyede 'Hazirlaniyor' asamasi yok - kesildigi an sevk edilmistir.
+        if self.status in ('hazirlaniyor', 'sevk_edildi'):
+            return 'Sevk Edildi'
         return SHIPMENT_STATUS_LABELS.get(self.status, self.status)
+
+    @property
+    def sevkten_beri_gun(self):
+        """Teslim edilmemis manuel irsaliyede sevk tarihinden bu yana gecen gun."""
+        if self.status == 'teslim_edildi' or not self.ship_date:
+            return None
+        return (datetime.utcnow().date() - self.ship_date).days
 
     @property
     def tracking_url(self):

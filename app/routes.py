@@ -727,6 +727,63 @@ def _miktar_tr_basit(value):
     return f'{v:,.2f}'.rstrip('0').rstrip('.').replace(',', '§').replace('.', ',').replace('§', '.')
 
 
+def _onay_odeme_onerisi(deal):
+    """2026-10-27: Teklifte girilen yapisal odeme sekli (pesinat_tipi/deger,
+    odeme_vade_gun, bakiye_zamani) varsa onay formunu ON-DOLDURUR - kullanici
+    ayni bilgiyi ikinci kez yazmasin. Sadece oneri: alanlar duzenlenebilir,
+    kayit yine approve_deal POST'unda yapilir. Teklifte bilgi yoksa None."""
+    if not deal.pesinat_tipi and deal.pesinat_orani is None:
+        return None
+    from app.pdf_utils import _is_gunu_ekle
+    bugun = datetime.now().date()
+    oran = deal.pesinat_orani
+    if oran is None and deal.pesinat_tipi == 'yok':
+        oran = 0.0
+    if oran is None and deal.pesinat_tipi == 'yuzde' and deal.pesinat_deger is not None:
+        oran = float(deal.pesinat_deger)
+    if oran is None and deal.pesinat_tipi == 'tutar' and deal.pesinat_deger is not None and deal.value:
+        oran = float(deal.pesinat_deger) / deal.value * 100
+    tutar = deal.value * oran / 100 if (oran is not None and deal.value) else None
+
+    termin = None
+    gunler = [i.termin_gun for i in deal.items if getattr(i, 'termin_gun', None)]
+    termin_gun = max(gunler) if gunler else deal.varsayilan_termin_gun
+    if termin_gun:
+        termin = _is_gunu_ekle(bugun, int(termin_gun))
+    elif deal.expected_close and deal.expected_close >= bugun:
+        termin = deal.expected_close
+
+    vade = deal.odeme_vade_gun or 0
+    zaman = deal.bakiye_zamani
+    if zaman == 'vade_sonunda':
+        bakiye = (termin or bugun) + timedelta(days=vade)
+        bakiye_kaynak = f'teslim + {vade} gün vade' if termin else f'bugün + {vade} gün vade'
+    elif zaman in ('teslimde', 'yukleme_oncesi'):
+        bakiye = termin
+        bakiye_kaynak = 'termin (teslimde)' if zaman == 'teslimde' else 'termin (yükleme öncesi)'
+    else:
+        bakiye = (termin + timedelta(days=vade)) if termin else (bugun + timedelta(days=vade) if vade else None)
+        bakiye_kaynak = 'termin' + (f' + {vade} gün' if vade else '') if termin else (f'bugün + {vade} gün' if vade else None)
+
+    zaman_tr = {'vade_sonunda': 'vade sonunda', 'teslimde': 'teslimde', 'yukleme_oncesi': 'yükleme öncesi'}.get(zaman)
+    if deal.pesinat_tipi == 'tutar' and deal.pesinat_deger is not None:
+        pes_ozet = f"{format_price_tr(float(deal.pesinat_deger))} ₺ peşin"
+    elif oran is not None:
+        pes_ozet = f"%{oran:g} peşin" if oran else 'peşinatsız'
+    else:
+        pes_ozet = None
+    ozet = ', '.join(x for x in [pes_ozet, f'bakiye {zaman_tr}' if zaman_tr else None,
+                                 f'vade {vade} gün' if deal.odeme_vade_gun is not None else None] if x)
+    return {
+        'pesinat_orani': (f'{oran:.2f}'.rstrip('0').rstrip('.') if oran is not None else ''),
+        'pesinat_tutari': tutar,
+        'pesinat_tarihi': bugun.strftime('%Y-%m-%d'),
+        'bakiye_tarihi': bakiye.strftime('%Y-%m-%d') if bakiye else '',
+        'bakiye_kaynak': bakiye_kaynak,
+        'ozet': ozet,
+    }
+
+
 def _parse_kese_gramaj(raw):
     """2026-10-26: 'Kese numarasi' secimi (100/250/.../2000) - bos/gecersiz
     -> None ('Ozel olcu' secenegi de bos deger gonderir)."""
@@ -3661,7 +3718,8 @@ def register_routes(app):
         is_new = prev_sales == 0
         suggested_rate = 1.5 if is_new else 1.0
         
-        return render_template('approve_deal.html', deal=deal, suggested_rate=suggested_rate)
+        return render_template('approve_deal.html', deal=deal, suggested_rate=suggested_rate,
+                               oneri=_onay_odeme_onerisi(deal))
 
     @app.route('/api/customers/<int:customer_id>/uretim-oneri')
     @login_required
@@ -5328,7 +5386,8 @@ def register_routes(app):
                     tracking_number=request.form.get('tracking_number') or None,
                     notes=request.form.get('notes', ''),
                     user_id=current_user.id,
-                    vat_rate=float(request.form.get('vat_rate', 20))
+                    vat_rate=float(request.form.get('vat_rate', 20)),
+                    status='sevk_edildi'
                 )
                 db.session.add(manual_irsaliye)
                 db.session.flush()
@@ -5564,7 +5623,10 @@ def register_routes(app):
         manual_irsaliye.actual_delivery_date = datetime.now().date()
         manual_irsaliye.status = 'teslim_edildi'
         db.session.commit()
-        flash('İrsaliye "Teslim Edildi" olarak işaretlendi.', 'success')
+        flash(f'{manual_irsaliye.display_no} "Teslim Edildi" olarak işaretlendi.', 'success')
+        # 2026-10-27: sevkiyat listesindeki hizli butondan gelindiyse listeye don
+        if request.form.get('donus') == 'liste':
+            return redirect(url_for('shipment_list'))
         return redirect(url_for('manual_irsaliye_detail', id=id))
 
     @app.route('/shipments/<int:id>/edit', methods=['GET', 'POST'])

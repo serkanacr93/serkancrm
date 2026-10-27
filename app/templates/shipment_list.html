@@ -32,9 +32,15 @@
                 <td>{{ s.customer.display_name if s.is_manual else s.production.deal.customer.display_name }}</td>
                 <td>{{ s.ship_date.strftime('%d.%m.%Y') if s.ship_date else '-' }}</td>
                 <td>
+                    {% if s.is_manual %}
+                    {# 2026-10-27: manuel irsaliyede 'Hazirlaniyor' asamasi yok - kesildigi an sevk edilmistir #}
+                    <span class="badge bg-{{ 'success' if s.status == 'teslim_edildi' else 'primary' }}">{{ s.status_label }}</span>
+                    {% if s.sevkten_beri_gun is not none and s.sevkten_beri_gun > 7 %}<small class="fw-bold" style="color:#C77700">· {{ s.sevkten_beri_gun }} gün</small>{% endif %}
+                    {% else %}
                     <span class="badge bg-{{ 'success' if s.status == 'teslim_edildi' else 'info' if s.status == 'yolda' else 'primary' if s.status == 'kargoya_verildi' else 'secondary' }}">
                         {{ s.status_label }}
                     </span>
+                    {% endif %}
                     {% if not s.is_manual and s.faturasiz_cikis %}<span class="badge bg-warning text-dark">Faturasız</span>{% endif %}
                 </td>
                 <td>
@@ -42,6 +48,14 @@
                     <a href="{{ url_for('manual_irsaliye_detail', id=s.id) }}" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-eye"></i>
                     </a>
+                    {% if s.status != 'teslim_edildi' %}
+                    <form method="POST" action="{{ url_for('mark_manual_irsaliye_delivered', id=s.id) }}" class="d-inline"
+                          onsubmit="return confirm('{{ s.display_no }} teslim edildi olarak işaretlensin mi? (Teslim tarihi: bugün)')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="donus" value="liste">
+                        <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Teslim edildi</button>
+                    </form>
+                    {% endif %}
                     {% else %}
                     <a href="{{ url_for('shipment_detail', id=s.id) }}" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-eye"></i>

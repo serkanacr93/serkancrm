@@ -287,3 +287,17 @@ def test_is_emri_bos_alanlar_addan_dolar_dolu_alan_oncelikli():
     d2 = _di(1, description='Doypack 16×27', en='18', boy='30', kagit_cinsi='Kraft', quantity=1, unit='adet')
     t2 = _metin(_uret(_uretim([d2], [_pi(1, d2)])))[0][2]
     assert '18 × 30 cm' in t2 and '16 × 27' not in t2.split('Ölçü')[1][:30]
+
+
+# ---------- 2026-10-27: alan addaki malzemenin parcasiysa ayrintili olan yazilir ----------
+
+@pytest.mark.parametrize('alan,ad,beklenen', [
+    ('gold', 'şeffaf gold metalize kilitli doypack 16×27 (4+4)', 'Şeffaf Gold Metalize'),
+    ('Kraft', 'şeffaf gold metalize doypack', 'Kraft'),
+    (None, 'esmer kare dipli kese', 'Esmer'),
+    ('Esmer Recycle', 'esmer kese', 'Esmer Recycle'),
+])
+def test_ayrintili_malzeme(alan, ad, beklenen):
+    d = _di(1, description=ad, kagit_cinsi=alan, quantity=1, unit='adet')
+    b = pdf_utils.is_emri_kalem_bilgisi(_uretim([d], [_pi(1, d, kagit_tipi=None)]), _pi(1, d, kagit_tipi=None), 1, 1)
+    assert b['kagit'] == beklenen

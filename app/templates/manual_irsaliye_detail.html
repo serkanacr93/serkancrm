@@ -60,7 +60,7 @@
                     <tr><th>Müşteri:</th><td>{{ manual_irsaliye.customer.display_name }}</td></tr>
                     <tr><th>Durum:</th>
                         <td>
-                            <span class="badge bg-{{ 'success' if manual_irsaliye.status == 'teslim_edildi' else 'info' if manual_irsaliye.status == 'yolda' else 'primary' if manual_irsaliye.status == 'kargoya_verildi' else 'secondary' }}">{{ manual_irsaliye.status_label }}</span>
+                            <span class="badge bg-{{ 'success' if manual_irsaliye.status == 'teslim_edildi' else 'info' if manual_irsaliye.status == 'yolda' else 'primary' if manual_irsaliye.status in ('kargoya_verildi', 'sevk_edildi', 'hazirlaniyor') else 'secondary' }}">{{ manual_irsaliye.status_label }}</span>
                         </td>
                     </tr>
                     <tr><th>Gönderim Tarihi:</th><td>{{ manual_irsaliye.ship_date.strftime('%d.%m.%Y') if manual_irsaliye.ship_date else '-' }}</td></tr>
