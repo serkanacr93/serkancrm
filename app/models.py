@@ -535,11 +535,78 @@ class Deal(db.Model):
             return None
         return self.value - tutar
 
+    def tahsilat_odemeleri(self):
+        """2026-10-27 (Odeme paketi): siparisin TUM tahsilati, her odeme BIR
+        KEZ: (1) dogrudan bu siparise bagli odemeler + (2) bu siparisin
+        faturalarina bagli odemeler (fatura formundaki 'On Odeme', gecmis
+        kayit kapanisi, faturadan girilen odeme - bunlar deal_id
+        doldurmuyordu). Ayni odeme hem siparise hem faturasina bagliysa tek
+        sayilir; BASKA bir siparise dogrudan bagli odeme sayilmaz (deal_id
+        onceliklidir). Odeme kayitlarina YAZMAZ, sadece okur."""
+        gorulen = {}
+        for p in self.payments:
+            gorulen[p.id] = p
+        for inv in self.invoices:
+            for p in inv.payments:
+                if p.id in gorulen or (p.deal_id and p.deal_id != self.id):
+                    continue
+                gorulen[p.id] = p
+        return [p for p in gorulen.values() if p.status == 'odendi']
+
     @property
     def paid_amount(self):
-        """Bu teklife (avans/pesinat asamasinda) baglanmis, 'odendi' durumundaki
-        Payment kayitlarinin toplami - Is E'de sevkiyat oncesi odeme kontrolu icin kullanilir."""
-        return sum(p.amount for p in self.payments if p.status == 'odendi')
+        """Bu siparise ait 'odendi' durumundaki odemelerin toplami (dogrudan
+        + faturasi uzerinden, bkz. tahsilat_odemeleri). Is E sevkiyat oncesi
+        odeme kontrolu, siparis durumu ve Takip Modu ayni rakami kullanir."""
+        return sum(p.amount for p in self.tahsilat_odemeleri())
+
+    def odeme_plani(self, bugun=None):
+        """2026-10-27 (Odeme paketi): pesinat + bakiye TEK plan. Odenen tutar
+        taksitlere vade sirasiyla dagitilir (once pesinat). 'vadesi_gelen' =
+        vadesi gelmis taksitlerin odenmemis kismi - Takip Modu'nda siparis
+        basina TEK satirda gosterilen tutar. Pesinat orani hic girilmemis
+        eski kayitlarda tum tutar ilk tarihte tek taksit sayilir (eski
+        hatirlatma mantigiyla ayni)."""
+        bugun = bugun or datetime.now().date()
+        toplam = float(self.value or 0)
+        odenen = float(self.paid_amount or 0)
+        pt, bt = self.pesinat_tarihi, self.bakiye_tarihi
+        taksitler = []
+        if self.pesinat_orani is None:
+            tarihler = [t for t in (pt, bt) if t]
+            if tarihler:
+                taksitler.append(('Ödeme', toplam, min(tarihler)))
+        else:
+            pes = toplam * float(self.pesinat_orani) / 100
+            bak = max(0.0, toplam - pes)
+            if pes > 0.01 and (pt or bt):
+                taksitler.append(('Peşinat', pes, pt or bt))
+            if bak > 0.01 and (bt or pt):
+                taksitler.append(('Bakiye', bak, bt or pt))
+        taksitler.sort(key=lambda t: t[2])
+        dagitilacak = odenen
+        satirlar = []
+        for ad, tutar, tarih in taksitler:
+            karsilanan = min(tutar, max(0.0, dagitilacak))
+            dagitilacak -= karsilanan
+            acik = tutar - karsilanan
+            if acik <= 0.01:
+                acik, durum = 0.0, 'odendi'
+            else:
+                durum = 'kismi' if karsilanan > 0.01 else 'bekliyor'
+            satirlar.append({
+                'ad': ad, 'tutar': tutar, 'tarih': tarih, 'odenen': karsilanan, 'acik': acik,
+                'durum': durum, 'vadesi_geldi': tarih <= bugun,
+                'gecikme': (bugun - tarih).days if (acik and tarih < bugun) else 0,
+            })
+        vadesi_gelen = sum(s['acik'] for s in satirlar if s['vadesi_geldi'])
+        acik_vadeler = [s['tarih'] for s in satirlar if s['vadesi_geldi'] and s['acik']]
+        return {
+            'toplam': toplam, 'odenen': odenen, 'kalan': max(0.0, toplam - odenen),
+            'fazla': max(0.0, odenen - toplam), 'taksitler': satirlar,
+            'vadesi_gelen': vadesi_gelen if vadesi_gelen > 0.01 else 0.0,
+            'en_eski_vade': min(acik_vadeler) if acik_vadeler else None,
+        }
 
     @property
     def outstanding_amount(self):
@@ -1232,12 +1299,15 @@ class PaymentReminder(db.Model):
     Takip Modu'nda gosterilmeye devam eder)."""
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, index=True)
-    source_type = db.Column(db.String(20), nullable=False)  # 'deal_pesinat' / 'deal_bakiye' / 'invoice' / 'manuel'
+    source_type = db.Column(db.String(20), nullable=False)  # 'deal_odeme' (2026-10-27, siparis basina tek) / eski 'deal_pesinat' / 'deal_bakiye' / 'invoice' / 'manuel'
     source_id = db.Column(db.Integer, nullable=True)  # deal_id veya invoice_id (turune gore) - FK degil, kaynak tipi degisken
     amount = db.Column(db.Float, nullable=False)
     due_date = db.Column(db.Date, nullable=False, index=True)
     # bekliyor -> hatirlatildi -> soz_verildi -> odendi (odendi'ye sadece
     # gercek bir Payment kaydi olusunca gecilir - bkz. routes.py)
+    # 2026-10-27: 'birlesti' (ayni siparisin ikinci satiri, tek satira
+    # birlestirildi) ve 'askida' (siparise donmemis teklif) - ikisi de
+    # listede GORUNMEZ, kayit silinmez. Bkz. HATIRLATMA_KAPALI.
     status = db.Column(db.String(20), default='bekliyor', nullable=False)
     promised_date = db.Column(db.Date, nullable=True)  # 'Odeme sozu verdi' ile girilen yeni tarih
     notes = db.Column(db.Text, nullable=True)
@@ -1247,6 +1317,9 @@ class PaymentReminder(db.Model):
 
     customer = db.relationship('Customer', backref='payment_reminders')
     created_by = db.relationship('User')
+
+# 2026-10-27: Takip Modu/Komuta'da GOSTERILMEYEN hatirlatma durumlari.
+HATIRLATMA_KAPALI = ('odendi', 'birlesti', 'askida')
 
 class TakipModuAtla(db.Model):
     """Takip Modu - 'Atla' (2026-10-06, E duzeltmesi): eskiden tamamen

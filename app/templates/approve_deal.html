@@ -47,18 +47,47 @@
                     </div>
                     {% endif %}
                     <p class="small text-muted">Üretime aktarmadan önce müşteriyle kesinleşen ödeme planı girilmelidir - zorunludur.</p>
+                    {# 2026-10-27 (Odeme paketi): pesinat durumu - Alindi ise odeme siparise bagli kaydedilir, hatirlatma acilmaz #}
+                    {% if form_data %}{% set pd_secili = form_data.pesinat_durumu %}
+                    {% elif kayitli_odeme and kayitli_odeme > 0.01 %}{% set pd_secili = 'alindi' %}
+                    {% elif oneri and oneri.pesinat_orani == '0' %}{% set pd_secili = 'yok' %}
+                    {% else %}{% set pd_secili = '' %}{% endif %}
                     <div class="mb-3">
+                        <label class="form-label d-block">Peşinat durumu <span class="text-danger">*</span></label>
+                        <div class="btn-group flex-wrap" role="group">
+                            <input type="radio" class="btn-check" name="pesinat_durumu" id="pd_alindi" value="alindi" {{ 'checked' if pd_secili == 'alindi' }} required>
+                            <label class="btn btn-outline-success" for="pd_alindi"><i class="bi bi-check-circle"></i> Alındı</label>
+                            <input type="radio" class="btn-check" name="pesinat_durumu" id="pd_alinacak" value="alinacak" {{ 'checked' if pd_secili == 'alinacak' }}>
+                            <label class="btn btn-outline-warning text-dark" for="pd_alinacak"><i class="bi bi-hourglass-split"></i> Alınacak</label>
+                            <input type="radio" class="btn-check" name="pesinat_durumu" id="pd_yok" value="yok" {{ 'checked' if pd_secili == 'yok' }}>
+                            <label class="btn btn-outline-secondary" for="pd_yok">Peşinat yok</label>
+                        </div>
+                        {% if kayitli_odeme and kayitli_odeme > 0.01 %}
+                        <div class="small text-success mt-1"><i class="bi bi-info-circle"></i> Bu teklife kayıtlı <strong>{{ "{:,.2f}".format(kayitli_odeme) }} ₺</strong> ödeme var — "Alındı" seçilirse sadece eksik kısım eklenir, aynı ödeme ikinci kez kaydedilmez.</div>
+                        {% endif %}
+                        <div class="small mt-1" id="pd_aciklama"></div>
+                    </div>
+                    <div class="mb-3" id="pesinat_orani_kutu">
                         <label for="pesinat_orani" class="form-label">Peşinat Oranı (%) <span class="text-danger">*</span></label>
                         <input type="number" step="0.01" min="0" max="100" class="form-control" id="pesinat_orani"
                                name="pesinat_orani" placeholder="Örn: 50"
                                value="{{ form_data.pesinat_orani if form_data else (oneri.pesinat_orani if oneri else '') }}" required>
                         <small class="text-muted">Toplam {{ "{:,.2f}".format(deal.value) }} ₺ üzerinden peşinat tutarı hesaplanır.{% if oneri and oneri.pesinat_tutari is not none and not form_data %} <span class="text-success">Tekliften: ≈ {{ "{:,.2f}".format(oneri.pesinat_tutari) }} ₺</span>{% endif %}</small>
                     </div>
-                    <div class="mb-3">
-                        <label for="pesinat_tarihi" class="form-label">Peşinat Ödeme Tarihi <span class="text-danger">*</span></label>
+                    <div class="mb-3" id="pesinat_tarihi_kutu">
+                        <label for="pesinat_tarihi" class="form-label"><span id="pesinat_tarihi_etiket">Peşinat Ödeme Tarihi</span> <span class="text-danger">*</span></label>
                         <input type="date" class="form-control" id="pesinat_tarihi" name="pesinat_tarihi"
                                value="{{ form_data.pesinat_tarihi if form_data else (oneri.pesinat_tarihi if oneri else '') }}" required>
                         <small class="text-muted">Peşinat zaten alındıysa gerçekleşen tarihi, alınmadıysa beklenen tarihi girin.</small>
+                    </div>
+                    <div class="mb-3 d-none" id="pesinat_yontemi_kutu">
+                        <label for="pesinat_yontemi" class="form-label">Peşinat ödeme yöntemi</label>
+                        <select class="form-select" id="pesinat_yontemi" name="pesinat_yontemi">
+                            <option value="">Seçin</option>
+                            {% for k, v in [('havale', 'Havale'), ('nakit', 'Nakit'), ('kredi_karti', 'Kredi Kartı'), ('cek', 'Çek')] %}
+                            <option value="{{ k }}" {{ 'selected' if form_data and form_data.pesinat_yontemi == k }}>{{ v }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="mb-0">
                         <label for="bakiye_tarihi" class="form-label">Bakiye Ödeme Tarihi (Beklenen) <span class="text-danger">*</span></label>
@@ -97,4 +126,49 @@
         </div>
     </div>
 </form>
+<script>
+(function () {
+    var toplam = {{ deal.value|float }};
+    var kayitli = {{ (kayitli_odeme or 0)|float }};
+    var oran = document.getElementById('pesinat_orani');
+    var tarih = document.getElementById('pesinat_tarihi');
+    var oranKutu = document.getElementById('pesinat_orani_kutu');
+    var tarihKutu = document.getElementById('pesinat_tarihi_kutu');
+    var yontemKutu = document.getElementById('pesinat_yontemi_kutu');
+    var etiket = document.getElementById('pesinat_tarihi_etiket');
+    var aciklama = document.getElementById('pd_aciklama');
+    function tl(x) { return x.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'; }
+    function guncelle() {
+        var sec = document.querySelector('input[name="pesinat_durumu"]:checked');
+        var v = sec ? sec.value : '';
+        var yok = v === 'yok';
+        oranKutu.classList.toggle('d-none', yok);
+        tarihKutu.classList.toggle('d-none', yok);
+        oran.required = !yok; tarih.required = !yok;
+        if (yok) { oran.value = '0'; }
+        yontemKutu.classList.toggle('d-none', v !== 'alindi');
+        etiket.textContent = v === 'alindi' ? 'Peşinatın Alındığı Tarih' : (v === 'alinacak' ? 'Peşinatın Beklenen Tarihi' : 'Peşinat Ödeme Tarihi');
+        var pes = toplam * (parseFloat((oran.value || '0').replace(',', '.')) || 0) / 100;
+        if (v === 'alindi') {
+            var eksik = pes - kayitli;
+            aciklama.className = 'small mt-1 text-success';
+            aciklama.textContent = pes <= 0.01 ? 'Peşinat oranını girin — alınan tutar buna göre kaydedilir.'
+                : (eksik > 0.01
+                    ? tl(eksik) + ' ödeme olarak kaydedilip siparişe bağlanacak — ödeme hatırlatması açılmaz.'
+                    : 'Peşinat zaten kayıtlı — yeni ödeme oluşturulmayacak.');
+        } else if (v === 'alinacak') {
+            aciklama.className = 'small mt-1 text-warning';
+            aciklama.textContent = pes > 0.01 ? tl(pes) + ' peşinat, tarihi gelince Takip Modu\'nda siparişin ödeme satırında görünür.' : '';
+        } else if (yok) {
+            aciklama.className = 'small mt-1 text-muted';
+            aciklama.textContent = 'Tüm tutar bakiye tarihinde tek ödeme olarak beklenir.';
+        } else {
+            aciklama.textContent = '';
+        }
+    }
+    document.querySelectorAll('input[name="pesinat_durumu"]').forEach(function (r) { r.addEventListener('change', guncelle); });
+    oran.addEventListener('input', guncelle);
+    guncelle();
+})();
+</script>
 {% endblock %}

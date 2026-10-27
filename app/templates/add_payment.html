@@ -10,15 +10,20 @@
                 <h4 class="mb-0"><i class="bi bi-cash"></i> Yeni Ödeme</h4>
             </div>
             <div class="card-body">
+                {% set onay_gerek = duplicate_warning or uyari_fazla %}
                 {% if duplicate_warning %}
                 <div class="alert alert-warning">
                     <i class="bi bi-exclamation-triangle"></i>
-                    Bu ödeme az önce eklenmiş görünüyor. Yine de eklemek istediğinize emin misiniz?
+                    {{ uyari_mukerrer or 'Bu ödeme az önce eklenmiş görünüyor. Yine de eklemek istediğinize emin misiniz?' }}
                 </div>
+                {% endif %}
+                {% if uyari_fazla %}
+                <div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> {{ uyari_fazla }}</div>
                 {% endif %}
                 <form method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    {% if duplicate_warning %}<input type="hidden" name="confirm_duplicate" value="1">{% endif %}
+                    {% if onay_gerek %}<input type="hidden" name="confirm_duplicate" value="1"><input type="hidden" name="confirm_fazla" value="1">{% endif %}
+                    {% if form_data and form_data.payment_reminder_id %}<input type="hidden" name="payment_reminder_id" value="{{ form_data.payment_reminder_id }}">{% endif %}
                     <input type="hidden" id="invoice_id" name="invoice_id" value="{{ form_data.invoice_id if form_data else (prefill_invoice.id if prefill_invoice else '') }}">
                     <input type="hidden" id="deal_id" name="deal_id" value="{{ form_data.deal_id if form_data else '' }}">
 
@@ -39,9 +44,21 @@
                         <select class="form-select" id="linked_record" disabled>
                             <option value="">Önce müşteri seçin</option>
                         </select>
-                        <div class="form-text">Fatura seçilirse tutar kalan bakiyeyle, teklif seçilirse peşinatla otomatik doldurulur (elle değiştirilebilir).</div>
+                        <div class="form-text">Fatura seçilirse tutar kalan bakiyeyle otomatik doldurulur (elle değiştirilebilir).</div>
                         {% endif %}
                     </div>
+
+                    {# 2026-10-27 (Odeme paketi): odeme hangi siparise - siparisin tek odeme satirini kapatir/azaltir #}
+                    {% if not prefill_invoice %}
+                    <div class="mb-3 d-none" id="siparis_panel" style="border:1px solid #E8C860;background:#FFF8DC;border-radius:6px;padding:8px 10px;">
+                        <div class="fw-bold mb-1">Bu ödeme hangi siparişe? <span class="small text-muted fw-normal">(müşterinin ödemesi bekleyen siparişleri)</span></div>
+                        <div id="siparis_liste"></div>
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="radio" name="siparis_sec" id="siparis_yok" value="">
+                            <label class="form-check-label" for="siparis_yok">Siparişe bağlı değil (genel tahsilat) <span class="small text-muted">— sipariş ödeme satırlarını kapatmaz</span></label>
+                        </div>
+                    </div>
+                    {% endif %}
 
                     <div class="row mb-3">
                         <div class="col-md-6">
@@ -106,7 +123,7 @@
                         <a href="{{ url_for('payments') }}" class="btn btn-secondary me-md-2">
                             <i class="bi bi-x-circle"></i> İptal
                         </a>
-                        {% if duplicate_warning %}
+                        {% if onay_gerek %}
                         <button type="submit" class="btn btn-warning">
                             <i class="bi bi-exclamation-triangle"></i> Yine de Ekle
                         </button>
@@ -143,12 +160,14 @@ function loadOpenRecords(customerId) {
                     opt.value = 'inv:' + inv.id;
                     opt.dataset.amount = inv.remaining.toFixed(2);
                     opt.dataset.currency = inv.para_birimi || 'TRY';
+                    opt.dataset.dealId = inv.deal_id || '';
                     opt.textContent = inv.display_no + ' - Kalan: ' + inv.remaining.toFixed(2) + ' ₺';
                     og.appendChild(opt);
                 });
                 linkedSelect.appendChild(og);
             }
-            if (data.deals.length) {
+            siparisPaneli(data.bekleyen_siparisler || []);
+            if (false && data.deals.length) {  // 2026-10-27: siparisler artik asagidaki panelde
                 var ogd = document.createElement('optgroup');
                 ogd.label = 'Teklifler (Ön Ödeme)';
                 data.deals.forEach(function (d) {
@@ -165,6 +184,54 @@ function loadOpenRecords(customerId) {
             linkedSelect.disabled = false;
         });
 }
+
+// 2026-10-27 (Odeme paketi): siparis paneli
+function tlYaz(x) { return (x || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'; }
+function siparisPaneli(liste) {
+    var panel = document.getElementById('siparis_panel');
+    var kutu = document.getElementById('siparis_liste');
+    if (!panel || !kutu) return;
+    kutu.innerHTML = '';
+    if (!liste.length) { panel.classList.add('d-none'); return; }
+    var onceki = dealIdInput.value;
+    liste.forEach(function (s) {
+        var d = document.createElement('div');
+        d.className = 'form-check d-flex justify-content-between flex-wrap gap-2 py-1';
+        d.style.borderBottom = '1px dashed #e2d6a8';
+        d.innerHTML = '<span><input class="form-check-input" type="radio" name="siparis_sec" id="sip_' + s.id + '" value="' + s.id + '">' +
+            ' <label class="form-check-label" for="sip_' + s.id + '"><b>' + s.display_no + '</b> · sipariş ' + tlYaz(s.toplam) + '</label></span>' +
+            '<span class="small">kalan <b class="text-danger">' + tlYaz(s.kalan) + '</b>' +
+            (s.vadesi_gelen > 0 ? ' (vadesi gelen ' + tlYaz(s.vadesi_gelen) + ')' : '') +
+            ' <span class="sonra text-muted" data-kalan="' + s.kalan + '"></span></span>';
+        kutu.appendChild(d);
+        d.querySelector('input').dataset.oneri = (s.vadesi_gelen > 0 ? s.vadesi_gelen : s.kalan).toFixed(2);
+    });
+    panel.classList.remove('d-none');
+    var sec = onceki ? document.getElementById('sip_' + onceki) : null;
+    if (!sec && liste.length === 1 && !invoiceIdInput.value) sec = document.getElementById('sip_' + liste[0].id);
+    if (sec) { sec.checked = true; siparisSecildi(sec, !amountInput.value); }
+    sonraKalanGuncelle();
+}
+function siparisSecildi(radio, tutarDoldur) {
+    dealIdInput.value = radio.value;
+    if (radio.value && linkedSelect && linkedSelect.value.indexOf('inv:') === 0) {
+        var o = linkedSelect.selectedOptions[0];
+        if (o && o.dataset.dealId && o.dataset.dealId !== radio.value) { linkedSelect.value = ''; invoiceIdInput.value = ''; }
+    }
+    if (tutarDoldur && radio.dataset.oneri) amountInput.value = radio.dataset.oneri;
+    sonraKalanGuncelle();
+}
+function sonraKalanGuncelle() {
+    var t = parseFloat(amountInput.value) || 0;
+    document.querySelectorAll('#siparis_liste .sonra').forEach(function (el) {
+        var r = el.closest('.form-check').querySelector('input');
+        el.textContent = (r.checked && t > 0) ? '→ ödeme sonrası ' + tlYaz(Math.max(0, parseFloat(el.dataset.kalan) - t)) : '';
+    });
+}
+document.addEventListener('change', function (e) {
+    if (e.target && e.target.name === 'siparis_sec') siparisSecildi(e.target, !amountInput.value);
+});
+amountInput.addEventListener('input', sonraKalanGuncelle);
 
 var CURRENCY_SYMBOLS = { TRY: '₺', EUR: '€', USD: '$' };
 
@@ -204,8 +271,16 @@ if (linkedSelect) {
         dealIdInput.value = '';
         if (val.indexOf('inv:') === 0) {
             invoiceIdInput.value = val.slice(4);
+            // faturanin siparisi paneldeyse o secilir (odeme siparise sayilir)
+            var fd = this.selectedOptions[0] && this.selectedOptions[0].dataset.dealId;
+            var fr = fd ? document.getElementById('sip_' + fd) : null;
+            if (fr) { fr.checked = true; dealIdInput.value = fd; }
+            else { var y = document.getElementById('siparis_yok'); if (y) y.checked = true; }
         } else if (val.indexOf('deal:') === 0) {
             dealIdInput.value = val.slice(5);
+        } else {
+            var secili = document.querySelector('input[name="siparis_sec"]:checked');
+            if (secili && secili.value) dealIdInput.value = secili.value;
         }
         var selected = this.selectedOptions[0];
         if (selected && selected.dataset.amount) {

@@ -1,6 +1,6 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, IrsaliyeDegisiklikLog, format_price_tr, TR_AYLAR
+from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, IrsaliyeDegisiklikLog, format_price_tr, TR_AYLAR, HATIRLATMA_KAPALI
 from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, is_emri_kalemleri, generate_siparis_dosyasi_pdf, generate_toplu_is_emri_pdf, generate_is_emri_kontrol_listesi_pdf, TOPLU_PARCA, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, siparisler, limiter, csrf
@@ -20,7 +20,7 @@ import unicodedata
 import uuid
 from urllib.parse import quote as _url_quote
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 from flask_wtf.csrf import generate_csrf
 
 def calculate_customer_balance(customer):
@@ -1333,7 +1333,7 @@ def register_routes(app):
         # ---- Bugun yapilacaklar (4 kaynaktan birlestirilmis, en fazla 4 satir) ----
         todo_items = []
 
-        reminder_q = PaymentReminder.query.filter(PaymentReminder.status != 'odendi').options(joinedload(PaymentReminder.customer))
+        reminder_q = PaymentReminder.query.filter(PaymentReminder.status.notin_(HATIRLATMA_KAPALI)).options(joinedload(PaymentReminder.customer))
         if not current_user.is_admin:
             reminder_q = reminder_q.join(Customer, PaymentReminder.customer_id == Customer.id).filter(
                 Customer.owner_user_id == current_user.id)
@@ -1888,91 +1888,155 @@ def register_routes(app):
                                 takip_gereken_gun=TAKIP_GEREKEN_GUN,
                                 duplicate_count_by_customer=duplicate_count_by_customer)
 
-    def _sync_payment_reminders_for_today():
-        """Is 1.6 OTOMATIK odeme hatirlatma: Deal.pesinat_tarihi/bakiye_tarihi
-        BUGUN VEYA GECMISTE olan ve ilgili tutar henuz tamamen odenmemis
-        teklifler icin PaymentReminder olusturur (yoksa).
+    _DEAL_HATIRLATMA_KAYNAK = ('deal_pesinat', 'deal_bakiye', 'deal_odeme')
 
-        2026-10-06 duzeltmesi: eskiden SADECE `== today` kontrol ediliyordu -
-        sayfa o GUN hic acilmazsa (hafta sonu, tatil, kullanici o gun
-        giris yapmadi vb.) senkron hic tetiklenmiyor ve hatirlatma SONSUZA
-        KADAR olusmuyordu (ertesi gun `== today` artik gecmisi yakalamadigi
-        icin). Artik `<= today` kontrol edilir ve due_date GERCEK (gecmis)
-        tarih olarak kaydedilir - boylece "N gun gecikti" dogru hesaplanir.
-        Tekrar-olusturmama kontrolu de artik due_date'e bagli degil - bir
-        kaynak (source_type+source_id) icin HERHANGI bir tarihte bir
-        hatirlatma olusmussa (odenmis olsa bile) bir daha asla tekrar
-        olusturulmaz."""
+    def _sync_payment_reminders_for_today(customer_ids=None, deal_ids=None, kaydet=True):
+        """2026-10-27 (Odeme paketi) - SIPARIS BASINA TEK HATIRLATMA.
+
+        Eskiden pesinat ve bakiye icin IKI ayri hatirlatma acilir, bakiye
+        satirina pesinat da dahil yazildigi icin ayni para iki kez sayilirdi;
+        siparise donmemis tekliflerde de hatirlatma acilirdi (MEVLANA) ve
+        faturaya bagli odemeler hic gorulmezdi (BEREKET).
+
+        Simdi her siparis icin Deal.odeme_plani() tek kaynak:
+          - vadesi gelen (vadesi gecmis taksitler - odenen) > 0 ise siparisin
+            TEK bir acik hatirlatmasi olur; tutari ve vadesi her senkronda
+            guncellenir. Ayni siparisin fazladan acik satirlari 'birlesti'
+            olur (silinmez). Soz verilmis satir varsa o ana satir kalir.
+          - vadesi gelen 0 ise acik satirlar 'odendi' olarak kapanir. Odeme
+            silinirse bir sonraki senkronda yeni satir ('deal_odeme') acilir.
+          - siparis olmayan (kazanilan disi) tekliflerin acik satirlari
+            'askida' olur - listede gorunmez, siparise donerse geri acilir.
+        'manuel' hatirlatmalara DOKUNULMAZ. Payment tablosuna YAZILMAZ.
+        kaydet=False: hicbir sey yazmadan sadece ne olacagini sayar (dry-run).
+        Donus: {'acilan', 'guncellenen', 'kapanan', 'birlesen', 'askiya'}."""
         today = date.today()
-        existing = set(db.session.query(PaymentReminder.source_type, PaymentReminder.source_id).filter(
-            PaymentReminder.source_type.in_(['deal_pesinat', 'deal_bakiye'])
-        ).all())
-        candidates = Deal.query.filter(
-            db.or_(Deal.pesinat_tarihi <= today, Deal.bakiye_tarihi <= today)
-        ).all()
-        created = 0
-        for d in candidates:
-            # B7 (2026-10-06): pesinat_tarihi/bakiye_tarihi artik teklif
-            # asamasinda da (approve_deal'dan ONCE) doldurulabiliyor - o an
-            # pesinat_orani henuz girilmemis (None) olabilir, bu durumda
-            # pesinat_tutari/bakiye_tutari de None doner. Asagidaki kontroller
-            # bu yuzden None-guvenli yazildi (eskiden `d.pesinat_tutari > 0.01`
-            # gibi dogrudan karsilastirma, orani olmayan bir teklifte
-            # TypeError ile /takip-modu'nun tamamen cokmesine yol acardi).
-            pesinat_tutari = d.pesinat_tutari if d.pesinat_orani is not None else d.outstanding_amount
-            if (d.pesinat_tarihi and d.pesinat_tarihi <= today and ('deal_pesinat', d.id) not in existing
-                    and pesinat_tutari and pesinat_tutari > 0.01):
-                db.session.add(PaymentReminder(
-                    customer_id=d.customer_id, source_type='deal_pesinat', source_id=d.id,
-                    amount=pesinat_tutari, due_date=d.pesinat_tarihi
-                ))
-                created += 1
-            if (d.bakiye_tarihi and d.bakiye_tarihi <= today and ('deal_bakiye', d.id) not in existing
-                    and not d.payment_complete and d.outstanding_amount > 0.01):
-                db.session.add(PaymentReminder(
-                    customer_id=d.customer_id, source_type='deal_bakiye', source_id=d.id,
-                    amount=d.outstanding_amount, due_date=d.bakiye_tarihi
-                ))
-                created += 1
-        if created:
-            db.session.commit()
+        simdi = datetime.utcnow()
+        sayac = {'acilan': 0, 'guncellenen': 0, 'kapanan': 0, 'birlesen': 0, 'askiya': 0}
+        detay = []  # (islem, deal_id, customer_id, tutar) - dry-run raporu icin
 
-    def _auto_close_paid_reminders(customer_ids=None):
-        """2026-10-06 duzeltmesi (bulgu D): eskiden bir PaymentReminder
-        SADECE Takip Modu'nun 'Odeme Alindi' butonuyla (payment_reminder_id
-        ile add_payment) kapaniyordu - odeme Odemeler sayfasi/fatura/musteri
-        uzerinden girilirse hatirlatma acik kalirdi. Artik deal_pesinat/
-        deal_bakiye kaynakli acik hatirlatmalar, ilgili Deal'in GERCEK odeme
-        durumuna gore otomatik kapatilir. source_type='manuel' olanlara
-        DOKUNULMAZ (elle girilen hatirlatma sadece elle/Odeme Alindi ile
-        kapanir)."""
-        q = PaymentReminder.query.filter(
-            PaymentReminder.status != 'odendi',
-            PaymentReminder.source_type.in_(['deal_pesinat', 'deal_bakiye'])
+        rq = PaymentReminder.query.filter(
+            PaymentReminder.source_type.in_(_DEAL_HATIRLATMA_KAYNAK),
+            PaymentReminder.status.notin_(('odendi', 'birlesti')),
         )
         if customer_ids is not None:
-            q = q.filter(PaymentReminder.customer_id.in_(customer_ids))
-        reminders = q.all()
-        if not reminders:
-            return []
-        deals = {d.id: d for d in Deal.query.filter(Deal.id.in_({r.source_id for r in reminders})).all()}
-        closed = []
-        for r in reminders:
-            d = deals.get(r.source_id)
-            if not d:
+            rq = rq.filter(PaymentReminder.customer_id.in_(customer_ids))
+        if deal_ids is not None:
+            rq = rq.filter(PaymentReminder.source_id.in_(deal_ids))
+        acik = {}
+        for r in rq.all():
+            acik.setdefault(r.source_id, []).append(r)
+
+        vadeli = db.and_(Deal.stage == 'kazanilan',
+                         db.or_(Deal.pesinat_tarihi <= today, Deal.bakiye_tarihi <= today))
+        dq = Deal.query.filter(db.or_(Deal.id.in_(list(acik.keys()) or [0]), vadeli))
+        if customer_ids is not None:
+            dq = dq.filter(Deal.customer_id.in_(customer_ids))
+        if deal_ids is not None:
+            dq = dq.filter(Deal.id.in_(deal_ids))
+        deals = dq.options(selectinload(Deal.payments),
+                           selectinload(Deal.invoices).selectinload(Invoice.payments)).all()
+        bulunan = {d.id for d in deals}
+
+        oncelik = {'soz_verildi': 0, 'hatirlatildi': 1, 'bekliyor': 2, 'askida': 3}
+        for d in deals:
+            mevcut = acik.get(d.id, [])
+            if d.stage != 'kazanilan':
+                for r in mevcut:
+                    if r.status != 'askida':
+                        sayac['askiya'] += 1
+                        detay.append(('askiya', d.id, d.customer_id, r.amount))
+                        if kaydet:
+                            r.status = 'askida'
                 continue
-            if r.source_type == 'deal_pesinat':
-                should_close = (d.paid_amount >= d.pesinat_tutari - 0.01) if d.pesinat_orani is not None \
-                    else (d.outstanding_amount <= 0.01)
-            else:  # deal_bakiye
-                should_close = d.payment_complete
-            if should_close:
-                r.status = 'odendi'
-                r.resolved_at = datetime.utcnow()
-                closed.append(r)
-        if closed:
+            plan = d.odeme_plani(today)
+            vg = round(plan['vadesi_gelen'], 2)
+            if vg <= 0.01:
+                for r in mevcut:
+                    sayac['kapanan'] += 1
+                    detay.append(('kapanan', d.id, d.customer_id, r.amount))
+                    if kaydet:
+                        r.status = 'odendi'
+                        r.resolved_at = simdi
+                continue
+            if not mevcut:
+                sayac['acilan'] += 1
+                detay.append(('acilan', d.id, d.customer_id, vg))
+                if kaydet:
+                    db.session.add(PaymentReminder(
+                        customer_id=d.customer_id, source_type='deal_odeme', source_id=d.id,
+                        amount=vg, due_date=plan['en_eski_vade'] or today))
+                continue
+            mevcut.sort(key=lambda r: (oncelik.get(r.status, 2), r.created_at or simdi, r.id))
+            ana = mevcut[0]
+            for r in mevcut[1:]:
+                sayac['birlesen'] += 1
+                detay.append(('birlesen', d.id, d.customer_id, r.amount))
+                if kaydet:
+                    r.status = 'birlesti'
+                    r.resolved_at = simdi
+            vade = plan['en_eski_vade'] or ana.due_date
+            if ana.status == 'askida' or abs((ana.amount or 0) - vg) > 0.009 or ana.due_date != vade:
+                sayac['guncellenen'] += 1
+                detay.append(('guncellenen', d.id, d.customer_id, f'{ana.amount} -> {vg}'))
+                if kaydet:
+                    if ana.status == 'askida':
+                        ana.status = 'bekliyor'
+                    ana.amount = vg
+                    ana.due_date = vade
+
+        # Kaynak teklifi silinmis acik satirlar (sadece tam senkronda).
+        if customer_ids is None and deal_ids is None:
+            for sid, liste in acik.items():
+                if sid not in bulunan:
+                    for r in liste:
+                        if r.status != 'askida':
+                            sayac['askiya'] += 1
+                            detay.append(('askiya', sid, r.customer_id, r.amount))
+                            if kaydet:
+                                r.status = 'askida'
+
+        if kaydet and any(sayac.values()):
             db.session.commit()
-        return closed
+        return dict(sayac, detay=detay)
+
+    # 2026-10-27: dry-run / bakim betikleri icin disaridan erisim
+    # (ornek: app.odeme_senkron(kaydet=False) - hicbir sey yazmaz).
+    app.odeme_senkron = _sync_payment_reminders_for_today
+
+    def _auto_close_paid_reminders(customer_ids=None):
+        """Eski ad korunur (cagiranlar bozulmasin) - artik tek senkron
+        fonksiyonuna yonlendirir (bkz. _sync_payment_reminders_for_today)."""
+        return _sync_payment_reminders_for_today(customer_ids=customer_ids)
+
+    def _hatirlatma_odeme_bilgisi(reminders):
+        """Takip Modu icin: siparis kaynakli her hatirlatmanin canli odeme
+        plani (toplam/odenen/taksitler). {reminder_id: {'deal', 'plan'}}."""
+        deal_ids = {r.source_id for r in reminders if r.source_type in _DEAL_HATIRLATMA_KAYNAK and r.source_id}
+        if not deal_ids:
+            return {}
+        deals = {d.id: d for d in Deal.query.filter(Deal.id.in_(deal_ids)).options(
+            selectinload(Deal.payments), selectinload(Deal.invoices).selectinload(Invoice.payments)).all()}
+        bugun = date.today()
+        planlar = {did: d.odeme_plani(bugun) for did, d in deals.items()}
+        return {r.id: {'deal': deals[r.source_id], 'plan': planlar[r.source_id]}
+                for r in reminders if r.source_id in deals and r.source_type in _DEAL_HATIRLATMA_KAYNAK}
+
+    def _baglanmamis_odemeler(customer_ids):
+        """Siparise de, siparisi olan bir faturaya da bagli OLMAYAN 'odendi'
+        odemeler (genel tahsilat) - Takip Modu'nda 'bu siparise bagla'
+        onerisi icin. Son 180 gun. {customer_id: [Payment]}."""
+        if not customer_ids:
+            return {}
+        sinir = date.today() - timedelta(days=180)
+        rows = Payment.query.outerjoin(Invoice, Payment.invoice_id == Invoice.id).filter(
+            Payment.customer_id.in_(customer_ids), Payment.status == 'odendi',
+            Payment.deal_id.is_(None), Invoice.deal_id.is_(None), Payment.payment_date >= sinir,
+        ).order_by(Payment.payment_date.desc()).all()
+        sonuc = {}
+        for p in rows:
+            sonuc.setdefault(p.customer_id, []).append(p)
+        return sonuc
 
     @app.route('/takip-modu')
     @login_required
@@ -1989,7 +2053,6 @@ def register_routes(app):
         (en uzun sessiz en ustte) siralanir; o gun 'Atla' denen musteriler
         (TakipModuAtla) listeye hic girmez."""
         _sync_payment_reminders_for_today()
-        _auto_close_paid_reminders()
         today = date.today()
         show_all = current_user.is_admin and request.args.get('tumu') == '1'
 
@@ -2042,7 +2105,7 @@ def register_routes(app):
         tekrar_ara_map = dict(tekrar_ara_rows)
 
         reminders = PaymentReminder.query.filter(
-            PaymentReminder.customer_id.in_(customer_ids), PaymentReminder.status != 'odendi'
+            PaymentReminder.customer_id.in_(customer_ids), PaymentReminder.status.notin_(HATIRLATMA_KAPALI)
         ).all()
         reminder_by_customer = {}
         for r in reminders:
@@ -2105,6 +2168,10 @@ def register_routes(app):
         cards.sort(key=lambda x: x['sort_key'])
 
         today_payments = [r for cid_list in reminder_by_customer.values() for r in cid_list]
+        # 2026-10-27 (Odeme paketi): siparis satirlarinin canli plani +
+        # musterinin siparise baglanmamis odemeleri ('bu siparise bagla').
+        odeme_bilgi = _hatirlatma_odeme_bilgisi(today_payments)
+        baglanmamis = _baglanmamis_odemeler(list(reminder_by_customer.keys()))
         today_payment_total = sum(r.amount for r in today_payments)
 
         outreach_count = DailyOutreachCount.query.filter_by(user_id=current_user.id, report_date=today).first()
@@ -2116,7 +2183,7 @@ def register_routes(app):
                                 outreach_count=outreach_count.count if outreach_count else 0,
                                 outreach_goal=GUNLUK_HEDEF_ILETISIM, show_all=show_all,
                                 customers_by_id={c.id: c for c in customers}, all_users=all_users,
-                                today=today)
+                                today=today, odeme_bilgi=odeme_bilgi, baglanmamis=baglanmamis)
 
     _TEKRAR_ARA_GUN = {'3gun': 3, '1hafta': 7, '1ay': 30}
 
@@ -3637,8 +3704,18 @@ def register_routes(app):
             pesinat_orani_raw = request.form.get('pesinat_orani', '').strip()
             pesinat_tarihi_raw = request.form.get('pesinat_tarihi', '').strip()
             bakiye_tarihi_raw = request.form.get('bakiye_tarihi', '').strip()
+            # 2026-10-27 (Odeme paketi): pesinat durumu - 'alindi' (odeme
+            # siparise bagli kaydedilir, hatirlatma acilmaz), 'alinacak'
+            # (beklenen tarih, eski davranis), 'yok' (oran 0).
+            pesinat_durumu = request.form.get('pesinat_durumu', '').strip()
 
             form_errors = []
+            if pesinat_durumu not in ('alindi', 'alinacak', 'yok'):
+                form_errors.append('Peşinat durumu seçilmelidir (Alındı / Alınacak / Peşinat yok).')
+            if pesinat_durumu == 'yok':
+                pesinat_orani_raw = '0'
+                if not pesinat_tarihi_raw:
+                    pesinat_tarihi_raw = bakiye_tarihi_raw
             pesinat_orani = None
             if not pesinat_orani_raw:
                 form_errors.append('Peşinat oranı girilmelidir.')
@@ -3660,7 +3737,7 @@ def register_routes(app):
                 prev_sales = Deal.query.filter(Deal.customer_id == deal.customer_id, Deal.stage == 'kazanilan', Deal.id != deal.id).count()
                 suggested_rate = 1.5 if prev_sales == 0 else 1.0
                 return render_template('approve_deal.html', deal=deal, suggested_rate=suggested_rate,
-                                        form_data=request.form)
+                                        form_data=request.form, kayitli_odeme=deal.paid_amount)
 
             try:
                 deal.pesinat_orani = pesinat_orani
@@ -3705,6 +3782,26 @@ def register_routes(app):
                                              description=f'Satış: {deal.title} (KDV Dahil: {deal.value:,.2f} ₺)')
                 db.session.add(statement)
 
+                # 2026-10-27 (Odeme paketi): 'Alindi' - pesinat siparise bagli
+                # odeme olarak kaydedilir; daha once (teklif asamasinda)
+                # girilmis odeme varsa SADECE eksik kismi eklenir, tamamsa
+                # yeni kayit ACILMAZ (cift sayim olmasin).
+                pesinat_odeme = None
+                if pesinat_durumu == 'alindi' and pesinat_orani:
+                    pes_tutar = round(deal.value * pesinat_orani / 100, 2)
+                    eksik = round(pes_tutar - deal.paid_amount, 2)
+                    if eksik > 0.01:
+                        pesinat_odeme = Payment(
+                            customer_id=deal.customer_id, deal_id=deal.id, amount=eksik,
+                            payment_date=deal.pesinat_tarihi, status='odendi',
+                            payment_method=request.form.get('pesinat_yontemi') or None,
+                            notes='Onay sırasında alınan peşinat', user_id=current_user.id)
+                        db.session.add(pesinat_odeme)
+                        db.session.flush()
+                        db.session.add(CustomerStatement(
+                            customer_id=deal.customer_id, payment_id=pesinat_odeme.id, type='alacak',
+                            amount=eksik, description=f'Tahsilat: {deal.display_no} (Peşinat - onay)'))
+
                 # Manuel prim oranını al
                 manual_rate = request.form.get('commission_rate')
                 if manual_rate:
@@ -3735,7 +3832,10 @@ def register_routes(app):
                 flash('Teklif onaylanırken bir hata oluştu, hiçbir değişiklik kaydedilmedi. Girdiğiniz bilgileri kontrol edip tekrar deneyin.', 'danger')
                 return redirect(url_for('approve_deal', id=id))
 
+            _sync_payment_reminders_for_today(deal_ids=[deal.id])
             flash(f'Teklif onaylandı! Üretime aktarıldı. Prim: %{rate} = {commission_amount:,.2f} ₺', 'success')
+            if pesinat_odeme:
+                flash(f'Peşinat {format_price_tr(pesinat_odeme.amount)} ödeme olarak kaydedildi ve siparişe bağlandı.', 'success')
             return redirect(url_for('production_detail', id=production.id))
         
         # GET isteği - onay formu göster
@@ -3744,7 +3844,7 @@ def register_routes(app):
         suggested_rate = 1.5 if is_new else 1.0
         
         return render_template('approve_deal.html', deal=deal, suggested_rate=suggested_rate,
-                               oneri=_onay_odeme_onerisi(deal))
+                               oneri=_onay_odeme_onerisi(deal), kayitli_odeme=deal.paid_amount)
 
     @app.route('/api/customers/<int:customer_id>/uretim-oneri')
     @login_required
@@ -7102,30 +7202,64 @@ def register_routes(app):
             # yanlislikla iki kez "Kaydet"e basmasi gibi) direkt kaydetmek
             # yerine onay istenir. confirm_duplicate=1 geldiyse kullanici
             # zaten uyariyi gorup bilerek devam etmis demektir.
+            # 2026-10-27 (Odeme paketi): hedef siparis - formda secilen
+            # siparis, yoksa secilen faturanin siparisi, yoksa Takip Modu
+            # hatirlatmasinin siparisi. Odeme bu siparise baglanir.
+            form_deal_id = request.form.get('deal_id', type=int)
+            form_invoice_id = request.form.get('invoice_id', type=int)
+            reminder_id = request.form.get('payment_reminder_id', type=int)
+            reminder = PaymentReminder.query.get(reminder_id) if reminder_id else None
+            if reminder and reminder.customer_id != customer_id:
+                reminder = None
+            if not form_deal_id and not form_invoice_id and reminder and \
+                    reminder.source_type in _DEAL_HATIRLATMA_KAYNAK and reminder.source_id:
+                form_deal_id = reminder.source_id
+            hedef_deal = Deal.query.get(form_deal_id) if form_deal_id else None
+            if hedef_deal and hedef_deal.customer_id != customer_id:
+                hedef_deal, form_deal_id = None, None
+            if not hedef_deal and form_invoice_id:
+                _inv = Invoice.query.get(form_invoice_id)
+                hedef_deal = _inv.deal if _inv and _inv.deal_id else None
+
+            # Is 3 + 2026-10-27: mukerrer odeme koruma. Eskiden sadece son
+            # 30 SANIYE bakiliyordu (Gur Kuruyemis'teki iki ayri 13.560 TL
+            # gecti). Artik ayni musteri + ayni tutar, odeme tarihi +-7 gun
+            # icinde iptal edilmemis bir odeme varsa ONAY istenir (engellemez).
+            # Fazla odeme: siparisin kalanindan buyuk tutarda da onay istenir.
+            uyari_mukerrer = None
             if not request.form.get('confirm_duplicate'):
-                recent_cutoff = datetime.utcnow() - timedelta(seconds=30)
-                recent_duplicate = Payment.query.filter(
+                benzer = Payment.query.filter(
                     Payment.customer_id == customer_id,
-                    Payment.amount == amount,
-                    Payment.payment_date == payment_date,
-                    Payment.created_at >= recent_cutoff
-                ).first()
-                if recent_duplicate:
-                    prefill_customer = Customer.query.get(customer_id)
-                    flash(
-                        f'Bu ödeme az önce eklenmiş görünüyor ({prefill_customer.display_name if prefill_customer else ""} - '
-                        f'{amount:,.2f} ₺, {payment_date.strftime("%d.%m.%Y")}). Yine de eklemek istiyorsanız '
-                        f'aşağıdaki "Yine de Ekle" butonuna basın.', 'warning'
-                    )
-                    return render_template('add_payment.html', today=datetime.now().date(),
-                                            prefill_customer=prefill_customer, prefill_invoice=None,
-                                            duplicate_warning=True, form_data=request.form)
+                    Payment.amount.between(amount - 0.01, amount + 0.01),
+                    Payment.status != 'iptal',
+                    Payment.payment_date.between(payment_date - timedelta(days=7), payment_date + timedelta(days=7)),
+                ).order_by(Payment.payment_date.desc()).first()
+                if benzer:
+                    uyari_mukerrer = (
+                        f'Bu müşteriye {benzer.payment_date.strftime("%d.%m.%Y") if benzer.payment_date else "-"} tarihinde '
+                        f'aynı tutarda ({format_price_tr(amount)}) bir ödeme zaten girilmiş'
+                        + (f' — not: "{benzer.notes}"' if benzer.notes else '')
+                        + (f' ({benzer.deal.display_no})' if benzer.deal else '')
+                        + '. Aynı ödeme mi?')
+            uyari_fazla = None
+            if hedef_deal and request.form.get('status', 'odendi') == 'odendi' and not request.form.get('confirm_fazla'):
+                kalan = hedef_deal.outstanding_amount
+                if amount > kalan + 0.01:
+                    uyari_fazla = (
+                        f'{hedef_deal.display_no} siparişinin kalanı {format_price_tr(kalan)}, girilen {format_price_tr(amount)}. '
+                        f'Fazlası {format_price_tr(amount - kalan)} — avans olarak cari hesapta görünecek.')
+            if uyari_mukerrer or uyari_fazla:
+                prefill_customer = Customer.query.get(customer_id)
+                return render_template('add_payment.html', today=datetime.now().date(),
+                                        prefill_customer=prefill_customer, prefill_invoice=None,
+                                        duplicate_warning=bool(uyari_mukerrer), uyari_mukerrer=uyari_mukerrer,
+                                        uyari_fazla=uyari_fazla, form_data=request.form)
 
             kur_orani_raw = request.form.get('kur_orani', '').strip()
             payment = Payment(
                 customer_id=customer_id,
-                invoice_id=int(request.form['invoice_id']) if request.form.get('invoice_id') else None,
-                deal_id=int(request.form['deal_id']) if request.form.get('deal_id') else None,
+                invoice_id=form_invoice_id,
+                deal_id=form_deal_id,
                 amount=amount,
                 payment_date=payment_date,
                 payment_method=request.form.get('payment_method'),
@@ -7158,23 +7292,27 @@ def register_routes(app):
             # (yukarida zaten olusturuldu) uzerinden hatirlatmayi da kapatir -
             # ayri bir odeme/bakiye hesaplama mantigi YOK, sadece durumu
             # 'odendi' yapar.
-            reminder_id = request.form.get('payment_reminder_id', type=int)
-            if reminder_id:
-                reminder = PaymentReminder.query.get(reminder_id)
-                if reminder and reminder.customer_id == customer_id:
-                    reminder.status = 'odendi'
-                    reminder.resolved_at = datetime.utcnow()
+            # 2026-10-27: SIPARIS hatirlatmasi artik tutara bakilmadan
+            # kapatilmaz - asagidaki senkron siparisin gercek odeme durumuna
+            # gore kapatir (kismi odemede satir acik kalir, tutari azalir).
+            # Elle ('manuel') hatirlatma eskisi gibi kapanir.
+            if reminder and reminder.source_type not in _DEAL_HATIRLATMA_KAYNAK:
+                reminder.status = 'odendi'
+                reminder.resolved_at = datetime.utcnow()
 
             db.session.commit()
 
-            # 2026-10-06 duzeltmesi (bulgu D): odeme Odemeler sayfasi/fatura/
-            # musteri uzerinden girildiginde de (payment_reminder_id ile
-            # BAGLANMAMIS olsa bile) ilgili deal'in peşinat/bakiye
-            # hatirlatmalari gercek odeme durumuna gore otomatik kapanir.
-            if payment.deal_id:
-                _auto_close_paid_reminders(customer_ids=[customer_id])
+            # Odeme hangi yoldan girilirse girilsin (siparis/fatura/genel)
+            # musterinin siparis hatirlatmalari yeniden hesaplanir.
+            _sync_payment_reminders_for_today(customer_ids=[customer_id])
 
-            flash('Ödeme kaydedildi!', 'success')
+            if hedef_deal:
+                db.session.refresh(hedef_deal)
+                kalan = hedef_deal.outstanding_amount
+                flash(f'Ödeme kaydedildi ({hedef_deal.display_no}). ' + (
+                    'Siparişin ödemesi tamamlandı.' if kalan <= 0.01 else f'Siparişin kalanı: {format_price_tr(kalan)}.'), 'success')
+            else:
+                flash('Ödeme kaydedildi! (Siparişe bağlı değil - genel tahsilat)', 'success')
             if reminder_id:
                 return redirect(url_for('takip_modu'))
             return redirect(url_for('payments'))
@@ -7195,8 +7333,11 @@ def register_routes(app):
             flash('Bu ödeme kaydını silme yetkiniz yok.', 'danger')
             return redirect(url_for('payments'))
         CustomerStatement.query.filter_by(payment_id=payment.id).delete()
+        silinen_musteri = payment.customer_id
         db.session.delete(payment)
         db.session.commit()
+        # 2026-10-27: odeme silinince siparis satiri gerekirse geri acilir.
+        _sync_payment_reminders_for_today(customer_ids=[silinen_musteri])
         flash('Ödeme kaydı silindi!', 'success')
         return redirect(url_for('payments'))
 
@@ -7226,7 +7367,8 @@ def register_routes(app):
         open_invoices = [{
             'id': inv.id, 'display_no': inv.display_no,
             'total': inv.total, 'remaining': inv.remaining_amount,
-            'para_birimi': inv.deal.para_birimi if inv.deal else 'TRY'
+            'para_birimi': inv.deal.para_birimi if inv.deal else 'TRY',
+            'deal_id': inv.deal_id,
         } for inv in invoices if inv.remaining_amount > 0.01]
 
         invoiced_deal_ids = {inv.deal_id for inv in invoices}
@@ -7236,7 +7378,48 @@ def register_routes(app):
             'value': d.value, 'pesinat': d.pesinat or '', 'para_birimi': d.para_birimi
         } for d in won_deals if d.id not in invoiced_deal_ids]
 
-        return jsonify({'invoices': open_invoices, 'deals': open_deals})
+        # 2026-10-27 (Odeme paketi): odemesi bekleyen siparisler (faturali
+        # olanlar dahil) - formdaki 'Bu odeme hangi siparise?' paneli.
+        bugun = date.today()
+        bekleyen = []
+        for d in sorted(won_deals, key=lambda x: (x.deal_date or date.min, x.id)):
+            plan = d.odeme_plani(bugun)
+            if plan['kalan'] > 0.01:
+                bekleyen.append({
+                    'id': d.id, 'display_no': d.display_no, 'toplam': plan['toplam'],
+                    'odenen': plan['odenen'], 'kalan': plan['kalan'], 'vadesi_gelen': plan['vadesi_gelen'],
+                    'para_birimi': d.para_birimi,
+                })
+        return jsonify({'invoices': open_invoices, 'deals': open_deals, 'bekleyen_siparisler': bekleyen})
+
+    @app.route('/payments/<int:id>/siparise-bagla', methods=['POST'])
+    @login_required
+    def payment_siparise_bagla(id):
+        """2026-10-27 (Odeme paketi): Takip Modu'ndaki 'bu siparise bagla' -
+        siparise ve siparisli faturaya bagli OLMAYAN genel bir odemenin
+        deal_id'sini doldurur (tutar/tarih/durum DEGISMEZ). Kullanici
+        tiklayinca calisir; otomatik eslestirme YOK."""
+        payment = Payment.query.get_or_404(id)
+        deal = Deal.query.get_or_404(request.form.get('deal_id', type=int))
+        donus = request.form.get('next') or url_for('takip_modu')
+        if not donus.startswith('/'):
+            donus = url_for('takip_modu')
+        if not current_user.is_admin and payment.user_id != current_user.id and deal.user_id != current_user.id:
+            flash('Bu ödemeyi bağlama yetkiniz yok.', 'danger')
+            return redirect(donus)
+        if payment.customer_id != deal.customer_id or deal.stage != 'kazanilan':
+            flash('Ödeme yalnızca aynı müşterinin siparişine bağlanabilir.', 'danger')
+            return redirect(donus)
+        if payment.deal_id or (payment.invoice and payment.invoice.deal_id):
+            flash('Bu ödeme zaten bir siparişe bağlı.', 'warning')
+            return redirect(donus)
+        payment.deal_id = deal.id
+        db.session.commit()
+        _sync_payment_reminders_for_today(customer_ids=[deal.customer_id])
+        db.session.refresh(deal)
+        flash(f'{format_price_tr(payment.amount)} ödeme {deal.display_no} siparişine bağlandı. '
+              f'Kalan: {format_price_tr(deal.outstanding_amount)}.', 'success')
+        return redirect(donus)
 
     @app.route('/potential-customers')
     @login_required

@@ -22,10 +22,10 @@ TANIMLAR (2026-10-08, Serkan onayladi):
   DOGRUDAN erismez.
 """
 from datetime import date
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app import db
-from app.models import Deal, Production, TR_AYLAR
+from app.models import Deal, Production, Invoice, TR_AYLAR
 
 
 # ---- Durum turetme (yeni veri girisi YOK, mevcut kayitlardan okunur) ----
@@ -95,6 +95,9 @@ def _siparis_query(scope_user_id, extra_filters=None):
         joinedload(Deal.items),
         joinedload(Deal.production).joinedload(Production.shipments),
         joinedload(Deal.payments),
+        # 2026-10-27: paid_amount artik faturaya bagli odemeleri de sayiyor -
+        # N+1 olmasin diye faturalar+odemeleri toplu yuklenir.
+        selectinload(Deal.invoices).selectinload(Invoice.payments),
     )
     return q
 

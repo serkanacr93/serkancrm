@@ -42,7 +42,7 @@
                     <tr class="today-payment-row" data-customer-id="{{ cid }}" data-reminder-id="{{ r.id }}" style="cursor:pointer;">
                         <td>{{ customers_by_id[cid].display_name }}</td>
                         <td>{{ r.amount|para_goster }}</td>
-                        <td>{{ {'deal_pesinat':'Peşinat','deal_bakiye':'Bakiye','manuel':'Manuel'}.get(r.source_type, r.source_type) }}</td>
+                        <td>{% set ob = odeme_bilgi.get(r.id) %}{% if ob %}Sipariş {{ ob.deal.display_no }}{% else %}{{ {'deal_pesinat':'Peşinat','deal_bakiye':'Bakiye','manuel':'Manuel'}.get(r.source_type, r.source_type) }}{% endif %}</td>
                         <td><span class="badge bg-{{ 'secondary' if r.status=='bekliyor' else 'info' if r.status=='hatirlatildi' else 'warning text-dark' }}">{{ {'bekliyor':'Bekliyor','hatirlatildi':'Hatırlatıldı','soz_verildi':'Söz Verdi'}.get(r.status, r.status) }}</span></td>
                     </tr>
                     {% endfor %}
@@ -76,10 +76,35 @@
                 </div>
 
                 {% if item.payment_reminders %}
-                {% set r = item.payment_reminders[0] %}
-                <div class="alert alert-danger py-2 mb-3">
+                {# 2026-10-27 (Odeme paketi): siparis basina TEK satir - pesinat+bakiye ayni satirda #}
+                {% for r in item.payment_reminders %}
+                {% set ob = odeme_bilgi.get(r.id) %}
+                <div class="alert alert-danger py-2 mb-2">
+                    {% if ob %}
+                    {% set p = ob.plan %}
+                    <div class="d-flex justify-content-between flex-wrap gap-1">
+                        <span><a href="{{ url_for('deal_detail', id=ob.deal.id) }}" class="alert-link">{{ ob.deal.display_no }}</a> · sipariş {{ p.toplam|para_goster }}</span>
+                        <span>Vadesi gelen: <strong>{{ r.amount|para_goster }}</strong></span>
+                    </div>
+                    {% set odn = ((p.odenen / p.toplam * 100) if p.toplam else 0)|round(1) %}
+                    {% set vg = ((r.amount / p.toplam * 100) if p.toplam else 0)|round(1) %}
+                    <div class="progress my-1" style="height:7px;">
+                        <div class="progress-bar bg-success" style="width: {{ [odn, 100]|min }}%"></div>
+                        <div class="progress-bar bg-danger" style="width: {{ [vg, 100 - [odn, 100]|min]|min }}%"></div>
+                    </div>
+                    <div class="small">
+                        <span class="text-success">Ödenen {{ p.odenen|para_goster }}</span>
+                        {% for t in p.taksitler %} ·
+                        {% if t.durum == 'odendi' %}{{ t.ad }} kapandı ✓
+                        {% elif t.vadesi_geldi %}<strong>{{ t.ad }} {{ t.acik|para_goster }}</strong> — vadesi {{ t.tarih.strftime('%d.%m') }}{% if t.gecikme %} ({{ t.gecikme }} gün geçti){% else %} (bugün){% endif %}
+                        {% else %}{{ t.ad }} {{ t.acik|para_goster }} — vadesi {{ t.tarih.strftime('%d.%m') }} (henüz gelmedi){% endif %}
+                        {% endfor %}
+                    </div>
+                    {% else %}
                     <strong>{{ r.amount|para_goster }}</strong> —
                     {% if r.due_date < today %}{{ (today - r.due_date).days }} gün gecikti{% else %}Ödeme günü{% endif %}
+                    {% endif %}
+                    {% if r.status == 'soz_verildi' and r.promised_date %}<div class="small">Söz verildi: {{ r.promised_date.strftime('%d.%m.%Y') }}</div>{% endif %}
                     {% if r.notes %}<div class="small">{{ r.notes }}</div>{% endif %}
                 </div>
                 <div class="d-grid gap-2 mb-3">
@@ -89,13 +114,33 @@
                     <button type="button" class="btn btn-outline-primary note-btn" data-customer-id="{{ item.customer.id }}" data-reminder-id="{{ r.id }}">
                         <i class="bi bi-telephone"></i> Arandı + Not
                     </button>
-                    <button type="button" class="btn btn-primary payment-received-btn" data-customer-id="{{ item.customer.id }}" data-reminder-id="{{ r.id }}" data-amount="{{ r.amount }}">
+                    <button type="button" class="btn btn-primary payment-received-btn" data-customer-id="{{ item.customer.id }}" data-reminder-id="{{ r.id }}" data-amount="{{ r.amount }}" data-deal-id="{{ ob.deal.id if ob else '' }}" data-baslik="{{ ob.deal.display_no if ob else '' }}">
                         <i class="bi bi-cash"></i> Ödeme Alındı
                     </button>
                     <button type="button" class="btn btn-outline-warning promise-btn" data-reminder-id="{{ r.id }}">
                         <i class="bi bi-calendar-plus"></i> Ödeme Sözü Verdi
                     </button>
                 </div>
+                {% endfor %}
+                {% set bp = baglanmamis.get(item.customer.id) %}
+                {% set sip_r = item.payment_reminders|selectattr('id', 'in', odeme_bilgi.keys()|list)|list %}
+                {% if bp and sip_r %}
+                <div class="alert alert-warning py-2 small mb-3">
+                    <i class="bi bi-link-45deg"></i> <strong>Siparişe bağlanmamış ödeme var</strong> — hangi siparişe aitse bağlayın (satır buna göre kapanır/azalır):
+                    {% for pay in bp[:5] %}
+                    <div class="d-flex flex-wrap align-items-center gap-1 mt-1">
+                        <span>{{ pay.payment_date.strftime('%d.%m.%Y') if pay.payment_date else '-' }} · <strong>{{ pay.amount|para_goster }}</strong>{% if pay.notes %} · {{ pay.notes }}{% endif %}</span>
+                        {% for rr in sip_r %}{% set d = odeme_bilgi[rr.id].deal %}
+                        <form method="POST" action="{{ url_for('payment_siparise_bagla', id=pay.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="deal_id" value="{{ d.id }}">
+                            <button type="submit" class="btn btn-sm btn-outline-dark py-0">→ {{ d.display_no }}'e bağla</button>
+                        </form>
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
                 <hr>
                 {% endif %}
 
@@ -207,12 +252,14 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="customer_id" id="paymentCustomerId">
             <input type="hidden" name="payment_reminder_id" id="paymentReminderId">
+            <input type="hidden" name="deal_id" id="paymentDealId">
             <input type="hidden" name="payment_date" value="{{ today.strftime('%Y-%m-%d') }}">
             <div class="modal-content">
-                <div class="modal-header"><h5 class="modal-title">Ödeme Alındı</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header"><h5 class="modal-title">Ödeme Alındı <small class="text-muted" id="paymentBaslik"></small></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
                     <label class="form-label">Tutar</label>
                     <input type="number" step="any" class="form-control" name="amount" id="paymentAmount" required>
+                    <div class="form-text">Ödeme siparişe bağlı kaydedilir. Kısmi ödemede satır açık kalır, tutarı azalır; tamamı ödenince kendiliğinden kapanır.</div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
@@ -307,6 +354,8 @@
         document.getElementById('paymentCustomerId').value = btn.dataset.customerId;
         document.getElementById('paymentReminderId').value = btn.dataset.reminderId;
         document.getElementById('paymentAmount').value = btn.dataset.amount;
+        document.getElementById('paymentDealId').value = btn.dataset.dealId || '';
+        document.getElementById('paymentBaslik').textContent = btn.dataset.baslik || '';
         paymentModal.show();
     });
 
