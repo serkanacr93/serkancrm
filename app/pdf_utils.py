@@ -3400,7 +3400,188 @@ def generate_irsaliye_pdf(shipment):
     buffer.seek(0)
     return buffer
 
+def _tr_para2(value):
+    """Belge tutari: her zaman 2 ondalik, TR ayrac ('31.500,00 TL') - Vera
+    fontunda ₺ glifi olmadigi icin diger PDF'lerle ayni 'TL' metni."""
+    v = float(value or 0)
+    s = f'{abs(v):,.2f}'.replace(',', '§').replace('.', ',').replace('§', '.')
+    return ('-' if v < 0 else '') + s + ' TL'
+
+
 def generate_manual_irsaliye_pdf(manual_irsaliye, show_prices=False):
+    """2026-10-28: YENI manuel irsaliye tasarimi (teklif/is emriyle ayni
+    kurumsal dil - sari #FBC213 / antrasit #353639). Gonderen firma basligi
+    (logo, unvan, adres, VD/VKN), ALICI ve SIPARIS kutulari, sevk seridi
+    (tasiyici, takip no, koli adedi, toplam kg), TR sayi bicimi, not kutusu,
+    imza/kase alani. show_prices=False iken fiyat sutunlari ve toplamlar HIC
+    gorunmez. Eski tasarim generate_manual_irsaliye_pdf_klasik olarak durur.
+    Veritabanina YAZMAZ."""
+    from datetime import timedelta
+    from xml.sax.saxutils import escape
+    from app.models import Deal, Production
+    company = _get_company_settings_for_pdf()
+    customer = manual_irsaliye.customer
+    buffer = BytesIO()
+    PW, PH = A4
+    M = 1.4 * cm
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=M, leftMargin=M, topMargin=1.2 * cm, bottomMargin=1.4 * cm,
+                            title=f'Sevk İrsaliyesi {manual_irsaliye.display_no}')
+    W = PW - 2 * M
+    st = getSampleStyleSheet()
+    n = ParagraphStyle('irN', parent=st['Normal'], fontName='Vera', fontSize=8.6, leading=11.5)
+    k = ParagraphStyle('irK', parent=n, fontSize=7.6, leading=10, textColor=_Y_IKINCIL)
+    b = ParagraphStyle('irB', parent=n, fontName='Vera-Bold')
+    h = ParagraphStyle('irH', parent=n, fontName='Vera-Bold', fontSize=6.8, leading=9, textColor=colors.HexColor('#8A8A8A'))
+    sag = ParagraphStyle('irSag', parent=n, alignment=2)
+    t = lambda s: escape(_clean_for_pdf(s) if s else '')
+
+    # ---- Baslik: logo + gonderen | SEVK IRSALIYESI + no + tarih/saat ----
+    logo = _ie_logo_reader(company)
+    logo_buf = _logo_for_pdf_yeni(company.logo_data) if (logo and company.logo_data) else None
+    firma_satir = [f"<font name='Vera-Bold' size='9.5'>{t(company.company_name or 'Lema Ambalaj')}</font>"]
+    if company.address:
+        firma_satir.append(t(company.address))
+    alt = ' · '.join(x for x in [f"{t(company.tax_office)} V.D." if company.tax_office else None,
+                                 t(company.tax_id) if company.tax_id else None, t(company.phone) if company.phone else None] if x)
+    if alt:
+        firma_satir.append(alt)
+    firma_p = Paragraph('<br/>'.join(firma_satir), ParagraphStyle('irF', parent=k, textColor=colors.HexColor('#333333'), leading=10.5))
+    if logo and logo_buf:
+        iw, ih = logo.getSize()
+        lh = 1.45 * cm
+        lw = min(lh * iw / ih if ih else lh, 3.6 * cm)
+        logo_buf.seek(0)
+        logo_img = Image(logo_buf, width=lw, height=lw * ih / iw if iw else lh)
+        sol = Table([[logo_img, firma_p]], colWidths=[lw + 0.3 * cm, W * 0.62 - lw - 0.3 * cm])
+        sol.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (-1, -1), 0)]))
+    else:
+        sol = firma_p
+    saat = (manual_irsaliye.created_at + timedelta(hours=3)).strftime('%H:%M') if manual_irsaliye.created_at else None
+    tarih = manual_irsaliye.ship_date.strftime('%d.%m.%Y') if manual_irsaliye.ship_date else '-'
+    sag_p = [Paragraph("<font name='Vera-Bold' size='15' color='#353639'>SEVK İRSALİYESİ</font>",
+                       ParagraphStyle('irBaslik', parent=sag, leading=19)), Spacer(1, 4),
+             Table([[manual_irsaliye.display_no]], style=TableStyle([
+                 ('BACKGROUND', (0, 0), (-1, -1), _Y_ANTRASIT), ('TEXTCOLOR', (0, 0), (-1, -1), _Y_SARI),
+                 ('FONTNAME', (0, 0), (-1, -1), 'Vera-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 9.5),
+                 ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]), hAlign='RIGHT'),
+             Spacer(1, 3),
+             Paragraph(f"Tarih: {tarih}" + (f" · Saat: {saat}" if saat else ''), ParagraphStyle('irT', parent=k, alignment=2))]
+    bas = Table([[sol, sag_p]], colWidths=[W * 0.62, W * 0.38])
+    bas.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                             ('RIGHTPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                             ('LINEBELOW', (0, 0), (-1, 0), 2.5, _Y_SARI)]))
+    el = [bas, Spacer(1, 9)]
+
+    # ---- ALICI | SIPARIS kutulari ----
+    musteri_ad = (customer.company_name or f"{customer.first_name or ''} {customer.last_name or ''}").strip()
+    kisi = f"{customer.first_name or ''} {customer.last_name or ''}".strip()
+    tel = customer.company_phone or customer.phone
+    alici = [Paragraph('ALICI', h), Paragraph(f"<font name='Vera-Bold' size='9.5'>{t(musteri_ad) or '-'}</font>", n)]
+    ikinci = ' · '.join(x for x in [t(kisi) if kisi and customer.company_name else None, t(tel) if tel else None] if x)
+    if ikinci:
+        alici.append(Paragraph(ikinci, n))
+    adres = customer.company_address or customer.address
+    if adres:
+        alici.append(Paragraph(t(adres), n))
+    vd = ' · '.join(x for x in [f"{t(customer.tax_office)} V.D." if customer.tax_office else None, t(customer.tax_id) if customer.tax_id else None] if x)
+    alici.append(Paragraph(f"V.D. / VKN: {vd}" if vd else 'V.D. / VKN: -', k))
+
+    siparis = [Paragraph('SİPARİŞ', h)]
+    deal = Deal.query.get(manual_irsaliye.deal_id) if manual_irsaliye.deal_id else None
+    if deal:
+        sip_tarih = deal.deal_date or (deal.created_at.date() if deal.created_at else None)
+        siparis.append(Paragraph(f"<font name='Vera-Bold' size='9.5'>{deal.display_no}</font>" +
+                                 (f" · sipariş tarihi {sip_tarih.strftime('%d.%m.%Y')}" if sip_tarih else ''), n))
+        prod = Production.query.filter_by(deal_id=deal.id).first()
+        if prod:
+            siparis.append(Paragraph(f"İş emri: IE-{prod.id:05d}", n))
+    else:
+        siparis.append(Paragraph('Siparişe bağlı değil (stok / numune)', n))
+    if manual_irsaliye.estimated_delivery_date:
+        siparis.append(Paragraph(f"Tahmini teslim: {manual_irsaliye.estimated_delivery_date.strftime('%d.%m.%Y')}", k))
+    kutular = Table([[alici, siparis]], colWidths=[W / 2 - 3, W / 2 - 3], spaceBefore=0)
+    kutular.setStyle(TableStyle([('BOX', (0, 0), (0, 0), 0.6, _Y_CIZGI_GRI), ('BOX', (1, 0), (1, 0), 0.6, _Y_CIZGI_GRI),
+                                 ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                                 ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 7)]))
+    el += [kutular, Spacer(1, 7)]
+
+    # ---- Sevk seridi ----
+    kg_toplam = sum((it.quantity or 0) for it in manual_irsaliye.items if (it.unit or '').lower() == 'kg')
+    koli = getattr(manual_irsaliye, 'koli_adedi', None)
+    hucre = lambda bas_, deger, kalin=False: [Paragraph(bas_, h), Paragraph(
+        f"<font name='{'Vera-Bold' if kalin else 'Vera'}'>{deger}</font>", n)]
+    serit = Table([[hucre('KARGO / TAŞIYICI', t(manual_irsaliye.carrier) or '-'),
+                    hucre('TAKİP NO', t(manual_irsaliye.tracking_number) or '-'),
+                    hucre('KOLİ', f"{koli} koli" if koli else '-', True),
+                    hucre('TOPLAM AĞIRLIK', f"{_miktar_tr(kg_toplam)} kg" if kg_toplam else '-', True)]],
+                  colWidths=[W / 4] * 4)
+    serit.setStyle(TableStyle([('BOX', (0, 0), (-1, -1), 0.6, _Y_CIZGI_GRI), ('LINEAFTER', (0, 0), (2, 0), 0.4, _Y_CIZGI_GRI),
+                               ('BACKGROUND', (0, 0), (-1, -1), _Y_TOPLAM_BG), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                               ('LEFTPADDING', (0, 0), (-1, -1), 7), ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
+    el += [serit, Spacer(1, 10)]
+
+    # ---- Kalemler ----
+    priced = show_prices and manual_irsaliye.is_priced
+    sagh = ParagraphStyle('irTh', parent=n, fontName='Vera-Bold', fontSize=7.8, textColor=_Y_SARI)
+    sagh_r = ParagraphStyle('irThR', parent=sagh, alignment=2)
+    bas_satir = [Paragraph('#', sagh), Paragraph('ÜRÜN', sagh), Paragraph('MİKTAR', sagh_r), Paragraph('BİRİM', sagh)]
+    if priced:
+        bas_satir += [Paragraph('BİRİM FİYAT', sagh_r), Paragraph('TUTAR', sagh_r)]
+    data = [bas_satir]
+    for i, it in enumerate(manual_irsaliye.items, 1):
+        row = [str(i), Paragraph(escape(_sanitize_pdf_free_text(it.description) or '-'), n),
+               Paragraph(_miktar_tr(it.quantity), sag), it.unit or '']
+        if priced:
+            row += [Paragraph(_tr_para2(it.unit_price), sag), Paragraph(_tr_para2((it.unit_price or 0) * (it.quantity or 0)), sag)]
+        data.append(row)
+    if len(data) == 1:
+        data.append(['', Paragraph('<i>Ürün kalemi yok.</i>', k), '', ''] + (['', ''] if priced else []))
+    cw = [0.8 * cm, W - 0.8 * cm - 2.4 * cm - 1.6 * cm - (5.6 * cm if priced else 0), 2.4 * cm, 1.6 * cm] + ([2.8 * cm, 2.8 * cm] if priced else [])
+    tab = Table(data, colWidths=cw, repeatRows=1)
+    tab.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), _Y_ANTRASIT), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                             ('FONTNAME', (0, 1), (-1, -1), 'Vera'), ('FONTSIZE', (0, 1), (-1, -1), 8.6),
+                             ('LINEBELOW', (0, 1), (-1, -1), 0.4, _Y_CIZGI_GRI),
+                             ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5)]))
+    el.append(tab)
+    if priced:
+        tt = Table([['Ara toplam', _tr_para2(manual_irsaliye.subtotal)],
+                    [f'KDV %{(manual_irsaliye.vat_rate or 0):g}', _tr_para2(manual_irsaliye.vat_amount)],
+                    ['GENEL TOPLAM', _tr_para2(manual_irsaliye.total)]], colWidths=[3.6 * cm, 3.6 * cm], hAlign='RIGHT')
+        tt.setStyle(TableStyle([('FONTNAME', (0, 0), (-1, -1), 'Vera'), ('FONTSIZE', (0, 0), (-1, -1), 8.8),
+                                ('FONTNAME', (0, 2), (-1, 2), 'Vera-Bold'), ('FONTSIZE', (0, 2), (-1, 2), 9.8),
+                                ('ALIGN', (1, 0), (1, -1), 'RIGHT'), ('LINEABOVE', (0, 2), (-1, 2), 1.4, _Y_ANTRASIT),
+                                ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+        el += [Spacer(1, 6), tt]
+
+    if manual_irsaliye.notes and manual_irsaliye.notes.strip():
+        notp = Table([[Paragraph(f"<font name='Vera-Bold'>Not:</font> {escape(_sanitize_pdf_free_text(manual_irsaliye.notes))}", n)]],
+                     colWidths=[W])
+        notp.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFF8DC')),
+                                  ('LINEBEFORE', (0, 0), (0, -1), 2.5, _Y_SARI), ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                                  ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
+        el += [Spacer(1, 9), notp]
+
+    imza = Table([[Paragraph("<font name='Vera-Bold'>Teslim Eden</font><br/>Ad Soyad / İmza", k), '',
+                   Paragraph("<font name='Vera-Bold'>Teslim Alan</font><br/>Ad Soyad / İmza / Kaşe", k)]],
+                 colWidths=[W * 0.42, W * 0.16, W * 0.42], rowHeights=[2.2 * cm])
+    imza.setStyle(TableStyle([('LINEABOVE', (0, 0), (0, 0), 0.8, colors.HexColor('#999999')),
+                              ('LINEABOVE', (2, 0), (2, 0), 0.8, colors.HexColor('#999999')),
+                              ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0)]))
+    el += [Spacer(1, 1.1 * cm), imza]
+
+    def _alt(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont('Vera', 7)
+        canvas.setFillColor(colors.HexColor('#999999'))
+        canvas.drawCentredString(PW / 2, 0.8 * cm, f"{company.company_name or 'Lema Ambalaj'} · {manual_irsaliye.display_no} · sayfa {_doc.page}")
+        canvas.restoreState()
+
+    doc.build(el, onFirstPage=_alt, onLaterPages=_alt)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_manual_irsaliye_pdf_klasik(manual_irsaliye, show_prices=False):
     """generate_irsaliye_pdf ile ayni gorsel format - ama Shipment/Production
     yerine dogrudan ManualIrsaliye+customer'dan besleniyor (teklif/uretim
     kaydi olmadan olusturulan bagimsiz irsaliyeler icin). Is 5: show_prices

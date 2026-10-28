@@ -5792,6 +5792,7 @@ def register_routes(app):
                     estimated_delivery_date=datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None,
                     carrier=request.form.get('carrier') or None,
                     tracking_number=request.form.get('tracking_number') or None,
+                    koli_adedi=_int_or_none(request.form.get('koli_adedi')),
                     notes=request.form.get('notes', ''),
                     user_id=current_user.id,
                     vat_rate=float(request.form.get('vat_rate', 20)),
@@ -5909,6 +5910,7 @@ def register_routes(app):
                 manual_irsaliye.estimated_delivery_date = datetime.strptime(request.form['estimated_delivery_date'], '%Y-%m-%d').date() if request.form.get('estimated_delivery_date') else None
                 manual_irsaliye.carrier = request.form.get('carrier') or None
                 manual_irsaliye.tracking_number = request.form.get('tracking_number') or None
+                manual_irsaliye.koli_adedi = _int_or_none(request.form.get('koli_adedi'))
                 manual_irsaliye.notes = request.form.get('notes', '')
                 manual_irsaliye.vat_rate = float(request.form.get('vat_rate', 20))
 

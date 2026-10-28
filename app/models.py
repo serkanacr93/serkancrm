@@ -985,6 +985,8 @@ class ManualIrsaliye(db.Model):
     invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=True)
     # 2026-10-27 (Veri akisi 2): siparisten doldurulduysa bagli siparis (FK DEGIL).
     deal_id = db.Column(db.Integer, nullable=True, index=True)
+    # 2026-10-28: koli adedi (irsaliye PDF'inde "Koli") - opsiyonel
+    koli_adedi = db.Column(db.Integer, nullable=True)
 
     customer = db.relationship('Customer', backref='manual_irsaliyeler')
     user = db.relationship('User')
