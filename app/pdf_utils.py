@@ -3408,6 +3408,18 @@ def _tr_para2(value):
     return ('-' if v < 0 else '') + s + ' TL'
 
 
+def _vd_metni(vergi_dairesi):
+    """'Selçuk' -> 'Selçuk V.D.'; zaten 'V.D.' / 'VD' / 'Vergi Dairesi' ile
+    bitiyorsa tekrar eklenmez ('Selçuk V.D. V.D.' olmasin)."""
+    s = (vergi_dairesi or '').strip()
+    if not s:
+        return ''
+    sade = re.sub(r'[\s.]', '', s).casefold()
+    if sade.endswith('vd') or sade.endswith('vergidairesi') or sade.endswith('vergidairesimüdürlüğü'):
+        return s
+    return s + ' V.D.'
+
+
 def generate_manual_irsaliye_pdf(manual_irsaliye, show_prices=False):
     """2026-10-28: YENI manuel irsaliye tasarimi (teklif/is emriyle ayni
     kurumsal dil - sari #FBC213 / antrasit #353639). Gonderen firma basligi
@@ -3441,7 +3453,7 @@ def generate_manual_irsaliye_pdf(manual_irsaliye, show_prices=False):
     firma_satir = [f"<font name='Vera-Bold' size='9.5'>{t(company.company_name or 'Lema Ambalaj')}</font>"]
     if company.address:
         firma_satir.append(t(company.address))
-    alt = ' · '.join(x for x in [f"{t(company.tax_office)} V.D." if company.tax_office else None,
+    alt = ' · '.join(x for x in [t(_vd_metni(company.tax_office)) if company.tax_office else None,
                                  t(company.tax_id) if company.tax_id else None, t(company.phone) if company.phone else None] if x)
     if alt:
         firma_satir.append(alt)
@@ -3483,7 +3495,7 @@ def generate_manual_irsaliye_pdf(manual_irsaliye, show_prices=False):
     adres = customer.company_address or customer.address
     if adres:
         alici.append(Paragraph(t(adres), n))
-    vd = ' · '.join(x for x in [f"{t(customer.tax_office)} V.D." if customer.tax_office else None, t(customer.tax_id) if customer.tax_id else None] if x)
+    vd = ' · '.join(x for x in [t(_vd_metni(customer.tax_office)) if customer.tax_office else None, t(customer.tax_id) if customer.tax_id else None] if x)
     alici.append(Paragraph(f"V.D. / VKN: {vd}" if vd else 'V.D. / VKN: -', k))
 
     siparis = [Paragraph('SİPARİŞ', h)]
