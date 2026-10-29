@@ -208,7 +208,11 @@
                 <i class="bi bi-person"></i> Müşteri Bilgileri
             </div>
             <div class="card-body">
-                <h6>{{ invoice.customer.display_name }}</h6>
+                {% if invoice.customer %}
+                <h6><a href="{{ url_for('customer_detail', id=invoice.customer.id) }}" class="text-decoration-none" title="Müşteri sayfasını aç">{{ invoice.customer.display_name }} <i class="bi bi-box-arrow-up-right small"></i></a></h6>
+                {% else %}
+                <h6>-</h6>
+                {% endif %}
                 {% if invoice.customer.tax_office or invoice.customer.tax_id %}
                 <small class="text-muted">
                     Vergi Dairesi: {{ invoice.customer.tax_office or '-' }}<br>
