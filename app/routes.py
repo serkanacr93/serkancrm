@@ -796,6 +796,15 @@ def _form_satir_indeksleri(form, alan='desc'):
     return sorted(idx)
 
 
+def _kdv_orani_oku(form, varsayilan):
+    """2026-10-29: formdan KDV orani (0-100). Gecersiz/bos ise varsayilan."""
+    try:
+        v = float(str(form.get('vat_rate', '')).replace(',', '.'))
+    except (TypeError, ValueError):
+        return varsayilan
+    return v if 0 <= v <= 100 else varsayilan
+
+
 def _int_or_none(raw):
     try:
         v = int(str(raw or '').strip())
@@ -6971,6 +6980,7 @@ def register_routes(app):
                 # invoice.items listesini guncellemiyordu - calculate_totals ESKI
                 # kalemleri topluyordu, kalem silinse de toplam degismiyordu.
                 db.session.expire(invoice, ['items'])
+                invoice.vat_rate = _kdv_orani_oku(request.form, invoice.vat_rate)  # 2026-10-29: KDV duzeltme
                 invoice.calculate_totals()
                 invoice.updated_by_user_id = current_user.id
                 invoice.updated_at = datetime.utcnow()

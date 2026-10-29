@@ -10,7 +10,7 @@
 
 <div class="alert alert-info">
     <i class="bi bi-info-circle"></i>
-    Müşteri: <strong>{{ invoice.customer.display_name }}</strong> — sadece kalemler düzenlenebilir, müşteri/teklif bağlantısı değiştirilemez.
+    Müşteri: <strong>{{ invoice.customer.display_name }}</strong> — sadece kalemler ve KDV oranı düzenlenebilir, müşteri/teklif bağlantısı değiştirilemez.
 </div>
 
 <form method="POST">
@@ -53,7 +53,11 @@
                             <td colspan="2"><strong id="subtotal">0,00 ₺</strong></td>
                         </tr>
                         <tr class="table-light">
-                            <td colspan="4" class="text-end"><strong>KDV (%{{ invoice.vat_rate }}):</strong></td>
+                            <td colspan="4" class="text-end"><strong>KDV</strong> <select name="vat_rate" id="kdv_sec" class="form-select form-select-sm d-inline-block w-auto ms-1 align-middle" title="KDV oranı">
+                                {%- set _kdv_ilk = invoice.vat_rate or 0 -%}
+                                {%- set _kdv_ops = [0, 1, 10, 20] if _kdv_ilk in [0, 1, 10, 20] else ([0, 1, 10, 20] + [_kdv_ilk])|sort -%}
+                                {%- for o in _kdv_ops %}<option value="{{ '%g' % o }}" {{ 'selected' if o == _kdv_ilk }}>%{{ '%g' % o }}</option>{% endfor -%}
+                                </select><div id="kdv_degisti" class="small text-danger fw-normal" style="display:none"></div></td>
                             <td colspan="2"><strong id="vat-amount">0,00 ₺</strong></td>
                         </tr>
                         <tr class="table-success">
@@ -81,7 +85,16 @@
 
 <script>
 let itemCount = {{ invoice.items|length }};
-let vatRate = {{ invoice.vat_rate }};
+let vatRate = {{ invoice.vat_rate or 0 }};
+// 2026-10-29: KDV orani faturada degistirilebilir
+var KDV_ILK = vatRate;
+document.getElementById('kdv_sec').addEventListener('change', function () {
+    vatRate = parseFloat(this.value) || 0;
+    var el = document.getElementById('kdv_degisti');
+    if (vatRate !== KDV_ILK) { el.textContent = 'KDV %' + KDV_ILK + ' → %' + vatRate + ' — kaydedince fatura toplamı ve cari bakiye değişir'; el.style.display = 'block'; }
+    else { el.style.display = 'none'; }
+    calculateTotals();
+});
 
 function fmt(n) { return n.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺'; }
 
