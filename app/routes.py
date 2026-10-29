@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, IrsaliyeDegisiklikLog, format_price_tr, TR_AYLAR, HATIRLATMA_KAPALI
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, is_emri_kalemleri, generate_siparis_dosyasi_pdf, generate_toplu_is_emri_pdf, generate_is_emri_kontrol_listesi_pdf, TOPLU_PARCA, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_cari_ekstre_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, is_emri_kalemleri, generate_siparis_dosyasi_pdf, generate_toplu_is_emri_pdf, generate_is_emri_kontrol_listesi_pdf, TOPLU_PARCA, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, siparisler, limiter, csrf
 from app.tcmb import fetch_tcmb_rate
@@ -2986,12 +2986,21 @@ def register_routes(app):
                 candidates = Customer.query.filter(Customer.phone.isnot(None), Customer.id != customer.id).all()
                 duplicate_siblings = [c for c in candidates if _normalize_phone_for_whatsapp(c.phone) == norm_phone]
 
+        # 2026-10-29: musteri sayfasinda "Faturalar" sekmesi - bu musterinin
+        # TUM faturalari/irsaliyeleri (SADECE OKUR). Cari Hesap'taki
+        # 'Faturalanmis' rakami buradaki fatura tipindekilerin toplamidir.
+        musteri_faturalari = Invoice.query.filter_by(customer_id=customer.id).options(
+            joinedload(Invoice.payments), joinedload(Invoice.deal)
+        ).order_by(Invoice.date.desc(), Invoice.id.desc()).all()
+        fatura_toplami = sum(float(i.total or 0) for i in musteri_faturalari if i.type == 'fatura')
+
         return render_template('customer_detail.html', customer=customer, deals=deals,
                              statements=statements, total_debit=total_debit, total_credit=total_credit,
                              balance_info=balance_info,
                              daily_reports=daily_reports, pending_productions=pending_productions,
                              last_contact_date=last_contact_date, days_since_contact=days_since_contact,
-                             duplicate_siblings=duplicate_siblings)
+                             duplicate_siblings=duplicate_siblings,
+                             musteri_faturalari=musteri_faturalari, fatura_toplami=fatura_toplami)
 
     @app.route('/customers/<int:id>/import-statement-pdf', methods=['POST'])
     @login_required
@@ -3062,10 +3071,27 @@ def register_routes(app):
     def edit_customer(id):
         customer = Customer.query.get_or_404(id)
         if request.method == 'POST':
+            # 2026-10-28: SADECE formda gelen alanlar yazilir; bos birakilan alan
+            # gercekten silinir (eskiden eski deger kaliyordu). Ad/soyad bos
+            # gelirse eski deger korunur. E-posta istege bagli: bos ya da "None"
+            # -> NULL; baska musteride kayitliysa 500 yerine uyari.
+            eposta = (request.form.get('email') or '').strip()
+            if eposta.lower() == 'none':
+                eposta = ''
+            if 'email' in request.form and eposta:
+                cakisan = Customer.query.filter(db.func.lower(Customer.email) == eposta.lower(), Customer.id != customer.id).first()
+                if cakisan:
+                    flash(f'Bu e-posta "{cakisan.display_name}" müşterisinde kayıtlı — değişiklikler kaydedilmedi.', 'danger')
+                    return render_template('edit_customer.html', customer=customer)
             for field in ['first_name', 'last_name', 'email', 'phone', 'company_name', 'tax_office', 'tax_id',
                          'trade_registry', 'company_phone', 'company_address', 'company_email', 'company_website',
                          'contact_person', 'contact_title', 'contact_phone', 'contact_email', 'address', 'notes', 'status']:
-                setattr(customer, field, request.form.get(field) or getattr(customer, field))
+                if field not in request.form:
+                    continue
+                deger = eposta if field == 'email' else (request.form.get(field) or '').strip()
+                if field in ('first_name', 'last_name', 'status') and not deger:
+                    continue
+                setattr(customer, field, deger or None)
             siparis_dongusu = request.form.get('siparis_dongusu_gun')
             if siparis_dongusu:
                 customer.siparis_dongusu_gun = int(siparis_dongusu)
@@ -3148,11 +3174,60 @@ def register_routes(app):
     @login_required
     def customer_statement_pdf(id):
         customer = Customer.query.get_or_404(id)
-        statements = CustomerStatement.query.filter_by(customer_id=id).order_by(CustomerStatement.created_at.desc()).all()
-        total_debit = sum(s.amount for s in statements if s.type == 'borc')
-        total_credit = sum(s.amount for s in statements if s.type == 'alacak')
-        pdf = generate_statement_pdf(customer, statements, total_debit, total_credit)
-        return send_file(pdf, as_attachment=True, download_name=f'ekstre_{customer.last_name}_{datetime.now().strftime("%Y%m%d")}.pdf')
+        if request.args.get('klasik') == '1':
+            # Eski ekstre (sadece CustomerStatement tablosu) - yedek olarak duruyor.
+            statements = CustomerStatement.query.filter_by(customer_id=id).order_by(CustomerStatement.created_at.desc()).all()
+            total_debit = sum(s.amount for s in statements if s.type == 'borc')
+            total_credit = sum(s.amount for s in statements if s.type == 'alacak')
+            pdf = generate_statement_pdf(customer, statements, total_debit, total_credit)
+            return send_file(pdf, as_attachment=True, download_name=f'ekstre_{customer.last_name}_{datetime.now().strftime("%Y%m%d")}.pdf')
+
+        # 2026-10-28: YENI cari ekstre - bakiye musteri detayindaki Cari Hesap
+        # ile ayni kaynaktan (faturalar + faturasiz siparisler - tahsilatlar).
+        # Secimler (customer_detail'deki pencereden): donem, sistem/eski
+        # kayitlar, devir, kalem detayi, imza alani. Parametresiz eski link:
+        # tum donem, sistem + eski kayitlar.
+        from app.cari_ekstre import ekstre_olustur
+        a = request.args
+        secimli = a.get('secim') == '1'
+        acik = lambda ad, vars_: (a.get(ad) == '1') if secimli else vars_
+        bugun = date.today()
+        donem = a.get('donem', 'tumu')
+        bas = bit = None
+        if donem == 'yil':
+            bas = date(bugun.year, 1, 1)
+        elif donem == '3ay':
+            y, m = bugun.year, bugun.month - 2
+            if m <= 0:
+                y, m = y - 1, m + 12
+            bas = date(y, m, 1)
+        elif donem == 'ay':
+            bas = date(bugun.year, bugun.month, 1)
+        elif donem == 'ozel':
+            try:
+                bas = datetime.strptime(a.get('bas', ''), '%Y-%m-%d').date() if a.get('bas') else None
+                bit = datetime.strptime(a.get('bit', ''), '%Y-%m-%d').date() if a.get('bit') else None
+            except ValueError:
+                flash('Tarih aralığı okunamadı.', 'danger')
+                return redirect(url_for('customer_detail', id=id))
+            if bas and bit and bas > bit:
+                bas, bit = bit, bas
+        sistem, eski = acik('sistem', True), acik('eski', True)
+        if not sistem and not eski:
+            flash('Ekstre için en az bir kayıt türü seçin (sistem hareketleri / eski cari kayıtlar).', 'warning')
+            return redirect(url_for('customer_detail', id=id))
+        ekstre = ekstre_olustur(customer, bas=bas, bit=bit, sistem=sistem, eski=eski, devir=acik('devir', True))
+        if bas or bit:
+            donem_metni = f"{bas.strftime('%d.%m.%Y') if bas else 'Başlangıç'} – {(bit or bugun).strftime('%d.%m.%Y')}"
+        else:
+            donem_metni = 'Tüm hareketler'
+        if not sistem:
+            donem_metni += ' · sadece eski cari kayıtlar'
+        elif not eski:
+            donem_metni += ' · sadece sistem hareketleri'
+        pdf = generate_cari_ekstre_pdf(customer, ekstre, detay=acik('detay', False), imza=acik('imza', False), donem_metni=donem_metni)
+        ad = re.sub(r'[^A-Za-z0-9]+', '_', unicodedata.normalize('NFKD', customer.display_name or 'musteri').encode('ascii', 'ignore').decode()).strip('_')[:40]
+        return send_file(pdf, as_attachment=True, download_name=f'cari_ekstre_{ad}_{bugun.strftime("%Y%m%d")}.pdf')
 
     @app.route('/customers/export/excel')
     @login_required
@@ -6719,9 +6794,44 @@ def register_routes(app):
                     'balance': running_balance
                 })
 
+        # 2026-10-28 (Fatura detay sol taraf yeni duzen): kalem satirlari TR
+        # bicimde + siparis kalemi bilgisi + ayni urunun iki satirda olmasi uyarisi.
+        # Sadece gorunum; veri degismez.
+        _sym = invoice.para_birimi_sembol or '₺'
+        def _p2(v):
+            v = float(v or 0)
+            return ('-' if v < 0 else '') + f'{abs(v):,.2f}'.replace(',', '§').replace('.', ',').replace('§', '.') + ' ' + _sym
+        _dk = sorted(invoice.deal.items, key=lambda x: x.id) if invoice.deal else []
+        _sira = {d.id: n for n, d in enumerate(_dk, 1)}
+        _bagli_var = any(it.deal_item_id for it in invoice.items)
+        try:
+            from app.kalem_belge import kalem_belge_ozeti
+            _oz = kalem_belge_ozeti(_dk) if (_dk and _bagli_var) else {}
+        except Exception:
+            _oz = {}
+        kalem_satirlari = []
+        for it in invoice.items:
+            di = next((d for d in _dk if d.id == it.deal_item_id), None) if it.deal_item_id else None
+            if di is not None:
+                bilgi = (f"sipariş kalemi {_sira[di.id]} · faturalanan "
+                         f"{_miktar_tr_basit((_oz.get(di.id) or {}).get('fatura', 0))} / {_miktar_tr_basit(di.quantity)} {di.unit}")
+            elif _bagli_var:
+                bilgi = 'ek kalem (siparişte yok)'
+            else:
+                bilgi = None
+            kalem_satirlari.append({'aciklama': it.description, 'bilgi': bilgi,
+                                    'miktar': f"{_miktar_tr_basit(it.quantity)} {it.unit or ''}".strip(),
+                                    'fiyat': _p2(it.unit_price), 'tutar': _p2(it.total_price), 'deal_item_id': it.deal_item_id})
+        _gruplar = {}
+        for k in kalem_satirlari:
+            _gruplar.setdefault(((k['aciklama'] or '').strip().casefold(), k['miktar']), []).append(k)
+        kalem_tekrar = [g[0] for g in _gruplar.values() if len(g) > 1 and not (
+            all(x['deal_item_id'] for x in g) and len({x['deal_item_id'] for x in g}) == len(g))]
+        kalem_toplam = {'ara': _p2(invoice.subtotal), 'kdv': _p2(invoice.vat_amount), 'genel': _p2(invoice.total)}
         return render_template('invoice_detail.html', invoice=invoice, ledger_rows=ledger_rows,
                                 bagli_irsaliye=bagli_irsaliye, fark_var_mi=fark_var_mi,
                                 siparis_odemeleri=siparis_odemeleri,
+                                kalem_satirlari=kalem_satirlari, kalem_tekrar=kalem_tekrar, kalem_toplam=kalem_toplam,
                                 silme_engeli=_fatura_silme_engeli(invoice) if current_user.is_admin else None)
 
     def _fatura_silme_engeli(invoice):

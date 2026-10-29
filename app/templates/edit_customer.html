@@ -22,8 +22,9 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label for="email" class="form-label">E-posta *</label>
-                        <input type="email" class="form-control" id="email" name="email" value="{{ customer.email }}" required>
+                        {# 2026-10-28: e-posta istege bagli; bos/"None" ise kutu bos gelir #}
+                        <label for="email" class="form-label">E-posta</label>
+                        <input type="email" class="form-control" id="email" name="email" value="{{ customer.email if (customer.email and customer.email|lower != 'none') else '' }}" placeholder="İsteğe bağlı">
                     </div>
                     <div class="row">
                         <div class="col-md-4 mb-3">
@@ -37,6 +38,17 @@
                         <div class="col-md-4 mb-3">
                             <label for="tax_id" class="form-label">Vergi No</label>
                             <input type="text" class="form-control" id="tax_id" name="tax_id" value="{{ customer.tax_id or '' }}">
+                        </div>
+                    </div>
+                    {# 2026-10-28: irsaliye / ekstre PDF'lerinde cikan firma bilgileri #}
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="tax_office" class="form-label">Vergi Dairesi</label>
+                            <input type="text" class="form-control" id="tax_office" name="tax_office" value="{{ customer.tax_office or '' }}" placeholder="Örn: Selçuk">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="company_address" class="form-label">Firma Adresi <span class="small text-muted">(fatura / irsaliye)</span></label>
+                            <textarea class="form-control" id="company_address" name="company_address" rows="1">{{ customer.company_address or '' }}</textarea>
                         </div>
                     </div>
                     <div class="row">

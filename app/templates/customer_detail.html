@@ -27,9 +27,10 @@
     </div>
     {% endif %}
     <div>
-        <a href="{{ url_for('customer_statement_pdf', id=customer.id) }}" class="btn btn-info" target="_blank">
+        {# 2026-10-28: ekstre once secim penceresi acar (donem, eski kayitlar, detay) #}
+        <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#ekstreModal">
             <i class="bi bi-file-pdf"></i> Ekstre PDF
-        </a>
+        </button>
         <a href="{{ url_for('add_payment') }}?customer_id={{ customer.id }}" class="btn btn-success">
             <i class="bi bi-cash"></i> Ödeme Ekle
         </a>
@@ -62,6 +63,7 @@
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1">Faturalanmış</h6>
                         <h5>{{ balance_info.invoiced|para_goster }}</h5>
+                        {% if musteri_faturalari %}<a href="#faturalar" class="small fatura-sekme-ac"><i class="bi bi-receipt"></i> Faturaları gör ({{ musteri_faturalari|selectattr('type','equalto','fatura')|list|length }})</a>{% endif %}
                     </div>
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1" title="Kazanılmış ama henüz fatura kesilmemiş tekliflerin toplam değeri">
@@ -187,6 +189,11 @@
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#faturalar" id="faturalar-sekme">
+                    <i class="bi bi-receipt"></i> Faturalar ({{ musteri_faturalari|length }})
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link" data-bs-toggle="tab" href="#statements">
                     <i class="bi bi-cash-stack"></i> Ekstre ({{ statements|length }})
                 </a>
@@ -285,6 +292,66 @@
                 </div>
             </div>
 
+            <div class="tab-pane fade" id="faturalar">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        {% if musteri_faturalari %}
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>No</th>
+                                        <th>Tarih</th>
+                                        <th>Sipariş</th>
+                                        <th class="text-end">Tutar</th>
+                                        <th class="text-end">Ödenen</th>
+                                        <th class="text-end">Kalan</th>
+                                        <th>Durum</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for inv in musteri_faturalari %}
+                                    <tr>
+                                        <td><a href="{{ url_for('invoice_detail', id=inv.id) }}" class="fw-bold">{{ inv.display_no }}</a>
+                                            {% if inv.type != 'fatura' %}<span class="badge bg-secondary">İrsaliye</span>{% endif %}</td>
+                                        <td>{{ inv.date.strftime('%d.%m.%Y') if inv.date else '-' }}</td>
+                                        <td>{% if inv.deal %}<a href="{{ url_for('deal_detail', id=inv.deal.id) }}">{{ inv.deal.display_no }}</a>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+                                        <td class="text-end"><strong>{{ inv.total|para_goster }}</strong></td>
+                                        {% if inv.type == 'fatura' %}
+                                        <td class="text-end text-success">{{ inv.paid_amount|para_goster }}</td>
+                                        <td class="text-end {{ 'text-danger' if inv.remaining_amount > 0.01 else '' }}">{{ inv.remaining_amount|para_goster }}</td>
+                                        <td>
+                                            {% set ps = inv.payment_status %}
+                                            <span class="badge bg-{{ 'success' if ps == 'odendi' else 'warning text-dark' if ps == 'kismi_odendi' else 'danger' }}">
+                                                {{ 'Ödendi' if ps == 'odendi' else 'Kısmi' if ps == 'kismi_odendi' else 'Ödenmedi' }}
+                                            </span>
+                                        </td>
+                                        {% else %}
+                                        <td class="text-end text-muted">-</td><td class="text-end text-muted">-</td><td class="text-muted small">cariye yazılmaz</td>
+                                        {% endif %}
+                                        <td class="text-end text-nowrap">
+                                            <a href="{{ url_for('invoice_detail', id=inv.id) }}" class="btn btn-sm btn-outline-primary" title="Aç"><i class="bi bi-eye"></i></a>
+                                            <a href="{{ url_for('invoice_pdf', id=inv.id) }}" target="_blank" class="btn btn-sm btn-outline-secondary" title="PDF"><i class="bi bi-file-pdf"></i></a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot>
+                                    <tr class="table-light">
+                                        <td colspan="3" class="text-end"><strong>Fatura toplamı</strong></td>
+                                        <td class="text-end"><strong>{{ fatura_toplami|para_goster }}</strong></td>
+                                        <td colspan="4" class="small text-muted">= Cari Hesap'taki "Faturalanmış"</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-4">Bu müşteriye henüz fatura kesilmemiş.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
             <div class="tab-pane fade" id="statements">
                 <div class="card shadow-sm">
                     <div class="card-body">
@@ -454,5 +521,70 @@
 <script>
 // Is 6: "son acilanlar" - arama siralamasinda kullanilir (CRM_SEARCH.trackRecent).
 if (window.CRM_SEARCH) { CRM_SEARCH.trackRecent({{ customer.id }}); }
+</script>
+{# 2026-10-28: Ekstre secim penceresi #}
+<div class="modal fade" id="ekstreModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="GET" action="{{ url_for('customer_statement_pdf', id=customer.id) }}" target="_blank" id="ekstreForm">
+            <input type="hidden" name="secim" value="1">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Ekstre Al — {{ customer.display_name }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="small fw-bold text-muted mb-1">DÖNEM</div>
+                    <div class="btn-group btn-group-sm flex-wrap mb-2" role="group">
+                        {% for v, ad in [('tumu', 'Tümü'), ('yil', 'Bu yıl'), ('3ay', 'Son 3 ay'), ('ay', 'Bu ay'), ('ozel', 'Özel')] %}
+                        <input type="radio" class="btn-check" name="donem" id="ed_{{ v }}" value="{{ v }}" {{ 'checked' if v == 'tumu' }}>
+                        <label class="btn btn-outline-dark" for="ed_{{ v }}">{{ ad }}</label>
+                        {% endfor %}
+                    </div>
+                    <div class="row g-2 mb-3 d-none" id="ekstreOzel">
+                        <div class="col-6"><label class="form-label small mb-0">Başlangıç</label><input type="date" class="form-control form-control-sm" name="bas"></div>
+                        <div class="col-6"><label class="form-label small mb-0">Bitiş</label><input type="date" class="form-control form-control-sm" name="bit"></div>
+                    </div>
+                    <div class="small fw-bold text-muted mb-1">NE GÖRÜNSÜN</div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" name="sistem" value="1" id="es_sistem" checked>
+                        <label class="form-check-label" for="es_sistem"><strong>Sistem hareketleri</strong> <span class="small text-muted">— faturalar, faturası kesilmemiş siparişler, tahsilatlar</span></label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" name="eski" value="1" id="es_eski" checked>
+                        <label class="form-check-label" for="es_eski"><strong>Eski cari kayıtlar</strong> <span class="small text-muted">— muhasebeden aktarılan PDF; sadece sistem öncesi tarihler (aynı hareket iki kez yazılmaz)</span></label></div>
+                    <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="devir" value="1" id="es_devir" checked>
+                        <label class="form-check-label" for="es_devir"><strong>Dönem öncesi devir bakiyesi</strong> <span class="small text-muted">— seçilen tarihten öncesi tek satır</span></label></div>
+                    <div class="small fw-bold text-muted mb-1">DETAY</div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" name="detay" value="1" id="es_detay">
+                        <label class="form-check-label" for="es_detay"><strong>Fatura kalemlerini göster</strong> <span class="small text-muted">— ürün · miktar · birim fiyat</span></label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" name="imza" value="1" id="es_imza">
+                        <label class="form-check-label" for="es_imza"><strong>Mutabakat imza alanı</strong></label></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-info"><i class="bi bi-download"></i> Ekstre PDF</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+document.querySelectorAll('#ekstreForm input[name="donem"]').forEach(function (r) {
+    r.addEventListener('change', function () { document.getElementById('ekstreOzel').classList.toggle('d-none', this.value !== 'ozel'); });
+});
+document.getElementById('ekstreForm').addEventListener('submit', function (e) {
+    if (!document.getElementById('es_sistem').checked && !document.getElementById('es_eski').checked) {
+        e.preventDefault(); alert('En az bir kayıt türü seçin.');
+    }
+});
+// 2026-10-29: Cari Hesap'taki "Faturaları gör" -> Faturalar sekmesini ac.
+// (Bu blok bootstrap.js'den ONCE yukleniyor - bootstrap tiklama aninda aranir.)
+(function () {
+    var sekme = document.getElementById('faturalar-sekme');
+    if (!sekme) return;
+    function ac() {
+        if (!window.bootstrap) return;
+        bootstrap.Tab.getOrCreateInstance(sekme).show();
+        sekme.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+    document.querySelectorAll('.fatura-sekme-ac').forEach(function (a) {
+        a.addEventListener('click', function (e) { e.preventDefault(); ac(); });
+    });
+    if (location.hash === '#faturalar') window.addEventListener('load', ac);
+})();
 </script>
 {% endblock %}

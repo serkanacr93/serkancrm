@@ -1732,7 +1732,199 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
     return buffer
 
 
+def _kurumsal_belge_pdf(baslik, belge_no, tarih, saat, customer, deal, serit, kalemler, priced,
+                        toplamlar=None, notlar=None, ek_kutu=None, imza=('Teslim Eden', 'Teslim Alan'),
+                        alt_not=None, pdf_title=None):
+    """2026-10-29: fatura / siparis irsaliyesi / sevkiyat irsaliyesi icin ORTAK
+    yeni tasarim (manuel irsaliyeyle ayni kurumsal dil). kalemler:
+    [{'aciklama','miktar','birim','fiyat','tutar'}]; serit: [(baslik, deger, kalin)];
+    toplamlar: (ara, kdv_orani, kdv, genel); ek_kutu: [(sol, sag)] satirlari
+    (orn. odeme durumu); imza: None ise imza alani yok. Veritabanina YAZMAZ."""
+    from xml.sax.saxutils import escape
+    from app.models import Production
+    company = _get_company_settings_for_pdf()
+    buffer = BytesIO()
+    PW, PH = A4
+    M = 1.4 * cm
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=M, leftMargin=M, topMargin=1.2 * cm, bottomMargin=1.4 * cm,
+                            title=pdf_title or f'{baslik} {belge_no}')
+    W = PW - 2 * M
+    st = getSampleStyleSheet()
+    n = ParagraphStyle('kbN', parent=st['Normal'], fontName='Vera', fontSize=8.6, leading=11.5)
+    k = ParagraphStyle('kbK', parent=n, fontSize=7.6, leading=10, textColor=_Y_IKINCIL)
+    h = ParagraphStyle('kbH', parent=n, fontName='Vera-Bold', fontSize=6.8, leading=9, textColor=colors.HexColor('#8A8A8A'))
+    sag = ParagraphStyle('kbSag', parent=n, alignment=2)
+    t = lambda s: escape(_clean_for_pdf(s) if s else '')
+
+    logo = _ie_logo_reader(company)
+    logo_buf = _logo_for_pdf_yeni(company.logo_data) if (logo and company.logo_data) else None
+    firma_satir = [f"<font name='Vera-Bold' size='9.5'>{t(company.company_name or 'Lema Ambalaj')}</font>"]
+    if company.address:
+        firma_satir.append(t(company.address))
+    alt = ' · '.join(x for x in [t(_vd_metni(company.tax_office)) if company.tax_office else None,
+                                 t(company.tax_id) if company.tax_id else None, t(company.phone) if company.phone else None] if x)
+    if alt:
+        firma_satir.append(alt)
+    firma_p = Paragraph('<br/>'.join(firma_satir), ParagraphStyle('kbF', parent=k, textColor=colors.HexColor('#333333'), leading=10.5))
+    if logo and logo_buf:
+        iw, ih = logo.getSize()
+        lh = 1.45 * cm
+        lw = min(lh * iw / ih if ih else lh, 3.6 * cm)
+        logo_buf.seek(0)
+        sol = Table([[Image(logo_buf, width=lw, height=lw * ih / iw if iw else lh), firma_p]], colWidths=[lw + 0.3 * cm, W * 0.6 - lw - 0.3 * cm])
+        sol.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (-1, -1), 0)]))
+    else:
+        sol = firma_p
+    baslik_satirlari = baslik.split('\n')
+    sag_p = [Paragraph('<br/>'.join(f"<font name='Vera-Bold' size='{15 if len(baslik_satirlari) == 1 else 12.5}' color='#353639'>{escape(b)}</font>" for b in baslik_satirlari),
+                       ParagraphStyle('kbB', parent=sag, leading=19 if len(baslik_satirlari) == 1 else 15.5)), Spacer(1, 4),
+             Table([[belge_no]], style=TableStyle([
+                 ('BACKGROUND', (0, 0), (-1, -1), _Y_ANTRASIT), ('TEXTCOLOR', (0, 0), (-1, -1), _Y_SARI),
+                 ('FONTNAME', (0, 0), (-1, -1), 'Vera-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 9.5),
+                 ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]), hAlign='RIGHT'),
+             Spacer(1, 3),
+             Paragraph(f"Tarih: {tarih.strftime('%d.%m.%Y') if tarih else '-'}" + (f" · Saat: {saat}" if saat else ''), ParagraphStyle('kbT', parent=k, alignment=2))]
+    bas = Table([[sol, sag_p]], colWidths=[W * 0.6, W * 0.4])
+    bas.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                             ('RIGHTPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                             ('LINEBELOW', (0, 0), (-1, 0), 2.5, _Y_SARI)]))
+    el = [bas, Spacer(1, 9)]
+
+    musteri_ad = (customer.company_name or f"{customer.first_name or ''} {customer.last_name or ''}").strip() if customer else '-'
+    kisi = f"{customer.first_name or ''} {customer.last_name or ''}".strip() if customer else ''
+    tel = (customer.company_phone or customer.phone) if customer else None
+    alici = [Paragraph('ALICI', h), Paragraph(f"<font name='Vera-Bold' size='9.5'>{t(musteri_ad) or '-'}</font>", n)]
+    ikinci = ' · '.join(x for x in [t(kisi) if (kisi and customer and customer.company_name) else None, t(tel) if tel else None] if x)
+    if ikinci:
+        alici.append(Paragraph(ikinci, n))
+    adres = (customer.company_address or customer.address) if customer else None
+    if adres:
+        alici.append(Paragraph(t(adres), n))
+    vd = ' · '.join(x for x in [t(_vd_metni(customer.tax_office)) if (customer and customer.tax_office) else None,
+                                t(customer.tax_id) if (customer and customer.tax_id) else None] if x)
+    alici.append(Paragraph(f"V.D. / VKN: {vd or '-'}", k))
+    siparis = [Paragraph('SİPARİŞ', h)]
+    if deal is not None:
+        sip_tarih = deal.deal_date or (deal.created_at.date() if deal.created_at else None)
+        siparis.append(Paragraph(f"<font name='Vera-Bold' size='9.5'>{deal.display_no}</font>" +
+                                 (f" · sipariş tarihi {sip_tarih.strftime('%d.%m.%Y')}" if sip_tarih else ''), n))
+        prod = Production.query.filter_by(deal_id=deal.id).first()
+        if prod:
+            siparis.append(Paragraph(f"İş emri: IE-{prod.id:05d}", n))
+    else:
+        siparis.append(Paragraph('Siparişe bağlı değil', n))
+    kutular = Table([[alici, siparis]], colWidths=[W / 2 - 3, W / 2 - 3])
+    kutular.setStyle(TableStyle([('BOX', (0, 0), (0, 0), 0.6, _Y_CIZGI_GRI), ('BOX', (1, 0), (1, 0), 0.6, _Y_CIZGI_GRI),
+                                 ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                                 ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 7)]))
+    el += [kutular, Spacer(1, 7)]
+
+    if serit:
+        hucre = lambda b_, d_, kal: [Paragraph(b_, h), Paragraph(f"<font name='{'Vera-Bold' if kal else 'Vera'}'>{d_}</font>", n)]
+        sr = Table([[hucre(b_, d_, kal) for b_, d_, kal in serit]], colWidths=[W / len(serit)] * len(serit))
+        sr.setStyle(TableStyle([('BOX', (0, 0), (-1, -1), 0.6, _Y_CIZGI_GRI), ('LINEAFTER', (0, 0), (-2, 0), 0.4, _Y_CIZGI_GRI),
+                                ('BACKGROUND', (0, 0), (-1, -1), _Y_TOPLAM_BG), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                                ('LEFTPADDING', (0, 0), (-1, -1), 7), ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
+        el += [sr, Spacer(1, 10)]
+
+    thh = ParagraphStyle('kbTh', parent=n, fontName='Vera-Bold', fontSize=7.8, textColor=_Y_SARI)
+    thr = ParagraphStyle('kbThR', parent=thh, alignment=2)
+    satir = [Paragraph('#', thh), Paragraph('ÜRÜN', thh), Paragraph('MİKTAR', thr), Paragraph('BİRİM', thh)]
+    if priced:
+        satir += [Paragraph('BİRİM FİYAT', thr), Paragraph('TUTAR', thr)]
+    data = [satir]
+    for i, kl in enumerate(kalemler, 1):
+        row = [str(i), Paragraph(escape(_sanitize_pdf_free_text(kl['aciklama']) or '-'), n),
+               Paragraph(_miktar_tr(kl['miktar']), sag), kl.get('birim') or '']
+        if priced:
+            row += [Paragraph(_tr_para2(kl.get('fiyat')), sag), Paragraph(_tr_para2(kl.get('tutar')), sag)]
+        data.append(row)
+    if len(data) == 1:
+        data.append(['', Paragraph('<i>Kalem yok.</i>', k), '', ''] + (['', ''] if priced else []))
+    cw = [0.8 * cm, W - 0.8 * cm - 2.4 * cm - 1.6 * cm - (5.6 * cm if priced else 0), 2.4 * cm, 1.6 * cm] + ([2.8 * cm, 2.8 * cm] if priced else [])
+    tab = Table(data, colWidths=cw, repeatRows=1)
+    tab.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), _Y_ANTRASIT), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                             ('FONTNAME', (0, 1), (-1, -1), 'Vera'), ('FONTSIZE', (0, 1), (-1, -1), 8.6),
+                             ('LINEBELOW', (0, 1), (-1, -1), 0.4, _Y_CIZGI_GRI),
+                             ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5)]))
+    el.append(tab)
+    if priced and toplamlar:
+        ara, oran, kdv, genel = toplamlar
+        tt = Table([['Ara toplam', _tr_para2(ara)], [f'KDV %{(oran or 0):g}', _tr_para2(kdv)], ['GENEL TOPLAM', _tr_para2(genel)]],
+                   colWidths=[3.6 * cm, 3.6 * cm], hAlign='RIGHT')
+        tt.setStyle(TableStyle([('FONTNAME', (0, 0), (-1, -1), 'Vera'), ('FONTSIZE', (0, 0), (-1, -1), 8.8),
+                                ('FONTNAME', (0, 2), (-1, 2), 'Vera-Bold'), ('FONTSIZE', (0, 2), (-1, 2), 9.8),
+                                ('ALIGN', (1, 0), (1, -1), 'RIGHT'), ('LINEABOVE', (0, 2), (-1, 2), 1.4, _Y_ANTRASIT),
+                                ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+        el += [Spacer(1, 6), tt]
+    if ek_kutu:
+        ek = Table([[Paragraph(f"<font name='Vera-Bold'>{escape(a)}</font>", n), Paragraph(escape(b), sag)] for a, b in ek_kutu],
+                   colWidths=[W * 0.28, W * 0.72])
+        ek.setStyle(TableStyle([('BOX', (0, 0), (-1, -1), 0.6, _Y_CIZGI_GRI), ('BACKGROUND', (0, 0), (-1, -1), _Y_TOPLAM_BG),
+                                ('LEFTPADDING', (0, 0), (-1, -1), 8), ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                                ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4)]))
+        el += [Spacer(1, 9), ek]
+    if notlar and notlar.strip():
+        notp = Table([[Paragraph(f"<font name='Vera-Bold'>Not:</font> {escape(_sanitize_pdf_free_text(notlar))}", n)]], colWidths=[W])
+        notp.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFF8DC')),
+                                  ('LINEBEFORE', (0, 0), (0, -1), 2.5, _Y_SARI), ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                                  ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
+        el += [Spacer(1, 9), notp]
+    if imza:
+        im = Table([[Paragraph(f"<font name='Vera-Bold'>{imza[0]}</font><br/>Ad Soyad / İmza", k), '',
+                     Paragraph(f"<font name='Vera-Bold'>{imza[1]}</font><br/>Ad Soyad / İmza / Kaşe", k)]],
+                   colWidths=[W * 0.42, W * 0.16, W * 0.42], rowHeights=[2.2 * cm])
+        im.setStyle(TableStyle([('LINEABOVE', (0, 0), (0, 0), 0.8, colors.HexColor('#999999')),
+                                ('LINEABOVE', (2, 0), (2, 0), 0.8, colors.HexColor('#999999')),
+                                ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0)]))
+        el += [Spacer(1, 1.1 * cm), im]
+    if alt_not:
+        el += [Spacer(1, 8), Paragraph(escape(alt_not), k)]
+
+    def _alt(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont('Vera', 7)
+        canvas.setFillColor(colors.HexColor('#999999'))
+        canvas.drawCentredString(PW / 2, 0.8 * cm, f"{company.company_name or 'Lema Ambalaj'} · {belge_no} · sayfa {_doc.page}")
+        canvas.restoreState()
+
+    doc.build(el, onFirstPage=_alt, onLaterPages=_alt)
+    buffer.seek(0)
+    return buffer
+
+
 def generate_invoice_pdf(invoice):
+    """2026-10-29: YENI tasarim (_kurumsal_belge_pdf). Fatura -> 'FATURA /
+    TAHSILAT TAKIP BELGESI' (resmi fatura degil - eski baslik korunur) +
+    odeme durumu kutusu + banka/IBAN; irsaliye tipi -> 'SEVK IRSALIYESI'.
+    Eski tasarim generate_invoice_pdf_klasik olarak duruyor."""
+    from datetime import timedelta
+    is_fatura = invoice.type == 'fatura'
+    company = _get_company_settings_for_pdf()
+    kalemler = [{'aciklama': it.description, 'miktar': it.quantity, 'birim': it.unit,
+                 'fiyat': it.unit_price, 'tutar': it.total_price} for it in invoice.items]
+    priced = is_fatura or any((it.unit_price or 0) > 0 for it in invoice.items)
+    kg = sum((it.quantity or 0) for it in invoice.items if (it.unit or '').lower() == 'kg')
+    ek = None
+    if is_fatura:
+        durum = {'odendi': 'Ödendi', 'kismi_odendi': 'Kısmi ödendi'}.get(invoice.payment_status, 'Ödenmedi')
+        serit = [('ÖDEME DURUMU', durum, True), ('ÖDENEN', _tr_para2(invoice.paid_amount), False),
+                 ('KALAN', _tr_para2(invoice.remaining_amount), True),
+                 ('TOPLAM AĞIRLIK', f"{_miktar_tr(kg)} kg" if kg else '-', False)]
+        if company.iban:
+            ek = [('Banka / IBAN', f"{company.banka_adi + ' · ' if company.banka_adi else ''}{company.iban}")]
+    else:
+        serit = [('KALEM', str(len(kalemler)), False), ('TOPLAM AĞIRLIK', f"{_miktar_tr(kg)} kg" if kg else '-', True)]
+    saat = (invoice.created_at + timedelta(hours=3)).strftime('%H:%M') if invoice.created_at else None
+    return _kurumsal_belge_pdf(
+        'FATURA / TAHSİLAT\nTAKİP BELGESİ' if is_fatura else 'SEVK İRSALİYESİ', invoice.display_no,
+        invoice.date, saat, invoice.customer, invoice.deal, serit, kalemler, priced,
+        toplamlar=(invoice.subtotal, invoice.vat_rate, invoice.vat_amount, invoice.total) if priced else None,
+        notlar=invoice.notes, ek_kutu=ek, imza=None if is_fatura else ('Teslim Eden', 'Teslim Alan'),
+        alt_not='Bu belge dahili takip belgesidir; resmi fatura muhasebe programında düzenlenir.' if is_fatura else None)
+
+
+def generate_invoice_pdf_klasik(invoice):
     """Fatura (type='fatura') veya Irsaliye (type='irsaliye') kaydi icin PDF.
     Is 2: invoice_detail sayfasinda daha once hic PDF indirme secenegi
     yoktu - hem fatura hem irsaliye icin bu tek fonksiyon kullanilir."""
@@ -3313,6 +3505,23 @@ def _escape_xml(s):
 
 
 def generate_irsaliye_pdf(shipment):
+    """2026-10-29: sevkiyat irsaliyesi - YENI tasarim (_kurumsal_belge_pdf),
+    fiyatsiz. Eski tasarim generate_irsaliye_pdf_klasik."""
+    from datetime import timedelta
+    production = shipment.production
+    deal = production.deal if production else None
+    kalemler = [{'aciklama': it.description, 'miktar': it.quantity, 'birim': it.unit} for it in shipment.items]
+    kg = sum((it.quantity or 0) for it in shipment.items if (it.unit or '').lower() == 'kg')
+    serit = [('KARGO / TAŞIYICI', _clean_for_pdf(shipment.carrier) if shipment.carrier else '-', False),
+             ('TAKİP NO', _clean_for_pdf(shipment.tracking_number) if shipment.tracking_number else '-', False),
+             ('TOPLAM AĞIRLIK', f"{_miktar_tr(kg)} kg" if kg else '-', True)]
+    saat = (shipment.created_at + timedelta(hours=3)).strftime('%H:%M') if shipment.created_at else None
+    return _kurumsal_belge_pdf('SEVK İRSALİYESİ', f'SVN-{shipment.id:05d}', shipment.ship_date or (shipment.created_at.date() if shipment.created_at else None),
+                               saat, deal.customer if deal else None, deal, serit, kalemler, False,
+                               notlar=None if (shipment.notes or '').startswith('Sade üretim akışı') else shipment.notes)
+
+
+def generate_irsaliye_pdf_klasik(shipment):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
 
@@ -3767,6 +3976,152 @@ def generate_statement_pdf(customer, statements, total_debit, total_credit):
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
+def generate_cari_ekstre_pdf(customer, ekstre, detay=False, imza=False, donem_metni=''):
+    """2026-10-28: YENI cari hesap ekstresi (kurumsal tasarim - irsaliye ile
+    ayni dil). ekstre: app.cari_ekstre.ekstre_olustur() ciktisi. Tarih
+    sirasiyla Borc / Alacak / yuruyen Bakiye (B = musteri borclu, A =
+    alacakli); istege bagli devir satiri, fatura kalem detayi, mutabakat
+    imza alani. Eski cari kayitlar (muhasebeden aktarilan) sari zeminli.
+    Eski tasarim generate_statement_pdf aynen duruyor. Veritabanina YAZMAZ."""
+    from xml.sax.saxutils import escape
+    company = _get_company_settings_for_pdf()
+    buffer = BytesIO()
+    PW, PH = A4
+    M = 1.3 * cm
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=M, leftMargin=M, topMargin=1.2 * cm, bottomMargin=1.4 * cm,
+                            title=f'Cari Hesap Ekstresi - {customer.display_name}')
+    W = PW - 2 * M
+    st = getSampleStyleSheet()
+    n = ParagraphStyle('ceN', parent=st['Normal'], fontName='Vera', fontSize=8.2, leading=10.5)
+    k = ParagraphStyle('ceK', parent=n, fontSize=7.4, leading=9.5, textColor=_Y_IKINCIL)
+    h = ParagraphStyle('ceH', parent=n, fontName='Vera-Bold', fontSize=6.8, leading=9, textColor=colors.HexColor('#8A8A8A'))
+    sag = ParagraphStyle('ceSag', parent=n, alignment=2)
+    t = lambda s: escape(_clean_for_pdf(s) if s else '')
+    para = lambda v: f'{abs(float(v or 0)):,.2f}'.replace(',', '§').replace('.', ',').replace('§', '.')
+    def bak(v):
+        v = float(v or 0)
+        if abs(v) < 0.005:
+            return '0,00'
+        return f"{para(v)} {'B' if v > 0 else 'A'}"
+
+    # Baslik (irsaliye ile ayni)
+    logo = _ie_logo_reader(company)
+    logo_buf = _logo_for_pdf_yeni(company.logo_data) if (logo and company.logo_data) else None
+    firma = [f"<font name='Vera-Bold' size='9.5'>{t(company.company_name or 'Lema Ambalaj')}</font>"]
+    if company.address:
+        firma.append(t(company.address))
+    alt = ' · '.join(x for x in [t(_vd_metni(company.tax_office)) if company.tax_office else None,
+                                 t(company.tax_id) if company.tax_id else None, t(company.phone) if company.phone else None] if x)
+    if alt:
+        firma.append(alt)
+    firma_p = Paragraph('<br/>'.join(firma), ParagraphStyle('ceF', parent=k, textColor=colors.HexColor('#333333'), leading=10.5))
+    if logo and logo_buf:
+        iw, ih = logo.getSize()
+        lh = 1.45 * cm
+        lw = min(lh * iw / ih if ih else lh, 3.6 * cm)
+        logo_buf.seek(0)
+        sol = Table([[Image(logo_buf, width=lw, height=lw * ih / iw if iw else lh), firma_p]], colWidths=[lw + 0.3 * cm, W * 0.6 - lw - 0.3 * cm])
+        sol.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (-1, -1), 0)]))
+    else:
+        sol = firma_p
+    simdi = datetime.utcnow()
+    try:
+        from zoneinfo import ZoneInfo
+        simdi = datetime.now(ZoneInfo('Europe/Istanbul'))
+    except Exception:
+        pass
+    sag_p = [Paragraph("<font name='Vera-Bold' size='14' color='#353639'>CARİ HESAP EKSTRESİ</font>", ParagraphStyle('ceB', parent=sag, leading=18)),
+             Paragraph(escape(donem_metni or 'Tüm hareketler'), ParagraphStyle('ceD', parent=k, alignment=2)),
+             Paragraph(f"Düzenleme: {simdi.strftime('%d.%m.%Y %H:%M')}", ParagraphStyle('ceD2', parent=k, alignment=2))]
+    bas = Table([[sol, sag_p]], colWidths=[W * 0.6, W * 0.4])
+    bas.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                             ('BOTTOMPADDING', (0, 0), (-1, -1), 8), ('LINEBELOW', (0, 0), (-1, 0), 2.5, _Y_SARI)]))
+    el = [bas, Spacer(1, 9)]
+
+    # Musteri + bakiye kutusu
+    ad = (customer.company_name or f"{customer.first_name or ''} {customer.last_name or ''}").strip()
+    kisi = f"{customer.first_name or ''} {customer.last_name or ''}".strip()
+    tel = customer.company_phone or customer.phone
+    mus = [Paragraph('MÜŞTERİ', h), Paragraph(f"<font name='Vera-Bold' size='9.5'>{t(ad) or '-'}</font>", n)]
+    ikinci = ' · '.join(x for x in [t(kisi) if (kisi and customer.company_name) else None, t(tel) if tel else None,
+                                    t(customer.musteri_no) if getattr(customer, 'musteri_no', None) else None] if x)
+    if ikinci:
+        mus.append(Paragraph(ikinci, n))
+    adres = customer.company_address or customer.address
+    if adres:
+        mus.append(Paragraph(t(adres), n))
+    vd = ' · '.join(x for x in [t(_vd_metni(customer.tax_office)) if customer.tax_office else None, t(customer.tax_id) if customer.tax_id else None] if x)
+    mus.append(Paragraph(f"V.D. / VKN: {vd or '-'}", k))
+    b = ekstre['bakiye']
+    durum = 'Müşteri borçlu' if b > 0.005 else ('Müşteri alacaklı' if b < -0.005 else 'Hesap kapalı')
+    bak_k = [Paragraph('GÜNCEL BAKİYE' if not ekstre.get('bit') else 'DÖNEM SONU BAKİYE', ParagraphStyle('ceBH', parent=h, textColor=_Y_SARI)),
+             Paragraph(f"<font name='Vera-Bold' size='15' color='#FFFFFF'>{para(b)} TL</font>", ParagraphStyle('ceBV', parent=n, leading=19)),
+             Paragraph(f"<font color='#FFFFFF'>{durum}</font>", n)]
+    kutu = Table([[mus, bak_k]], colWidths=[W * 0.6 - 4, W * 0.4 - 4])
+    kutu.setStyle(TableStyle([('BOX', (0, 0), (0, 0), 0.6, _Y_CIZGI_GRI), ('BACKGROUND', (1, 0), (1, 0), _Y_ANTRASIT),
+                              ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                              ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 7)]))
+    el += [kutu, Spacer(1, 10)]
+
+    # Hareket tablosu
+    th = ParagraphStyle('ceTh', parent=n, fontName='Vera-Bold', fontSize=7.4, textColor=_Y_SARI)
+    thr = ParagraphStyle('ceThR', parent=th, alignment=2)
+    data = [[Paragraph('TARİH', th), Paragraph('BELGE', th), Paragraph('AÇIKLAMA', th),
+             Paragraph('BORÇ', thr), Paragraph('ALACAK', thr), Paragraph('BAKİYE', thr)]]
+    stil = []
+    if ekstre.get('devir') is not None:
+        data.append(['', '', Paragraph(f"<font name='Vera-Bold'>Devir ({ekstre['bas'].strftime('%d.%m.%Y')} öncesi)</font>", n),
+                     '', '', Paragraph(f"<font name='Vera-Bold'>{bak(ekstre['devir'])}</font>", sag)])
+        stil.append(('BACKGROUND', (0, len(data) - 1), (-1, len(data) - 1), _Y_BEJ))
+    for r in ekstre['satirlar']:
+        acik = t(r['aciklama'])
+        if detay and r['detay']:
+            alt_satir = '<br/>'.join(
+                f"<font size='7' color='#777777'>{t(d['aciklama'])} · {_miktar_tr(d['miktar'])} {t(d['birim'] or '')} × {para(d['fiyat'])} = {para(d['tutar'])}</font>"
+                for d in r['detay'])
+            acik = acik + '<br/>' + alt_satir
+        data.append([Paragraph(r['tarih'].strftime('%d.%m.%Y') if r['tarih'] else '-', n), Paragraph(t(r['belge']) or '', n),
+                     Paragraph(acik, n), Paragraph(para(r['borc']) if r['borc'] else '', sag),
+                     Paragraph(para(r['alacak']) if r['alacak'] else '', sag), Paragraph(bak(r['bakiye']), sag)])
+        if r['kaynak'] == 'eski':
+            stil.append(('BACKGROUND', (0, len(data) - 1), (-1, len(data) - 1), colors.HexColor('#FFFBEA')))
+    if len(data) == 1 or (len(data) == 2 and ekstre.get('devir') is not None):
+        data.append(['', '', Paragraph('<i>Bu dönemde hareket yok.</i>', k), '', '', ''])
+    data.append([Paragraph("<font name='Vera-Bold'>TOPLAM</font>", n), '', '',
+                 Paragraph(f"<font name='Vera-Bold'>{para(ekstre['toplam_borc'])}</font>", sag),
+                 Paragraph(f"<font name='Vera-Bold'>{para(ekstre['toplam_alacak'])}</font>", sag),
+                 Paragraph(f"<font name='Vera-Bold'>{bak(ekstre['bakiye'])}</font>", sag)])
+    cw = [2.15 * cm, 2.05 * cm, W - 2.15 * cm - 2.05 * cm - 3 * 2.4 * cm, 2.4 * cm, 2.4 * cm, 2.4 * cm]
+    tab = Table(data, colWidths=cw, repeatRows=1)
+    tab.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), _Y_ANTRASIT), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                             ('LINEBELOW', (0, 1), (-1, -2), 0.4, _Y_CIZGI_GRI), ('LINEABOVE', (0, -1), (-1, -1), 1.4, _Y_ANTRASIT),
+                             ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4), ('SPAN', (0, -1), (2, -1))] + stil))
+    el.append(tab)
+    not_satir = 'B = müşteri borçlu, A = müşteri alacaklı. Tutarlar TL.'
+    if ekstre.get('eski_dahil_sayi'):
+        not_satir += ' Sarı zeminli satırlar muhasebeden aktarılan eski kayıtlardır (sistem öncesi dönem).'
+    el += [Spacer(1, 5), Paragraph(not_satir, k)]
+    if imza:
+        im = Table([[Paragraph("<font name='Vera-Bold'>Düzenleyen</font><br/>Ad Soyad / İmza", k), '',
+                     Paragraph("<font name='Vera-Bold'>Mutabakat — Müşteri</font><br/>Yukarıdaki bakiyeyi onaylıyoruz. İmza / Kaşe", k)]],
+                   colWidths=[W * 0.42, W * 0.16, W * 0.42], rowHeights=[2.2 * cm])
+        im.setStyle(TableStyle([('LINEABOVE', (0, 0), (0, 0), 0.8, colors.HexColor('#999999')),
+                                ('LINEABOVE', (2, 0), (2, 0), 0.8, colors.HexColor('#999999')),
+                                ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0)]))
+        el += [Spacer(1, 1.1 * cm), im]
+
+    def _alt(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont('Vera', 7)
+        canvas.setFillColor(colors.HexColor('#999999'))
+        canvas.drawCentredString(PW / 2, 0.8 * cm, f"{company.company_name or 'Lema Ambalaj'} · cari hesap ekstresi · {_clean_for_pdf(ad)} · sayfa {_doc.page}")
+        canvas.restoreState()
+
+    doc.build(el, onFirstPage=_alt, onLaterPages=_alt)
+    buffer.seek(0)
+    return buffer
+
 
 def generate_production_list_pdf(productions, tab_label):
     """Uretim Listesi'nin o an ekranda gorunen (sekme ile filtrelenmis)
