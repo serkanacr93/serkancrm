@@ -1903,14 +1903,16 @@ def generate_invoice_pdf(invoice):
     company = _get_company_settings_for_pdf()
     kalemler = [{'aciklama': it.description, 'miktar': it.quantity, 'birim': it.unit,
                  'fiyat': it.unit_price, 'tutar': it.total_price} for it in invoice.items]
-    priced = is_fatura or any((it.unit_price or 0) > 0 for it in invoice.items)
+    # 2026-10-29: irsaliye (siparisten kesilen dahil) HER ZAMAN fiyatsiz basilir.
+    priced = is_fatura
     kg = sum((it.quantity or 0) for it in invoice.items if (it.unit or '').lower() == 'kg')
     ek = None
     if is_fatura:
-        durum = {'odendi': 'Ödendi', 'kismi_odendi': 'Kısmi ödendi'}.get(invoice.payment_status, 'Ödenmedi')
-        serit = [('ÖDEME DURUMU', durum, True), ('ÖDENEN', _tr_para2(invoice.paid_amount), False),
-                 ('KALAN', _tr_para2(invoice.remaining_amount), True),
-                 ('TOPLAM AĞIRLIK', f"{_miktar_tr(kg)} kg" if kg else '-', False)]
+        # 2026-10-29: musteriye giden belgede odendi/odenmedi/kalan YAZILMAZ
+        # (Serkan: "o kisim cok hos olmaz"). Odeme durumu sadece ekranda.
+        serit = [('KALEM', str(len(kalemler)), False),
+                 ('TOPLAM AĞIRLIK', f"{_miktar_tr(kg)} kg" if kg else '-', False),
+                 ('GENEL TOPLAM', _tr_para2(invoice.total), True)]
         if company.iban:
             ek = [('Banka / IBAN', f"{company.banka_adi + ' · ' if company.banka_adi else ''}{company.iban}")]
     else:
