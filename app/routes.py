@@ -6021,6 +6021,7 @@ def register_routes(app):
                         ))
                     db.session.flush()
                     invoice.vat_rate = manual_irsaliye.vat_rate
+                    db.session.expire(invoice, ['items'])  # 2026-10-29: eski kalemlerle toplama hatasi
                     invoice.calculate_totals()
                     invoice.updated_by_user_id = current_user.id
                     invoice.updated_at = datetime.utcnow()
@@ -6091,6 +6092,10 @@ def register_routes(app):
                 invoice.updated_at = datetime.utcnow()
                 aciklama = f'İrsaliyeye göre fatura ({invoice.display_no}) güncellendi.'
             db.session.flush()
+            # 2026-10-29: toplu silme oturumdaki kalem listelerini guncellemiyor -
+            # toplam ve log ESKI kalemlerden hesaplaniyordu.
+            db.session.expire(invoice, ['items'])
+            db.session.expire(manual_irsaliye, ['items'])
             invoice.calculate_totals()
             _log_irsaliye_degisiklik(
                 manual_irsaliye, invoice, aciklama,
@@ -6939,24 +6944,33 @@ def register_routes(app):
                 return redirect(url_for('edit_invoice', id=id))
             try:
                 onceki_fat = _invoice_items_snapshot(invoice.items)
+                # 2026-10-29: kalemin siparis kalemi bagi (deal_item_id) korunur -
+                # eskiden duzenlenen faturanin kalem bagi kayboluyordu.
+                gecerli_kalem_idleri = {di.id for di in invoice.deal.items} if invoice.deal else set()
                 InvoiceItem.query.filter_by(invoice_id=invoice.id).delete()
                 new_inv_items = []
                 i = 0
                 while f'desc_{i}' in request.form:
                     qty = float(request.form.get(f'qty_{i}', 0))
                     price = float(request.form.get(f'price_{i}', 0))
+                    did = _int_or_none(request.form.get(f'deal_item_id_{i}'))
                     item = InvoiceItem(
                         invoice_id=invoice.id,
                         description=request.form[f'desc_{i}'],
                         quantity=qty,
                         unit=request.form.get(f'unit_{i}', 'adet'),
                         unit_price=price,
-                        total_price=qty * price
+                        total_price=qty * price,
+                        deal_item_id=did if did in gecerli_kalem_idleri else None
                     )
                     db.session.add(item)
                     new_inv_items.append(item)
                     i += 1
                 db.session.flush()
+                # 2026-10-29 HATA DUZELTMESI: toplu silme (query.delete) oturumdaki
+                # invoice.items listesini guncellemiyordu - calculate_totals ESKI
+                # kalemleri topluyordu, kalem silinse de toplam degismiyordu.
+                db.session.expire(invoice, ['items'])
                 invoice.calculate_totals()
                 invoice.updated_by_user_id = current_user.id
                 invoice.updated_at = datetime.utcnow()
