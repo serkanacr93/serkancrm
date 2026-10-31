@@ -126,6 +126,47 @@
             {% endif %}
         </div>
 
+        {# 2026-10-31: fatura - gunluk uretim karsilastirmasi #}
+        {% if uretim_karsilastirma and uretim_karsilastirma.satirlar %}
+        <div class="card mb-4 shadow-sm {{ 'border-warning' if uretim_karsilastirma.cakisma else '' }}">
+            <div class="card-header d-flex justify-content-between align-items-center {{ 'bg-warning' if uretim_karsilastirma.cakisma else 'bg-white' }}">
+                <span><i class="bi bi-arrow-left-right"></i> <strong>Fatura – üretim karşılaştırması</strong></span>
+                {% if uretim_karsilastirma.cakisma %}<span class="badge bg-danger">{{ uretim_karsilastirma.cakisma }} kalemde çakışma — kontrol edin</span>
+                {% else %}<span class="badge bg-success">Tutuyor</span>{% endif %}
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                    <thead class="table-light"><tr>
+                        <th class="ps-3">Kalem</th><th class="text-end">Sipariş</th><th class="text-end">Günlük üretim</th>
+                        <th class="text-end">Faturalanan</th><th class="text-end pe-3">Durum</th></tr></thead>
+                    <tbody>
+                    {% for s in uretim_karsilastirma.satirlar %}
+                    <tr>
+                        <td class="ps-3">{{ s.aciklama }}</td>
+                        <td class="text-end">{{ (miktar_tr(s.siparis) ~ ' ' ~ (s.birim or '')) if s.siparis is not none else '—' }}</td>
+                        <td class="text-end">{{ (miktar_tr(s.uretim) ~ ' ' ~ (s.birim or '')) if s.uretim else '—' }}</td>
+                        <td class="text-end fw-bold">{{ miktar_tr(s.faturalanan) }} {{ s.birim or '' }}</td>
+                        <td class="text-end pe-3">
+                            {% if s.durum == 'tutuyor' %}<span class="badge bg-success">Tutuyor</span>
+                            {% elif s.durum == 'fazla' %}<span class="badge bg-danger">{{ miktar_tr(s.fark|abs) }} {{ s.birim or '' }} fazla</span>
+                            {% elif s.durum == 'eksik' %}<span class="badge bg-warning text-dark">{{ miktar_tr(s.fark|abs) }} {{ s.birim or '' }} eksik</span>
+                            {% elif s.durum == 'sipariste_yok' %}<span class="badge bg-danger">siparişte yok</span>
+                            {% else %}<span class="text-muted small">üretim kaydı yok</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+            </div>
+            <div class="card-footer small text-muted">
+                Bu siparişe kesilen tüm faturaların toplamı. Günlük üretim: o kaleme bağlı günlük üretim kayıtları + üretim detayında elle girilen miktar.
+                {% if invoice.deal.production %} · İş emri: <a href="{{ url_for('production_detail', id=invoice.deal.production.id) }}">IE-{{ '%05d' % invoice.deal.production.id }}</a> ({{ invoice.deal.production.stage_label }}){% endif %}
+            </div>
+        </div>
+        {% endif %}
+
         {% if invoice.notes %}
         <div class="card mb-4 shadow-sm">
             <div class="card-header"><i class="bi bi-journal-text"></i> Notlar</div>

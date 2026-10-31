@@ -179,3 +179,60 @@ def siparis_kalem_durumu(deal, production=None):
             'gunluk_eksik': bool(kayit is not None and gonderilen > (kayit or 0) + 0.0005),
         })
     return sonuc
+
+
+def _ad(s):
+    return ' '.join((s or '').split()).casefold()
+
+
+def fatura_uretim_karsilastirma(deal):
+    """2026-10-31: siparise kesilen TUM faturalarin (type='fatura') kalem
+    miktarlari ile gunluk uretim (gunluk kayit + uretim detayinda elle
+    girilen) kalem kalem karsilastirilir. SADECE OKUR.
+    Eski faturalarda kalem bagi (deal_item_id) yok - ayni siparisteki
+    baglanmamis fatura kalemleri, ADI siparis kalemiyle birebir ayni ise
+    (bosluk/buyuk-kucuk harf farki hariç) o kaleme sayilir; eslesmeyenler
+    'siparişte yok' satiri olur.
+    Donus: {'satirlar': [...], 'cakisma': int}. Satir: aciklama, birim,
+    siparis, uretim (None = kayit yok), faturalanan, fark, durum
+    ('tutuyor' | 'fazla' | 'eksik' | 'uretim_yok' | 'sipariste_yok')."""
+    if deal is None:
+        return {'satirlar': [], 'cakisma': 0}
+    try:
+        durumlar = {k['id']: k for k in siparis_kalem_durumu(deal)}
+    except Exception:
+        durumlar = {}
+    kalemler = sorted(deal.items, key=lambda x: x.id)
+    ad_harita = {}
+    for di in kalemler:
+        ad_harita.setdefault(_ad(di.description), di.id)
+    faturalanan = {di.id: 0.0 for di in kalemler}
+    ekstra = {}
+    for inv in Invoice.query.filter_by(deal_id=deal.id, type='fatura').all():
+        for it in inv.items:
+            did = it.deal_item_id if it.deal_item_id in faturalanan else ad_harita.get(_ad(it.description))
+            if did is not None:
+                faturalanan[did] += it.quantity or 0
+            else:
+                anahtar = (_ad(it.description), (it.unit or '').casefold())
+                e = ekstra.setdefault(anahtar, {'aciklama': it.description, 'birim': it.unit, 'miktar': 0.0})
+                e['miktar'] += it.quantity or 0
+    satirlar = []
+    for di in kalemler:
+        k = durumlar.get(di.id) or {}
+        uretim = k.get('uretim_kaydi')
+        if uretim is None:
+            uretim = k.get('hazir')
+        f = faturalanan[di.id]
+        if not uretim:
+            durum, fark = 'uretim_yok', None
+        else:
+            fark = f - uretim
+            durum = 'tutuyor' if abs(fark) < 0.0005 else ('fazla' if fark > 0 else 'eksik')
+        satirlar.append({'aciklama': di.description, 'birim': di.unit, 'siparis': di.quantity or 0,
+                         'uretim': uretim or None, 'faturalanan': f, 'fark': fark, 'durum': durum})
+    for e in ekstra.values():
+        satirlar.append({'aciklama': e['aciklama'], 'birim': e['birim'], 'siparis': None, 'uretim': None,
+                         'faturalanan': e['miktar'], 'fark': None, 'durum': 'sipariste_yok'})
+    cakisma = sum(1 for s in satirlar if s['durum'] in ('fazla', 'eksik', 'sipariste_yok'))
+    return {'satirlar': satirlar, 'cakisma': cakisma}

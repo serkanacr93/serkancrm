@@ -2972,6 +2972,10 @@ def register_routes(app):
             if p.status == 'iptal':
                 return False
             latest = p.latest_shipment
+            # 2026-10-31: fatura ile 'Gonderildi'ye gecen (sevkiyat kaydi
+            # olmayan) is emri artik bekleyen sayilmaz.
+            if p.status == 'sevkiyat' and latest is None:
+                return False
             return not (latest and latest.status == 'teslim_edildi')
         pending_productions = sorted(
             [d.production for d in deals if d.production and _is_pending(d.production)],
@@ -6842,11 +6846,44 @@ def register_routes(app):
         kalem_tekrar = [g[0] for g in _gruplar.values() if len(g) > 1 and not (
             all(x['deal_item_id'] for x in g) and len({x['deal_item_id'] for x in g}) == len(g))]
         kalem_toplam = {'ara': _p2(invoice.subtotal), 'kdv': _p2(invoice.vat_amount), 'genel': _p2(invoice.total)}
+        # 2026-10-31: fatura - gunluk uretim karsilastirmasi (siparise kesilen tum faturalar)
+        uretim_karsilastirma = None
+        if invoice.type == 'fatura' and invoice.deal is not None:
+            try:
+                from app.kalem_belge import fatura_uretim_karsilastirma
+                uretim_karsilastirma = fatura_uretim_karsilastirma(invoice.deal)
+            except Exception:
+                uretim_karsilastirma = None
         return render_template('invoice_detail.html', invoice=invoice, ledger_rows=ledger_rows,
+                                uretim_karsilastirma=uretim_karsilastirma, miktar_tr=_miktar_tr_basit,
                                 bagli_irsaliye=bagli_irsaliye, fark_var_mi=fark_var_mi,
                                 siparis_odemeleri=siparis_odemeleri,
                                 kalem_satirlari=kalem_satirlari, kalem_tekrar=kalem_tekrar, kalem_toplam=kalem_toplam,
                                 silme_engeli=_fatura_silme_engeli(invoice) if current_user.is_admin else None)
+
+    def _is_emri_no(production):
+        return f'IE-{production.id:05d}'
+
+    def _fatura_uretim_uyarilari(deal):
+        """2026-10-31: fatura ile gunluk uretim tutmayan kalemler icin uyari
+        metinleri (en fazla 4). Sadece okur."""
+        try:
+            from app.kalem_belge import fatura_uretim_karsilastirma
+            k = fatura_uretim_karsilastirma(deal)
+        except Exception:
+            return []
+        out = []
+        for s in k['satirlar']:
+            b = s['birim'] or ''
+            if s['durum'] in ('fazla', 'eksik'):
+                out.append(f"{s['aciklama']}: faturada {_miktar_tr_basit(s['faturalanan'])} {b}, günlük üretimde "
+                           f"{_miktar_tr_basit(s['uretim'])} {b} — {_miktar_tr_basit(abs(s['fark']))} {b} "
+                           f"{'fazla' if s['durum'] == 'fazla' else 'eksik'} faturalandı. Kontrol edin.")
+            elif s['durum'] == 'sipariste_yok':
+                out.append(f"{s['aciklama']}: faturada {_miktar_tr_basit(s['faturalanan'])} {b} var ama siparişte bu kalem yok. Kontrol edin.")
+        if len(out) > 4:
+            out = out[:4] + [f'… ve {len(out) - 4} kalem daha (fatura detayındaki karşılaştırmaya bakın).']
+        return out
 
     def _fatura_silme_engeli(invoice):
         """2026-10-27 (Fatura Sil): silinemiyorsa nedenini (str), silinebiliyorsa
@@ -7143,6 +7180,13 @@ def register_routes(app):
                 # otomatik olusur.
                 _create_prepayment_if_requested(invoice, request.form, current_user.id)
 
+                # 2026-10-31: fatura kesilince is emri uretimden DUSER (veride
+                # 'sevkiyat' = Gonderildi). Fatura/uretim cakismasi asagida uyarilir.
+                kapanan_is_emri = None
+                if inv_type == 'fatura' and deal.production is not None and deal.production.status in ('uretimde', 'hazir'):
+                    deal.production.status = 'sevkiyat'
+                    kapanan_is_emri = deal.production
+
                 db.session.commit()
             except Exception:
                 db.session.rollback()
@@ -7150,8 +7194,17 @@ def register_routes(app):
                 return redirect(url_for('create_invoice_from_deal', id=id))
 
             flash(f'{invoice.display_no} - {inv_type} başarıyla oluşturuldu!', 'success')
+            if kapanan_is_emri is not None:
+                flash(f'İş emri {_is_emri_no(kapanan_is_emri)} üretimden düştü (Gönderildi).', 'success')
             for m in _sevk_fatura_uyarilari(deal):
+                # 2026-10-31: faturada 'fazla faturalama' artik asagidaki
+                # fatura-uretim karsilastirmasiyla veriliyor (cift uyari olmasin)
+                if inv_type == 'fatura' and 'fazla faturalama olabilir' in m:
+                    continue
                 flash('⚠ ' + m, 'warning')
+            if inv_type == 'fatura':
+                for m in _fatura_uretim_uyarilari(deal):
+                    flash('⚠ ' + m, 'warning')
             return redirect(url_for('invoice_detail', id=invoice.id))
 
         unlinked_payments = Payment.query.filter_by(deal_id=deal.id, invoice_id=None).all()
