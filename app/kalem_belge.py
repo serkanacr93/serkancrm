@@ -186,13 +186,19 @@ def _ad(s):
 
 
 # 2026-11-02: uretimle karsilastirilmayan hizmet satirlari (klise bedeli,
-# nakliye/kargo) - 'sipariste yok' / 'uretim kaydi yok' gurultusu olmasin.
-_HIZMET_KELIMELERI = ('klişe', 'klise', 'nakliye', 'kargo')
+# nakliye/kargo) - 'sipariste yok' / 'uretim kaydi yok' gurultusu olmasin;
+# siparis onayinda is emrine de GIRMEZLER (sadece faturaya gelir).
+# Klise her yerde aranir (KLİŞE / KLISE / klişe); nakliye ve kargo SADECE
+# satirin basindaysa ("KARGO BEDELİ" hizmet, "KARGO POŞETİ" urun degil).
+_HIZMET_HER_YERDE = ('klişe', 'klise', 'klıse', 'klışe')
+_HIZMET_BASTA = ('nakliye', 'kargo bedel', 'kargo ücret', 'kargo ucret', 'kargo gider')
 
 
 def _hizmet_mi(s):
-    t = (s or '').replace('İ', 'i').replace('I', 'ı').lower()
-    return any(k in t for k in _HIZMET_KELIMELERI)
+    t = ' '.join((s or '').replace('İ', 'i').replace('I', 'ı').lower().split())
+    if any(k in t for k in _HIZMET_HER_YERDE):
+        return True
+    return t == 'kargo' or any(t.startswith(k) for k in _HIZMET_BASTA)
 
 
 def fatura_uretim_karsilastirma(deal):

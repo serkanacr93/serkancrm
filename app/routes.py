@@ -3452,7 +3452,7 @@ def register_routes(app):
                 i = 0
                 new_items = []
                 numune_errors = []
-                while f'desc_{i}' in request.form:
+                for i in _form_satir_indeksleri(request.form):  # 2026-11-02: silinen satirdan sonrakiler kaybolmasin
                     qty = float(request.form[f'qty_{i}'])
                     price = float(request.form[f'price_{i}'])
                     teslim_tarihi_raw = request.form.get(f'teslim_tarihi_{i}', '').strip()
@@ -3486,8 +3486,12 @@ def register_routes(app):
                     )
                     db.session.add(item)
                     new_items.append(item)
-                    i += 1
 
+                if not new_items:
+                    # 2026-11-02: kalemsiz (0 TL) teklif kaydedilmez
+                    db.session.rollback()
+                    flash('Teklifte en az bir kalem olmalı — teklif kaydedilmedi.', 'danger')
+                    return redirect(url_for('add_deal'))
                 db.session.flush()
                 # new_items burada explicit veriliyor - deal.items (henuz
                 # yuklenmemis bir iliski) okumak, Neon'a gereksiz bir
@@ -3594,7 +3598,7 @@ def register_routes(app):
             i = 0
             new_items = []
             numune_errors = []
-            while f'desc_{i}' in request.form:
+            for i in _form_satir_indeksleri(request.form):  # 2026-11-02: silinen satirdan sonrakiler kaybolmasin
                 qty = float(request.form[f'qty_{i}'])
                 price = float(request.form[f'price_{i}'])
                 teslim_tarihi_raw = request.form.get(f'teslim_tarihi_{i}', '').strip()
@@ -3627,8 +3631,12 @@ def register_routes(app):
                                deal_id=deal.id)
                 db.session.add(item)
                 new_items.append(item)
-                i += 1
 
+            if not new_items:
+                # 2026-11-02: duzenlemede kalemler sifirlanmasin (eski kalemler korunur)
+                db.session.rollback()
+                flash('Teklifte en az bir kalem olmalı — değişiklikler kaydedilmedi, eski kalemler korundu.', 'danger')
+                return redirect(url_for('edit_deal', id=id))
             db.session.flush()
             # new_items explicit veriliyor - performans denetimi (bkz. add_deal,
             # commit 153bc85): self.items okumak gereksiz bir SELECT daha acardi.
@@ -3972,7 +3980,13 @@ def register_routes(app):
                 # girilmis kagit_cinsi/boy/en/renk varsa is emrine on-doldurma
                 # olarak kopyalanir (atolyenin ayni bilgiyi elden tekrar girmesi
                 # gerekmesin diye) - yine de is emri sayfasindan duzenlenebilir.
+                from app.kalem_belge import _hizmet_mi
+                is_emri_kalem_sayisi = 0
                 for item in deal.items:
+                    # 2026-11-02: klise bedeli / nakliye / kargo is emrine
+                    # GIRMEZ - sadece faturaya gelir (fatura formunda duzenlenebilir).
+                    if _hizmet_mi(item.description):
+                        continue
                     olcu = None
                     if item.boy and item.en:
                         olcu = f'{item.boy}x{item.en}'
@@ -3993,6 +4007,10 @@ def register_routes(app):
                         baski_bilgisi=item.renk
                     )
                     db.session.add(prod_item)
+                    is_emri_kalem_sayisi += 1
+                if is_emri_kalem_sayisi == 0:
+                    # siparisin tamami hizmet (or. sadece klise) - atolyeye dusmez
+                    production.status = 'hazir'
 
                 statement = CustomerStatement(customer_id=deal.customer_id, deal_id=deal.id, type='borc', amount=deal.value,
                                              description=f'Satış: {deal.title} (KDV Dahil: {deal.value:,.2f} ₺)')
@@ -6005,7 +6023,7 @@ def register_routes(app):
                 ManualIrsaliyeItem.query.filter_by(manual_irsaliye_id=id).delete()
                 new_irs_items = []
                 i = 0
-                while f'desc_{i}' in request.form:
+                for i in _form_satir_indeksleri(request.form):  # 2026-11-02: silinen satirdan sonrakiler kaybolmasin
                     desc = request.form.get(f'desc_{i}', '').strip()
                     qty = request.form.get(f'qty_{i}', '').strip()
                     price_raw = request.form.get(f'price_{i}', '').strip()
@@ -6017,7 +6035,6 @@ def register_routes(app):
                         )
                         db.session.add(new_item)
                         new_irs_items.append(new_item)
-                    i += 1
                 db.session.flush()
 
                 sync_requested = request.form.get('esitle_fatura') == 'on'
