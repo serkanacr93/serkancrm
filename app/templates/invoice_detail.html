@@ -152,6 +152,7 @@
                             {% elif s.durum == 'fazla' %}<span class="badge bg-danger">{{ miktar_tr(s.fark|abs) }} {{ s.birim or '' }} fazla</span>
                             {% elif s.durum == 'eksik' %}<span class="badge bg-warning text-dark">{{ miktar_tr(s.fark|abs) }} {{ s.birim or '' }} eksik</span>
                             {% elif s.durum == 'sipariste_yok' %}<span class="badge bg-danger">siparişte yok</span>
+                            {% elif s.durum == 'hizmet' %}<span class="text-muted small">hizmet (üretim dışı)</span>
                             {% else %}<span class="text-muted small">üretim kaydı yok</span>{% endif %}
                         </td>
                     </tr>

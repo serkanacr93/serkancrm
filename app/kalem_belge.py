@@ -185,6 +185,16 @@ def _ad(s):
     return ' '.join((s or '').split()).casefold()
 
 
+# 2026-11-02: uretimle karsilastirilmayan hizmet satirlari (klise bedeli,
+# nakliye/kargo) - 'sipariste yok' / 'uretim kaydi yok' gurultusu olmasin.
+_HIZMET_KELIMELERI = ('klişe', 'klise', 'nakliye', 'kargo')
+
+
+def _hizmet_mi(s):
+    t = (s or '').replace('İ', 'i').replace('I', 'ı').lower()
+    return any(k in t for k in _HIZMET_KELIMELERI)
+
+
 def fatura_uretim_karsilastirma(deal):
     """2026-10-31: siparise kesilen TUM faturalarin (type='fatura') kalem
     miktarlari ile gunluk uretim (gunluk kayit + uretim detayinda elle
@@ -224,7 +234,9 @@ def fatura_uretim_karsilastirma(deal):
         if uretim is None:
             uretim = k.get('hazir')
         f = faturalanan[di.id]
-        if not uretim:
+        if _hizmet_mi(di.description):
+            durum, fark = 'hizmet', None
+        elif not uretim:
             durum, fark = 'uretim_yok', None
         else:
             fark = f - uretim
@@ -233,6 +245,7 @@ def fatura_uretim_karsilastirma(deal):
                          'uretim': uretim or None, 'faturalanan': f, 'fark': fark, 'durum': durum})
     for e in ekstra.values():
         satirlar.append({'aciklama': e['aciklama'], 'birim': e['birim'], 'siparis': None, 'uretim': None,
-                         'faturalanan': e['miktar'], 'fark': None, 'durum': 'sipariste_yok'})
+                         'faturalanan': e['miktar'], 'fark': None,
+                         'durum': 'hizmet' if _hizmet_mi(e['aciklama']) else 'sipariste_yok'})
     cakisma = sum(1 for s in satirlar if s['durum'] in ('fazla', 'eksik', 'sipariste_yok'))
     return {'satirlar': satirlar, 'cakisma': cakisma}
