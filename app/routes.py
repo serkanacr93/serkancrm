@@ -3007,13 +3007,37 @@ def register_routes(app):
         ).order_by(Invoice.date.desc(), Invoice.id.desc()).all()
         fatura_toplami = sum(float(i.total or 0) for i in musteri_faturalari if i.type == 'fatura')
 
+        # 2026-11-03: musteri sayfasinda 'Gunluk Uretim' sekmesi - bu musteriye
+        # (customer_id) ya da musterinin siparislerinin is emrine (production_id)
+        # bagli gunluk uretim kayitlari. SADECE OKUR.
+        _prod_ids = [d.production.id for d in deals if d.production]
+        _gu_kosul = DailyProductionOutput.customer_id == customer.id
+        if _prod_ids:
+            _gu_kosul = db.or_(_gu_kosul, DailyProductionOutput.production_id.in_(_prod_ids))
+        gunluk_uretimler = DailyProductionOutput.query.filter(_gu_kosul).options(
+            joinedload(DailyProductionOutput.production_item), joinedload(DailyProductionOutput.user),
+            joinedload(DailyProductionOutput.production)
+        ).order_by(DailyProductionOutput.tarih.desc(), DailyProductionOutput.id.desc()).limit(300).all()
+        _sira = {}
+        for _p in {g.production for g in gunluk_uretimler if g.production}:
+            for _n, _it in enumerate(sorted(_p.items, key=lambda x: x.id or 0), 1):
+                _sira[_it.id] = _n
+        gunluk_uretim_satirlari = [{
+            'g': g,
+            'ie': (f"IE-{g.production_id:05d}" + (f"-{_sira[g.production_item_id]}" if g.production_item_id in _sira else '')) if g.production_id else None,
+            'siparis': g.production.deal if g.production else None,
+            'urun': g.production_item.description if g.production_item else None,
+        } for g in gunluk_uretimler]
+        gunluk_uretim_toplam_kg = sum(float(g.toplam_kg or 0) for g in gunluk_uretimler)
+
         return render_template('customer_detail.html', customer=customer, deals=deals,
                              statements=statements, total_debit=total_debit, total_credit=total_credit,
                              balance_info=balance_info,
                              daily_reports=daily_reports, pending_productions=pending_productions,
                              last_contact_date=last_contact_date, days_since_contact=days_since_contact,
                              duplicate_siblings=duplicate_siblings,
-                             musteri_faturalari=musteri_faturalari, fatura_toplami=fatura_toplami)
+                             musteri_faturalari=musteri_faturalari, fatura_toplami=fatura_toplami,
+                             gunluk_uretim_satirlari=gunluk_uretim_satirlari, gunluk_uretim_toplam_kg=gunluk_uretim_toplam_kg)
 
     @app.route('/customers/<int:id>/import-statement-pdf', methods=['POST'])
     @login_required
@@ -5530,17 +5554,35 @@ def register_routes(app):
                     kalan_gun = (b['termin'] - bugun).days
                     termin_renk = 'danger' if kalan_gun < 0 else ('warning' if kalan_gun <= 3 else None)
                 satirlar.append({'p': p, 'it': it, 'b': b, 'musteri': musteri, 'termin_renk': termin_renk})
+        # 2026-11-03: kalem bazli gonderim takibi (parca parca kargo) -
+        # gonderilen / kalan + hangi irsaliyelerle gittigi. Tek sorgu, SADECE OKUR.
+        try:
+            from app.kalem_belge import kalem_belge_ozeti
+            _belge = kalem_belge_ozeti([s['b']['deal_item'] for s in satirlar if s['b'].get('deal_item') is not None])
+        except Exception:
+            _belge = {}
+        for s in satirlar:
+            b = s['b']
+            di = b.get('deal_item')
+            gond = float(b.get('gonderilen') or 0)
+            plan = float(b.get('planlanan') or 0)
+            s['gonderim_belgeler'] = (_belge.get(di.id) or {}).get('irsaliye_belgeler', []) if di is not None else []
+            s['gonderim_kalan'] = max(plan - gond, 0)
+            s['kismi_gonderim'] = gond > 0.0005 and gond < plan - 0.0005
+        kismi_sayi = sum(1 for s in satirlar if s['kismi_gonderim'])
         sayac = {}
         for s in satirlar:
             sayac[s['b']['durum']] = sayac.get(s['b']['durum'], 0) + 1
         filtre = request.args.get('kalem_durum', '')
-        if filtre:
+        if filtre == 'kismi':
+            satirlar = [s for s in satirlar if s['kismi_gonderim']]
+        elif filtre:
             satirlar = [s for s in satirlar if s['b']['durum'] == filtre]
         acik_sayi = len({p.id for p in productions if p.status in ('uretimde', 'hazir')}) if sekme == 'aktif' else 0
         paketler = [(i + 1, i * TOPLU_PARCA + 1, min((i + 1) * TOPLU_PARCA, acik_sayi))
                     for i in range((acik_sayi + TOPLU_PARCA - 1) // TOPLU_PARCA)]
         return render_template('is_emirleri.html', satirlar=satirlar, sekme=sekme, q=q,
-                               sayac=sayac, filtre=filtre, miktar_tr=_miktar_tr_basit,
+                               sayac=sayac, filtre=filtre, miktar_tr=_miktar_tr_basit, kismi_sayi=kismi_sayi,
                                acik_siparis_sayisi=acik_sayi, paketler=paketler)
 
     @app.route('/production/<int:id>/mark-ready', methods=['POST'])

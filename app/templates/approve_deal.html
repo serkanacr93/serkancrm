@@ -36,7 +36,17 @@
                     <i class="bi bi-calendar-check"></i> Ödeme Takvimi <span class="text-danger">*</span>
                 </div>
                 <div class="card-body">
-                    {% if oneri and not form_data %}
+                    {# 2026-11-03: teklifte odeme sekli VE hesaplanabilir bakiye tarihi varsa form tekrar sorulmaz - ozet gosterilir, 'Degistir' ile acilir #}
+                    {% set ozet_mod = oneri and not form_data and oneri.bakiye_tarihi and oneri.pesinat_orani != '' %}
+                    {% set pesinatsiz = ozet_mod and oneri.pesinat_orani == '0' %}
+                    {% if ozet_mod %}
+                    <div class="border rounded p-3 mb-3 bg-light" id="odeme_ozet">
+                        <div class="small text-success mb-2"><i class="bi bi-check-circle"></i> Ödeme planı tekliften alındı{% if oneri.ozet %}: <strong>{{ oneri.ozet }}</strong>{% endif %}</div>
+                        <div>Peşinat: <strong>{% if pesinatsiz %}yok{% else %}%{{ oneri.pesinat_orani }}{% if oneri.pesinat_tutari %} · {{ "{:,.2f}".format(oneri.pesinat_tutari) }} ₺{% endif %}{% endif %}</strong></div>
+                        <div>Bakiye: beklenen <strong>{{ oneri.bakiye_tarihi[8:10] }}.{{ oneri.bakiye_tarihi[5:7] }}.{{ oneri.bakiye_tarihi[0:4] }}</strong>{% if oneri.bakiye_kaynak %} <span class="text-muted small">({{ oneri.bakiye_kaynak }})</span>{% endif %}</div>
+                        <a href="#" class="small" id="odeme_degistir"><i class="bi bi-pencil"></i> Değiştir</a>
+                    </div>
+                    {% elif oneri and not form_data %}
                     {# 2026-10-27: teklifte girilen odeme sekli on-doldurma - alanlar duzenlenebilir #}
                     <div class="alert alert-success py-2 small mb-3">
                         <i class="bi bi-check-circle"></i> Tekliften alındı{% if oneri.ozet %}: <strong>{{ oneri.ozet }}</strong>{% endif %}. Kontrol edip gerekirse değiştirin.
@@ -46,27 +56,29 @@
                         <i class="bi bi-exclamation-triangle"></i> Bu teklifte ödeme şekli girilmemiş — aşağıyı doldurun.
                     </div>
                     {% endif %}
-                    <p class="small text-muted">Üretime aktarmadan önce müşteriyle kesinleşen ödeme planı girilmelidir - zorunludur.</p>
+                    <p class="small text-muted {{ 'd-none odeme-detay' if ozet_mod }}">Üretime aktarmadan önce müşteriyle kesinleşen ödeme planı girilmelidir - zorunludur.</p>
                     {# 2026-10-27 (Odeme paketi): pesinat durumu - Alindi ise odeme siparise bagli kaydedilir, hatirlatma acilmaz #}
                     {% if form_data %}{% set pd_secili = form_data.pesinat_durumu %}
                     {% elif kayitli_odeme and kayitli_odeme > 0.01 %}{% set pd_secili = 'alindi' %}
                     {% elif oneri and oneri.pesinat_orani == '0' %}{% set pd_secili = 'yok' %}
+                    {% elif ozet_mod %}{% set pd_secili = 'alinacak' %}
                     {% else %}{% set pd_secili = '' %}{% endif %}
-                    <div class="mb-3">
-                        <label class="form-label d-block">Peşinat durumu <span class="text-danger">*</span></label>
+                    <div class="mb-3 {{ 'd-none odeme-detay' if pesinatsiz }}">
+                        <label class="form-label d-block">{% if ozet_mod %}Peşinat alındı mı?{% else %}Peşinat durumu{% endif %} <span class="text-danger">*</span></label>
                         <div class="btn-group flex-wrap" role="group">
                             <input type="radio" class="btn-check" name="pesinat_durumu" id="pd_alindi" value="alindi" {{ 'checked' if pd_secili == 'alindi' }} required>
                             <label class="btn btn-outline-success" for="pd_alindi"><i class="bi bi-check-circle"></i> Alındı</label>
                             <input type="radio" class="btn-check" name="pesinat_durumu" id="pd_alinacak" value="alinacak" {{ 'checked' if pd_secili == 'alinacak' }}>
                             <label class="btn btn-outline-warning text-dark" for="pd_alinacak"><i class="bi bi-hourglass-split"></i> Alınacak</label>
                             <input type="radio" class="btn-check" name="pesinat_durumu" id="pd_yok" value="yok" {{ 'checked' if pd_secili == 'yok' }}>
-                            <label class="btn btn-outline-secondary" for="pd_yok">Peşinat yok</label>
+                            <label class="btn btn-outline-secondary {{ 'd-none odeme-detay' if ozet_mod and not pesinatsiz }}" for="pd_yok">Peşinat yok</label>
                         </div>
                         {% if kayitli_odeme and kayitli_odeme > 0.01 %}
                         <div class="small text-success mt-1"><i class="bi bi-info-circle"></i> Bu teklife kayıtlı <strong>{{ "{:,.2f}".format(kayitli_odeme) }} ₺</strong> ödeme var — "Alındı" seçilirse sadece eksik kısım eklenir, aynı ödeme ikinci kez kaydedilmez.</div>
                         {% endif %}
                         <div class="small mt-1" id="pd_aciklama"></div>
                     </div>
+                    <div class="{{ 'd-none odeme-detay' if ozet_mod }}" id="odeme_detay_alanlar">
                     <div class="mb-3" id="pesinat_orani_kutu">
                         <label for="pesinat_orani" class="form-label">Peşinat Oranı (%) <span class="text-danger">*</span></label>
                         <input type="number" step="0.01" min="0" max="100" class="form-control" id="pesinat_orani"
@@ -94,6 +106,7 @@
                         <input type="date" class="form-control" id="bakiye_tarihi" name="bakiye_tarihi"
                                value="{{ form_data.bakiye_tarihi if form_data else (oneri.bakiye_tarihi if oneri else '') }}" required>
                         {% if oneri and oneri.bakiye_kaynak and oneri.bakiye_tarihi and not form_data %}<small class="text-success">Hesaplama: {{ oneri.bakiye_kaynak }}</small>{% endif %}
+                    </div>
                     </div>
                 </div>
             </div>
@@ -169,6 +182,13 @@
     document.querySelectorAll('input[name="pesinat_durumu"]').forEach(function (r) { r.addEventListener('change', guncelle); });
     oran.addEventListener('input', guncelle);
     guncelle();
+    // 2026-11-03: 'Degistir' - tekliften gelen ozeti acip tam formu gosterir
+    var degistir = document.getElementById('odeme_degistir');
+    if (degistir) degistir.addEventListener('click', function (e) {
+        e.preventDefault();
+        document.querySelectorAll('.odeme-detay').forEach(function (el) { el.classList.remove('d-none'); });
+        degistir.classList.add('d-none');
+    });
 })();
 </script>
 {% endblock %}

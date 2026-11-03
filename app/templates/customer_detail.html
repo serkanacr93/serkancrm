@@ -194,6 +194,11 @@
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#gunluk-uretim">
+                    <i class="bi bi-boxes"></i> Günlük Üretim ({{ gunluk_uretim_satirlari|length }})
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link" data-bs-toggle="tab" href="#statements">
                     <i class="bi bi-cash-stack"></i> Ekstre ({{ statements|length }})
                 </a>
@@ -348,6 +353,39 @@
                         </div>
                         {% else %}
                         <p class="text-muted text-center py-4">Bu müşteriye henüz fatura kesilmemiş.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="gunluk-uretim">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        {% if gunluk_uretim_satirlari %}
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-dark">
+                                    <tr><th>Tarih</th><th>İş emri</th><th>Ürün</th><th>Kağıt</th>
+                                        <th class="text-end">Koli × kg</th><th class="text-end">Toplam kg</th><th>Giren</th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for s in gunluk_uretim_satirlari %}{% set g = s.g %}
+                                    <tr>
+                                        <td class="text-nowrap">{{ g.tarih.strftime('%d.%m.%Y') if g.tarih else '-' }}</td>
+                                        <td class="text-nowrap">{% if s.ie %}<a href="{{ url_for('production_detail', id=g.production_id) }}">{{ s.ie }}</a>{% if s.siparis %}<div class="small text-muted">{{ s.siparis.display_no }}</div>{% endif %}{% else %}<span class="text-muted small">bağlı değil</span>{% endif %}</td>
+                                        <td>{{ s.urun or (g.aciklama or '-') }}</td>
+                                        <td class="small">{{ g.kagit_cinsi or '-' }}</td>
+                                        <td class="text-end text-nowrap">{{ '%g' % (g.koli_adedi or 0) }} × {{ '%g' % (g.koli_basi_kg or 0) }}</td>
+                                        <td class="text-end fw-bold">{{ '%g' % (g.toplam_kg or 0) }} kg</td>
+                                        <td class="small text-muted">{{ g.user.username if g.user else '-' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot><tr class="table-light"><td colspan="5" class="text-end"><strong>Toplam</strong></td>
+                                    <td class="text-end"><strong>{{ '%g' % gunluk_uretim_toplam_kg }} kg</strong></td><td></td></tr></tfoot>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-4">Bu müşteriye bağlı günlük üretim kaydı yok.</p>
                         {% endif %}
                     </div>
                 </div>
