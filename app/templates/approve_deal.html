@@ -24,9 +24,9 @@
                         <tr><th>Müşteri:</th><td>
                             {% if deal.customer.company_name %}{{ deal.customer.company_name }} - {% endif %}{{ deal.customer.first_name }} {{ deal.customer.last_name }}
                         </td></tr>
-                        <tr><th>Ara Toplam:</th><td>{{ "{:,.2f}".format(deal.subtotal) }} ₺</td></tr>
-                        <tr><th>KDV (%{{ deal.vat_rate }}):</th><td>{{ "{:,.2f}".format(deal.vat_amount) }} ₺</td></tr>
-                        <tr><th>Genel Toplam:</th><td><strong>{{ "{:,.2f}".format(deal.value) }} ₺</strong></td></tr>
+                        <tr><th>Ara Toplam:</th><td>{{ deal.subtotal|para_goster(deal.para_birimi) }}</td></tr>
+                        <tr><th>KDV (%{{ deal.vat_rate }}):</th><td>{{ deal.vat_amount|para_goster(deal.para_birimi) }}</td></tr>
+                        <tr><th>Genel Toplam:</th><td><strong>{{ deal.value|para_goster(deal.para_birimi) }}</strong>{% if deal.para_birimi and deal.para_birimi != 'TRY' and deal.kullanilan_kur %} <span class="text-muted small">≈ {{ (deal.value * deal.kullanilan_kur)|para_goster }} (1 {{ deal.para_birimi }} = {{ deal.kullanilan_kur }} ₺)</span>{% endif %}</td></tr>
                     </table>
                 </div>
             </div>
@@ -42,7 +42,7 @@
                     {% if ozet_mod %}
                     <div class="border rounded p-3 mb-3 bg-light" id="odeme_ozet">
                         <div class="small text-success mb-2"><i class="bi bi-check-circle"></i> Ödeme planı tekliften alındı{% if oneri.ozet %}: <strong>{{ oneri.ozet }}</strong>{% endif %}</div>
-                        <div>Peşinat: <strong>{% if pesinatsiz %}yok{% else %}%{{ oneri.pesinat_orani }}{% if oneri.pesinat_tutari %} · {{ "{:,.2f}".format(oneri.pesinat_tutari) }} ₺{% endif %}{% endif %}</strong></div>
+                        <div>Peşinat: <strong>{% if pesinatsiz %}yok{% else %}%{{ oneri.pesinat_orani }}{% if oneri.pesinat_tutari %} · {{ oneri.pesinat_tutari|para_goster(deal.para_birimi) }}{% endif %}{% endif %}</strong></div>
                         <div>Bakiye: beklenen <strong>{{ oneri.bakiye_tarihi[8:10] }}.{{ oneri.bakiye_tarihi[5:7] }}.{{ oneri.bakiye_tarihi[0:4] }}</strong>{% if oneri.bakiye_kaynak %} <span class="text-muted small">({{ oneri.bakiye_kaynak }})</span>{% endif %}</div>
                         <a href="#" class="small" id="odeme_degistir"><i class="bi bi-pencil"></i> Değiştir</a>
                     </div>
@@ -74,7 +74,7 @@
                             <label class="btn btn-outline-secondary {{ 'd-none odeme-detay' if ozet_mod and not pesinatsiz }}" for="pd_yok">Peşinat yok</label>
                         </div>
                         {% if kayitli_odeme and kayitli_odeme > 0.01 %}
-                        <div class="small text-success mt-1"><i class="bi bi-info-circle"></i> Bu teklife kayıtlı <strong>{{ "{:,.2f}".format(kayitli_odeme) }} ₺</strong> ödeme var — "Alındı" seçilirse sadece eksik kısım eklenir, aynı ödeme ikinci kez kaydedilmez.</div>
+                        <div class="small text-success mt-1"><i class="bi bi-info-circle"></i> Bu teklife kayıtlı <strong>{{ kayitli_odeme|para_goster(deal.para_birimi) }}</strong> ödeme var — "Alındı" seçilirse sadece eksik kısım eklenir, aynı ödeme ikinci kez kaydedilmez.</div>
                         {% endif %}
                         <div class="small mt-1" id="pd_aciklama"></div>
                     </div>
@@ -84,7 +84,7 @@
                         <input type="number" step="0.01" min="0" max="100" class="form-control" id="pesinat_orani"
                                name="pesinat_orani" placeholder="Örn: 50"
                                value="{{ form_data.pesinat_orani if form_data else (oneri.pesinat_orani if oneri else '') }}" required>
-                        <small class="text-muted">Toplam {{ "{:,.2f}".format(deal.value) }} ₺ üzerinden peşinat tutarı hesaplanır.{% if oneri and oneri.pesinat_tutari is not none and not form_data %} <span class="text-success">Tekliften: ≈ {{ "{:,.2f}".format(oneri.pesinat_tutari) }} ₺</span>{% endif %}</small>
+                        <small class="text-muted">Toplam {{ deal.value|para_goster(deal.para_birimi) }} üzerinden peşinat tutarı hesaplanır.{% if oneri and oneri.pesinat_tutari is not none and not form_data %} <span class="text-success">Tekliften: ≈ {{ oneri.pesinat_tutari|para_goster(deal.para_birimi) }}</span>{% endif %}</small>
                     </div>
                     <div class="mb-3" id="pesinat_tarihi_kutu">
                         <label for="pesinat_tarihi" class="form-label"><span id="pesinat_tarihi_etiket">Peşinat Ödeme Tarihi</span> <span class="text-danger">*</span></label>
@@ -150,7 +150,8 @@
     var yontemKutu = document.getElementById('pesinat_yontemi_kutu');
     var etiket = document.getElementById('pesinat_tarihi_etiket');
     var aciklama = document.getElementById('pd_aciklama');
-    function tl(x) { return x.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'; }
+    var PB_SEMBOL = {{ ({'TRY': '₺', 'USD': '$', 'EUR': '€', 'GBP': '£'}).get(deal.para_birimi or 'TRY', deal.para_birimi)|tojson }};  // 2026-11-15
+    function tl(x) { return x.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + PB_SEMBOL; }
     function guncelle() {
         var sec = document.querySelector('input[name="pesinat_durumu"]:checked');
         var v = sec ? sec.value : '';

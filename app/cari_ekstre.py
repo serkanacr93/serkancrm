@@ -32,14 +32,26 @@ def _kalem_detay(items):
     return out
 
 
+def _doviz_notu(tutar, para_birimi, kur):
+    """2026-11-14: dovizli satira aciklama eki - '6.528,00 USD × 50,2830'."""
+    if not para_birimi or para_birimi == 'TRY':
+        return ''
+    t = f"{float(tutar or 0):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    if kur:
+        k = f"{float(kur):,.4f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        return f' ({t} {para_birimi} × {k})'
+    return f' ({t} {para_birimi}, kur girilmemiş)'
+
+
 def sistem_hareketleri(customer):
     rows = []
     faturalar = Invoice.query.filter_by(customer_id=customer.id, type='fatura').all()
     for inv in faturalar:
         rows.append({
             'tarih': _gun(inv.date) or _gun(inv.created_at), 'belge': inv.display_no,
-            'aciklama': 'Fatura' + (f' · {inv.deal.display_no}' if inv.deal else ''),
-            'borc': float(inv.total or 0), 'alacak': 0.0, 'detay': _kalem_detay(inv.items),
+            'aciklama': 'Fatura' + (f' · {inv.deal.display_no}' if inv.deal else '')
+                        + _doviz_notu(inv.total, inv.para_birimi, inv.deal.kullanilan_kur if inv.deal else None),
+            'borc': float(inv.total_tl or 0), 'alacak': 0.0, 'detay': _kalem_detay(inv.items),
             'kaynak': 'sistem', 'sira': 1,
         })
     faturali_deal = {inv.deal_id for inv in Invoice.query.filter(
@@ -49,8 +61,8 @@ def sistem_hareketleri(customer):
             continue
         rows.append({
             'tarih': _gun(d.deal_date) or _gun(d.created_at), 'belge': d.display_no,
-            'aciklama': 'Sipariş (faturası henüz kesilmedi)',
-            'borc': float(d.value or 0), 'alacak': 0.0, 'detay': _kalem_detay(d.items),
+            'aciklama': 'Sipariş (faturası henüz kesilmedi)' + _doviz_notu(d.value, d.para_birimi, d.kullanilan_kur),
+            'borc': float(d.deger_tl or 0), 'alacak': 0.0, 'detay': _kalem_detay(d.items),
             'kaynak': 'sistem', 'sira': 1,
         })
     yontem = {'nakit': 'nakit', 'kredi_karti': 'kredi kartı', 'havale': 'havale', 'cek': 'çek'}
@@ -61,9 +73,13 @@ def sistem_hareketleri(customer):
             parca.append(p.notes.strip()[:60])
         if p.payment_method:
             parca.append(yontem.get(p.payment_method, p.payment_method))
+        if abs(float(p.tutar_tl or 0) - float(p.amount or 0)) > 0.005:
+            _pb = (p.invoice.para_birimi if p.invoice else None) or (p.deal.para_birimi if p.deal else None) or 'döviz'
+            _d = p.deal or (p.invoice.deal if p.invoice else None)
+            parca.append(_doviz_notu(p.amount, _pb, p.kur_orani or (_d.kullanilan_kur if _d else None)).strip(' ()'))
         rows.append({
             'tarih': _gun(p.payment_date) or _gun(p.created_at), 'belge': belge,
-            'aciklama': ' · '.join(parca), 'borc': 0.0, 'alacak': float(p.amount or 0),
+            'aciklama': ' · '.join(parca), 'borc': 0.0, 'alacak': float(p.tutar_tl or 0),
             'detay': [], 'kaynak': 'sistem', 'sira': 2,
         })
     return rows

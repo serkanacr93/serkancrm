@@ -22,7 +22,7 @@
             </div>
             <div class="row">
                 <div class="col-md-3 mb-3">
-                    <label for="value" class="form-label">Toplam Değer (₺) *</label>
+                    <label for="value" class="form-label">Toplam Değer (<span id="toplam_deger_sembol">{{ deal.para_birimi_sembol }}</span>) *</label>
                     <input type="number" class="form-control" id="value" name="value" value="{{ deal.value }}" min="0" step="any" required>
                 </div>
                 <div class="col-md-3 mb-3">
@@ -318,6 +318,9 @@ document.getElementById('odeme_havale').addEventListener('change', updateHavaleO
 updateHavaleOnizleme();
 
 document.getElementById('para_birimi').addEventListener('change', function () {
+    // 2026-11-14: "Toplam Değer" etiketindeki sembol secili para birimini gostersin
+    var _sem = document.getElementById('toplam_deger_sembol');
+    if (_sem) _sem.textContent = ({ TRY: '₺', EUR: '€', USD: '$', GBP: '£' })[this.value] || this.value;
     var kurBox = document.getElementById('kullanilan_kur_box');
     var kurInput = document.getElementById('kullanilan_kur');
     if (this.value === 'TRY') {

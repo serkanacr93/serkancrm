@@ -322,10 +322,11 @@
                                             {% if inv.type != 'fatura' %}<span class="badge bg-secondary">İrsaliye</span>{% endif %}</td>
                                         <td>{{ inv.date.strftime('%d.%m.%Y') if inv.date else '-' }}</td>
                                         <td>{% if inv.deal %}<a href="{{ url_for('deal_detail', id=inv.deal.id) }}">{{ inv.deal.display_no }}</a>{% else %}<span class="text-muted">-</span>{% endif %}</td>
-                                        <td class="text-end"><strong>{{ inv.total|para_goster }}</strong></td>
+                                        <td class="text-end"><strong>{{ inv.total|para_goster(inv.para_birimi or 'TRY') }}</strong>
+                                            {% if inv.para_birimi and inv.para_birimi != 'TRY' %}<div class="small text-muted">≈ {{ inv.total_tl|para_goster }}</div>{% endif %}</td>
                                         {% if inv.type == 'fatura' %}
-                                        <td class="text-end text-success">{{ inv.paid_amount|para_goster }}</td>
-                                        <td class="text-end {{ 'text-danger' if inv.remaining_amount > 0.01 else '' }}">{{ inv.remaining_amount|para_goster }}</td>
+                                        <td class="text-end text-success">{{ inv.paid_amount|para_goster(inv.para_birimi or 'TRY') }}</td>
+                                        <td class="text-end {{ 'text-danger' if inv.remaining_amount > 0.01 else '' }}">{{ inv.remaining_amount|para_goster(inv.para_birimi or 'TRY') }}</td>
                                         <td>
                                             {% set ps = inv.payment_status %}
                                             <span class="badge bg-{{ 'success' if ps == 'odendi' else 'warning text-dark' if ps == 'kismi_odendi' else 'danger' }}">
@@ -346,7 +347,7 @@
                                     <tr class="table-light">
                                         <td colspan="3" class="text-end"><strong>Fatura toplamı</strong></td>
                                         <td class="text-end"><strong>{{ fatura_toplami|para_goster }}</strong></td>
-                                        <td colspan="4" class="small text-muted">= Cari Hesap'taki "Faturalanmış"</td>
+                                        <td colspan="4" class="small text-muted">= Cari Hesap'taki "Faturalanmış"{% if musteri_faturalari|selectattr('para_birimi')|rejectattr('para_birimi', 'equalto', 'TRY')|list %} (dövizli faturalar TL karşılığıyla){% endif %}</td>
                                     </tr>
                                 </tfoot>
                             </table>

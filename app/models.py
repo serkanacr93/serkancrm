@@ -208,7 +208,8 @@ class Customer(db.Model):
         """Cari hesap (Is F) - GERCEK Invoice kayitlarindan canli hesaplanir,
         onbellege alinmaz. Sadece 'fatura' tipi belgeler tutar sayilir
         (irsaliyenin bedeli yoktur)."""
-        return sum(inv.total for inv in Invoice.query.filter_by(customer_id=self.id, type='fatura').all())
+        # 2026-11-14: dovizli fatura (USD/EUR) TL karsiligiyla toplanir
+        return sum(inv.total_tl for inv in Invoice.query.filter_by(customer_id=self.id, type='fatura').all())
 
     @property
     def total_uninvoiced_won(self):
@@ -232,8 +233,9 @@ class Customer(db.Model):
             Deal.customer_id == self.id, Deal.stage == 'kazanilan',
             ~Deal.id.in_(invoiced_deal_ids)
         ).all()
+        # 2026-11-14: dovizli siparis (USD/EUR) teklifteki kurla TL'ye cevrilir (Deal.deger_tl)
         return sum(
-            d.value for d in deals
+            d.deger_tl for d in deals
             if d.production and d.production.status in ('hazir', 'sevkiyat')
         )
 
@@ -241,7 +243,8 @@ class Customer(db.Model):
     def total_collected(self):
         """Musteriye ait, 'odendi' durumundaki TUM Payment kayitlarinin toplami
         (fatura/teklif baglantisindan bagimsiz - gercek tahsil edilen nakit)."""
-        return sum(p.amount for p in self.payments if p.status == 'odendi')
+        # 2026-11-14: dovizli odeme TL karsiligiyla toplanir (Payment.tutar_tl)
+        return sum(p.tutar_tl for p in self.payments if p.status == 'odendi')
 
     @property
     def balance(self):
@@ -1133,6 +1136,16 @@ class Invoice(db.Model):
         return CURRENCY_SYMBOLS.get(self.para_birimi or 'TRY', self.para_birimi)
 
     @property
+    def total_tl(self):
+        """2026-11-14: cari bakiye icin TL karsiligi. TRY/bos ise total aynen;
+        dovizli (USD/EUR) faturada bagli teklifin kullanilan_kur'u ile cevrilir;
+        kur yoksa total oldugu gibi (Deal.deger_tl ile AYNI kural)."""
+        if not self.para_birimi or self.para_birimi == 'TRY':
+            return self.total or 0
+        kur = self.deal.kullanilan_kur if self.deal is not None else None
+        return (self.total or 0) * kur if kur else (self.total or 0)
+
+    @property
     def owner_id(self):
         """Sahiplik kontrolu icin - once kendi user_id'si, o da yoksa
         (eski kayitlar) bagli teklifin sahibine duser. Ikisi de yoksa
@@ -1369,6 +1382,22 @@ class Payment(db.Model):
         """kur_orani girilmisse amount * kur_orani (dovizin TL karsiligi),
         yoksa amount'un zaten TL oldugu varsayilir."""
         return self.amount * self.kur_orani if self.kur_orani else self.amount
+
+    @property
+    def tutar_tl(self):
+        """2026-11-15: cari bakiye icin TL karsiligi. kur_orani girilmisse
+        amount * kur_orani. Girilmemis ama odeme dovizli (USD/EUR) bir
+        siparise/faturaya bagliysa tutar o para biriminde girilmistir (odeme
+        formu da bagli kayit dovizliyse dovizle ister; onaydaki 'Alindi'
+        pesinati ve faturadaki on odeme de siparisin para biriminde kaydedilir)
+        - teklifin kullanilan_kur'u ile cevrilir. Diger her durumda TL."""
+        if self.kur_orani:
+            return (self.amount or 0) * self.kur_orani
+        d = self.deal if self.deal is not None else (self.invoice.deal if self.invoice is not None else None)
+        pb = (self.invoice.para_birimi if self.invoice is not None else None) or (d.para_birimi if d is not None else None)
+        if pb and pb != 'TRY' and d is not None and d.kullanilan_kur:
+            return (self.amount or 0) * d.kullanilan_kur
+        return self.amount or 0
 
     def __repr__(self):
         return f'<Payment {self.amount} ₺ - {self.customer.display_name}>'

@@ -2667,6 +2667,24 @@ def register_routes(app):
             customers_query = customers_query.filter(Customer.owner_user_id == current_user.id)
         customers = customers_query.all()
 
+        # 2026-11-14: dovizli (USD/EUR) fatura / siparis / odemeler TL karsiligiyla
+        # sayilir - Customer.total_invoiced / total_uninvoiced_won / total_collected
+        # ile AYNI kural. Yukaridaki SQL toplamlari ham tutari topluyor; burada
+        # sadece dovizli kayitlarin farki (TL karsiligi - ham tutar) eklenir.
+        for inv in Invoice.query.filter(Invoice.type == 'fatura', Invoice.para_birimi.isnot(None),
+                                        Invoice.para_birimi != 'TRY').all():
+            invoiced_map[inv.customer_id] = invoiced_map.get(inv.customer_id, 0) + (inv.total_tl - (inv.total or 0))
+        for d in Deal.query.join(Production, Production.deal_id == Deal.id).filter(
+                Deal.stage == 'kazanilan', ~Deal.id.in_(invoiced_deal_ids_subq),
+                Production.status.in_(['hazir', 'sevkiyat']),
+                Deal.para_birimi.isnot(None), Deal.para_birimi != 'TRY').all():
+            uninvoiced_won_map[d.customer_id] = uninvoiced_won_map.get(d.customer_id, 0) + (d.deger_tl - (d.value or 0))
+        for p in Payment.query.filter(Payment.status == 'odendi', db.or_(
+                Payment.kur_orani.isnot(None), Payment.deal_id.isnot(None), Payment.invoice_id.isnot(None))).all():
+            _fark = p.tutar_tl - (p.amount or 0)
+            if abs(_fark) > 0.005:
+                collected_map[p.customer_id] = collected_map.get(p.customer_id, 0) + _fark
+
         rows = []
         cities = set()
         for c in customers:
@@ -3005,7 +3023,7 @@ def register_routes(app):
         musteri_faturalari = Invoice.query.filter_by(customer_id=customer.id).options(
             joinedload(Invoice.payments), joinedload(Invoice.deal)
         ).order_by(Invoice.date.desc(), Invoice.id.desc()).all()
-        fatura_toplami = sum(float(i.total or 0) for i in musteri_faturalari if i.type == 'fatura')
+        fatura_toplami = sum(float(i.total_tl or 0) for i in musteri_faturalari if i.type == 'fatura')  # 2026-11-14: TL karsiligi
 
         # 2026-11-03: musteri sayfasinda 'Gunluk Uretim' sekmesi - bu musteriye
         # (customer_id) ya da musterinin siparislerinin is emrine (production_id)
