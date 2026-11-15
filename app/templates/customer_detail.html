@@ -59,23 +59,35 @@
                 <i class="bi bi-wallet2"></i> Cari Hesap
             </div>
             <div class="card-body">
+                {% set eski_var = (balance_info.eski_borc or 0) > 0.005 or (balance_info.eski_tahsilat or 0) > 0.005 %}
                 <div class="row text-center">
-                    <div class="col-md-3">
+                    <div class="col-md">
                         <h6 class="text-muted mb-1">Faturalanmış</h6>
                         <h5>{{ balance_info.invoiced|para_goster }}</h5>
                         {% if musteri_faturalari %}<a href="#faturalar" class="small fatura-sekme-ac"><i class="bi bi-receipt"></i> Faturaları gör ({{ musteri_faturalari|selectattr('type','equalto','fatura')|list|length }})</a>{% endif %}
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md">
                         <h6 class="text-muted mb-1" title="Kazanılmış ama henüz fatura kesilmemiş tekliflerin toplam değeri">
                             Faturalanmamış Kazanılan
                         </h6>
                         <h5>{{ balance_info.uninvoiced_won|para_goster }}</h5>
                     </div>
-                    <div class="col-md-3">
-                        <h6 class="text-muted mb-1">Toplam Tahsil Edilen</h6>
-                        <h5 class="text-success">{{ balance_info.collected|para_goster }}</h5>
+                    {% if eski_var %}
+                    <div class="col-md">
+                        <h6 class="text-muted mb-1" title="Muhasebeden aktarılan, CRM'deki ilk hareketten önceki eski cari kayıtlar">
+                            Eski Borç (muhasebe)
+                        </h6>
+                        <h5>{{ balance_info.eski_borc|para_goster }}</h5>
                     </div>
-                    <div class="col-md-3">
+                    {% endif %}
+                    <div class="col-md">
+                        <h6 class="text-muted mb-1">Toplam Tahsil Edilen</h6>
+                        <h5 class="text-success mb-0">{{ (balance_info.collected_toplam if balance_info.collected_toplam is defined else balance_info.collected)|para_goster }}</h5>
+                        {% if eski_var and (balance_info.eski_tahsilat or 0) > 0.005 %}
+                        <div class="small text-muted">{{ balance_info.eski_tahsilat|para_goster }} muhasebe + {{ balance_info.collected|para_goster }} CRM</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md">
                         <h6 class="text-muted mb-1">Toplam Bakiye</h6>
                         <h4 class="{{ 'text-danger' if balance_info.balance > 0.01 else 'text-success' }}">
                             {{ balance_info.balance|para_goster }}
@@ -88,7 +100,7 @@
                     </div>
                 </div>
                 <div class="small text-muted mt-2 text-center">
-                    Faturalanmış + Faturalanmamış Kazanılan Teklif − Tahsil Edilen = Toplam Bakiye
+                    Faturalanmış + Faturalanmamış Kazanılan Teklif{% if eski_var %} + Eski Borç{% endif %} − Tahsil Edilen = Toplam Bakiye
                 </div>
             </div>
         </div>

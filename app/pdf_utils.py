@@ -4194,17 +4194,20 @@ def generate_cari_hesap_pdf(rows):
     elements.append(Spacer(1, 5*mm))
 
     if rows:
-        data = [['Müşteri', 'Şehir', 'Faturalanmış', 'Fat.yok Kazanılan', 'Tahsil Edilen', 'Toplam Bakiye']]
+        # 2026-11-16: 'Eski Borç' (muhasebeden gelen devir) sutunu eklendi;
+        # Tahsil Edilen = muhasebe + CRM tahsilati (ekrandaki ile ayni).
+        data = [['Müşteri', 'Şehir', 'Faturalanmış', 'Fat.yok Kazanılan', 'Eski Borç', 'Tahsil Edilen', 'Toplam Bakiye']]
         for r in rows:
             data.append([
                 Paragraph(_clean_for_pdf(r['customer'].display_name), turkish_style),
                 _clean_for_pdf(r['city']) if r['city'] else '-',
                 format_price_precise(r['invoiced']),
                 format_price_precise(r['uninvoiced_won']),
+                format_price_precise(r.get('eski_borc', 0)) if r.get('eski_borc') else '-',
                 format_price_precise(r['collected']),
                 format_price_precise(r['balance']),
             ])
-        table = Table(data, colWidths=[4.5*cm, 2.5*cm, 2.8*cm, 2.8*cm, 2.8*cm, 2.8*cm], repeatRows=1)
+        table = Table(data, colWidths=[4.0*cm, 2.1*cm, 2.5*cm, 2.5*cm, 2.3*cm, 2.5*cm, 2.6*cm], repeatRows=1)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),

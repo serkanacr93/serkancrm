@@ -246,6 +246,31 @@ class Customer(db.Model):
         # 2026-11-14: dovizli odeme TL karsiligiyla toplanir (Payment.tutar_tl)
         return sum(p.tutar_tl for p in self.payments if p.status == 'odendi')
 
+    def eski_devir(self):
+        """2026-11-16: muhasebeden aktarilan eski cari kayitlar (CustomerStatement
+        source='pdf_import'). SADECE CRM'deki ilk hareketten ONCEKI tarihli
+        olanlar sayilir - cari ekstredeki kuralla (app/cari_ekstre.py
+        eski_hareketler) BIREBIR ayni fonksiyon kullanilir, ayni hareket iki
+        kez sayilmaz. Donus: {'borc', 'tahsilat', 'sayi', 'ilk_tarih'}.
+        pdf_import kaydi olmayan musteride tek sorgu atar, sifir doner."""
+        bos = {'borc': 0.0, 'tahsilat': 0.0, 'sayi': 0, 'ilk_tarih': None}
+        if self.id is None:
+            return bos
+        var_mi = db.session.query(CustomerStatement.id).filter_by(
+            customer_id=self.id, source='pdf_import').first()
+        if var_mi is None:
+            return bos
+        from app.cari_ekstre import sistem_hareketleri, eski_hareketler
+        s_rows = sistem_hareketleri(self)
+        bas = min((r['tarih'] for r in s_rows if r['tarih']), default=None)
+        e_rows = eski_hareketler(self, bas)
+        return {
+            'borc': sum(r['borc'] for r in e_rows),
+            'tahsilat': sum(r['alacak'] for r in e_rows),
+            'sayi': len(e_rows),
+            'ilk_tarih': min((r['tarih'] for r in e_rows if r['tarih']), default=None),
+        }
+
     @property
     def balance(self):
         """Kalan Bakiye = Faturalanan + Faturalanmamis Kazanilan Teklif -
@@ -253,8 +278,14 @@ class Customer(db.Model):
         odeme tamam ya da fazla odenmis. Bu, Cari Hesap Ozeti sayfasindaki
         toplu (GROUP BY) hesaplamayla AYNI mantigi kullanir (bkz.
         cari_hesap_ozeti() route'u) - iki sayfa artik hep ayni bakiyeyi
-        gosterir."""
-        return self.total_invoiced + self.total_uninvoiced_won - self.total_collected
+        gosterir.
+
+        2026-11-16: + muhasebeden gelen eski borc - eski tahsilat (eski_devir).
+        Sonuc kurusa yuvarlanir (0,01 TL'lik kayan nokta artigi 'borclu'
+        gorunmesin)."""
+        e = self.eski_devir()
+        return round(self.total_invoiced + self.total_uninvoiced_won + e['borc']
+                     - self.total_collected - e['tahsilat'], 2)
 
     def __repr__(self):
         return f'<Customer {self.display_name}>'

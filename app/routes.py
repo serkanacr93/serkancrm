@@ -31,11 +31,22 @@ def calculate_customer_balance(customer):
     ve Cari Hesap Ozeti'nin bulk GROUP BY hesaplamasi (cari_hesap_ozeti())
     hep bu tek tanima dayanir, ikinci/farkli bir hesaplama yolu yok.
     customer: zaten yuklenmis bir Customer instance'i (tekrar sorgu atmaz)."""
+    # 2026-11-16: muhasebeden gelen eski devir (eski borc + eski tahsilat).
+    # 'collected' eskisi gibi SADECE CRM tahsilati; ekranda gosterilen toplam
+    # 'collected_toplam' (muhasebe + CRM).
+    eski = customer.eski_devir()
+    invoiced = customer.total_invoiced
+    uninvoiced_won = customer.total_uninvoiced_won
+    collected = customer.total_collected
     return {
-        'invoiced': customer.total_invoiced,
-        'uninvoiced_won': customer.total_uninvoiced_won,
-        'collected': customer.total_collected,
-        'balance': customer.balance,
+        'invoiced': invoiced,
+        'uninvoiced_won': uninvoiced_won,
+        'collected': collected,
+        'eski_borc': eski['borc'],
+        'eski_tahsilat': eski['tahsilat'],
+        'eski_sayi': eski['sayi'],
+        'collected_toplam': collected + eski['tahsilat'],
+        'balance': round(invoiced + uninvoiced_won + eski['borc'] - collected - eski['tahsilat'], 2),
     }
 
 def _customers_with_activity_subquery():
@@ -2685,16 +2696,25 @@ def register_routes(app):
             if abs(_fark) > 0.005:
                 collected_map[p.customer_id] = collected_map.get(p.customer_id, 0) + _fark
 
+        # 2026-11-16: muhasebeden gelen eski devir - Customer.balance ile AYNI
+        # kural (Customer.eski_devir). Sadece pdf_import kaydi olan musteriler
+        # icin hesaplanir (az sayida), digerlerinde sifir.
+        eski_ids = {cid for (cid,) in db.session.query(CustomerStatement.customer_id).filter(
+            CustomerStatement.source == 'pdf_import').distinct().all()}
+
         rows = []
         cities = set()
         for c in customers:
             invoiced = invoiced_map.get(c.id, 0)
             uninvoiced_won = uninvoiced_won_map.get(c.id, 0)
             collected = collected_map.get(c.id, 0)
-            balance = invoiced + uninvoiced_won - collected
+            eski = c.eski_devir() if c.id in eski_ids else {'borc': 0.0, 'tahsilat': 0.0, 'ilk_tarih': None}
+            balance = round(invoiced + uninvoiced_won + eski['borc'] - collected - eski['tahsilat'], 2)
 
-            oldest_dates = [d for d in [oldest_invoice_map.get(c.id), oldest_uninvoiced_deal_map.get(c.id)] if d]
-            debt_age_days = (today - min(oldest_dates).date()).days if (oldest_dates and balance > 0.01) else None
+            oldest_dates = [d.date() if isinstance(d, datetime) else d for d in
+                            [oldest_invoice_map.get(c.id), oldest_uninvoiced_deal_map.get(c.id),
+                             eski['ilk_tarih'] if eski['borc'] > 0 else None] if d]
+            debt_age_days = (today - min(oldest_dates)).days if (oldest_dates and balance > 0.01) else None
 
             last_whatsapp_date = last_whatsapp_map.get(c.id)
             last_whatsapp_days = (today - last_whatsapp_date).days if last_whatsapp_date else None
@@ -2705,7 +2725,9 @@ def register_routes(app):
 
             rows.append({
                 'customer': c, 'invoiced': invoiced, 'uninvoiced_won': uninvoiced_won,
-                'collected': collected, 'balance': balance, 'debt_age_days': debt_age_days,
+                'collected': collected + eski['tahsilat'], 'collected_crm': collected,
+                'eski_borc': eski['borc'], 'eski_tahsilat': eski['tahsilat'],
+                'balance': balance, 'debt_age_days': debt_age_days,
                 'last_whatsapp_days': last_whatsapp_days, 'city': city,
             })
         return rows, sorted(cities), cari_own_only
@@ -2727,11 +2749,13 @@ def register_routes(app):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = 'Cari Hesap Özeti'
-        ws.append(['Müşteri', 'Şehir', 'Faturalanmış', 'Faturalanmamış Kazanılan', 'Tahsil Edilen', 'Toplam Bakiye', 'Borç Yaşı (gün)'])
+        ws.append(['Müşteri', 'Şehir', 'Faturalanmış', 'Faturalanmamış Kazanılan', 'Eski Borç (muhasebe)',
+                   'Tahsil Edilen (toplam)', 'Muhasebe Tahsilatı', 'CRM Tahsilatı', 'Toplam Bakiye', 'Borç Yaşı (gün)'])
         for r in rows:
             ws.append([
                 r['customer'].display_name, r['city'] or '-', r['invoiced'], r['uninvoiced_won'],
-                r['collected'], r['balance'], r['debt_age_days'] if r['debt_age_days'] is not None else '-',
+                r['eski_borc'], r['collected'], r['eski_tahsilat'], r['collected_crm'],
+                r['balance'], r['debt_age_days'] if r['debt_age_days'] is not None else '-',
             ])
         buffer = BytesIO()
         wb.save(buffer)

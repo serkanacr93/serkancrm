@@ -84,6 +84,7 @@
                         <th>Şehir</th>
                         <th class="text-end">Faturalanmış</th>
                         <th class="text-end" title="Kazanılmış ama henüz fatura kesilmemiş tekliflerin toplam değeri">Faturalanmamış Kazanılan</th>
+                        <th class="text-end" title="Muhasebeden aktarılan, CRM'deki ilk hareketten önceki eski cari borç">Eski Borç (muhasebe)</th>
                         <th class="text-end">Tahsil Edilen</th>
                         <th class="text-end">
                             <a href="{{ url_for('cari_hesap_ozeti', filter=filter_type, city=city_filter, owner=owner_filter, sort='balance_desc' if sort != 'balance_desc' else 'balance_asc') }}" class="text-white text-decoration-none">
@@ -102,7 +103,8 @@
                         <td>{{ r.city or '-' }}</td>
                         <td class="text-end">{{ r.invoiced|para_goster }}</td>
                         <td class="text-end text-muted">{{ r.uninvoiced_won|para_goster }}</td>
-                        <td class="text-end text-success">{{ r.collected|para_goster }}</td>
+                        <td class="text-end text-muted">{% if r.eski_borc %}{{ r.eski_borc|para_goster }}{% else %}-{% endif %}</td>
+                        <td class="text-end text-success">{{ r.collected|para_goster }}{% if r.eski_tahsilat %}<div class="small text-muted">{{ r.eski_tahsilat|para_goster }} muhasebe + {{ r.collected_crm|para_goster }} CRM</div>{% endif %}</td>
                         <td class="text-end">
                             <strong class="{{ 'text-danger' if r.balance > 0.01 else 'text-success' }}">
                                 {{ r.balance|para_goster }}
