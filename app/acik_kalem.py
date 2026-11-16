@@ -75,7 +75,7 @@ def hesapla(customer_ids=None, bugun=None):
     bugun = bugun or datetime.now().date()
     ids = set(customer_ids) if customer_ids is not None else None
 
-    inv_q = Invoice.query.options(joinedload(Invoice.deal)).filter(Invoice.type == 'fatura')
+    inv_q = Invoice.query.filter(Invoice.type == 'fatura')
     pay_q = Payment.query.filter(Payment.status == 'odendi')
     deal_q = (Deal.query.options(joinedload(Deal.production))
               .join(Production, Production.deal_id == Deal.id)
@@ -91,6 +91,15 @@ def hesapla(customer_ids=None, bugun=None):
     invoices = inv_q.all()
     payments = pay_q.all()
     deals = deal_q.all()
+    # 2026-11-17 (hiz): Payment.tutar_tl ve vade hesabi p.deal / p.invoice /
+    # p.invoice.deal'e bakar - bunlar oturumda yoksa HER odeme icin ayri sorgu
+    # atiliyordu. Gereken fatura ve siparisler burada TOPLUCA yuklenir
+    # (oturumun kimlik haritasina girer, sonraki erisimler sorgu atmaz).
+    _inv_ids = {p.invoice_id for p in payments if p.invoice_id} - {i.id for i in invoices}
+    _ek_inv = Invoice.query.filter(Invoice.id.in_(_inv_ids)).all() if _inv_ids else []
+    _deal_ids = ({p.deal_id for p in payments if p.deal_id} | {i.deal_id for i in invoices if i.deal_id}
+                 | {i.deal_id for i in _ek_inv if i.deal_id}) - {d.id for d in deals}
+    _ek_deal = Deal.query.options(joinedload(Deal.production)).filter(Deal.id.in_(_deal_ids)).all() if _deal_ids else []
     eski_ids = {cid for (cid,) in eski_q.distinct().all()}
 
     # Faturasi (type='fatura') olan siparisler - Customer.total_uninvoiced_won

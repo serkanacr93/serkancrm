@@ -104,19 +104,30 @@
     </div>
 </div>
 {% if alacak_ozet %}
-{# 2026-11-16: alacak kutulari - Tahsilat Listesi ile ayni hesap #}
-<div class="km-kpis" style="grid-template-columns:repeat(2,1fr);">
+{# 2026-11-17: alacak kutulari sayfa acildiktan sonra /api/alacak-ozeti'nden yuklenir #}
+<div class="km-kpis" id="alacakKutulari" style="grid-template-columns:repeat(2,1fr);">
     <a class="km-kpi text-decoration-none" href="{{ url_for('tahsilat_listesi_sayfa') }}">
         <div class="t">Toplam Alacak</div>
-        <div class="v">{{ alacak_ozet.toplam|para_goster }}</div>
-        <div class="s" style="color:#777;">{{ alacak_ozet.musteri }} müşteri · listeyi aç →</div>
+        <div class="v" id="akToplam">…</div>
+        <div class="s" style="color:#777;" id="akToplamAlt">hesaplanıyor</div>
     </a>
     <a class="km-kpi text-decoration-none" href="{{ url_for('tahsilat_listesi_sayfa', filtre='gecen') }}">
         <div class="t">Vadesi Geçen</div>
-        <div class="v" {% if alacak_ozet.gecen > 0.01 %}style="color:#b02a37;"{% endif %}>{{ alacak_ozet.gecen|para_goster }}</div>
-        <div class="s" style="color:#777;">{{ alacak_ozet.gecen_musteri }} müşteri</div>
+        <div class="v" id="akGecen">…</div>
+        <div class="s" style="color:#777;" id="akGecenAlt">&nbsp;</div>
     </a>
 </div>
+<script>
+(function () {
+    fetch('{{ url_for('api_alacak_ozeti') }}', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d || d.hata) { document.getElementById('alacakKutulari').style.display = 'none'; return; }
+        document.getElementById('akToplam').textContent = d.toplam;
+        document.getElementById('akToplamAlt').textContent = d.musteri + ' müşteri · listeyi aç →';
+        var g = document.getElementById('akGecen'); g.textContent = d.gecen; if (d.gecen_var) g.style.color = '#b02a37';
+        document.getElementById('akGecenAlt').textContent = d.gecen_musteri + ' müşteri';
+    }).catch(function () { document.getElementById('alacakKutulari').style.display = 'none'; });
+})();
+</script>
 {% endif %}
 
 <div class="km-layout">

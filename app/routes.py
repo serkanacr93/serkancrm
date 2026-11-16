@@ -1458,24 +1458,10 @@ def register_routes(app):
         else:
             greeting = 'İyi akşamlar'
 
-        # 2026-11-16: ana sayfa alacak kutulari (Tahsilat Listesi ile ayni
-        # hesap, ayni gorunurluk). Hata olursa ana sayfa BOZULMAZ - kutular gizlenir.
-        alacak_ozet = None
-        try:
-            from app.acik_kalem import tahsilat_listesi as _tahsilat_listesi
-            _satirlar, _ = _tahsilat_listesi()
-            _satirlar = [x for x in _satirlar if x['customer'].status != 'musteri_degil'
-                         and (current_user.is_admin or x['customer'].owner_user_id == current_user.id)]
-            alacak_ozet = {
-                'toplam': round(sum(x['toplam_borc'] for x in _satirlar), 2),
-                'musteri': len(_satirlar),
-                'gecen': round(sum(x['vadesi_gecen'] for x in _satirlar), 2),
-                'gecen_musteri': sum(1 for x in _satirlar if x['vadesi_gecen'] > 0.01),
-            }
-        except Exception:
-            db.session.rollback()
-            app.logger.exception('ana sayfa alacak ozeti hesaplanamadi')
-
+        # 2026-11-17: alacak kutulari ARTIK sayfa acilisinda hesaplanmaz (ana
+        # sayfayi ~8 sn yavaslatiyordu) - sayfa acildiktan sonra
+        # /api/alacak-ozeti'nden ayrica yuklenir, 2 dk bellekte tutulur.
+        alacak_ozet = True
         return render_template('index_komuta.html', alacak_ozet=alacak_ozet,
                                 greeting=greeting, today=today,
                                 toplam_teklif=toplam_teklif, siparis_sayisi=siparis_sayisi, donusum_pct=donusum_pct,
@@ -2787,6 +2773,38 @@ def register_routes(app):
         rows, _, _ = _cari_hesap_rows()
         pdf = generate_cari_hesap_pdf(rows)
         return send_file(pdf, as_attachment=True, download_name=f'cari_hesap_ozeti_{datetime.now().strftime("%Y%m%d")}.pdf')
+
+    _alacak_ozet_cache = {}
+
+    @app.route('/api/alacak-ozeti')
+    @login_required
+    def api_alacak_ozeti():
+        """Ana sayfadaki 'Toplam Alacak' / 'Vadesi Gecen' kutulari - Tahsilat
+        Listesi ile AYNI hesap ve gorunurluk. Kullanici basina 120 sn bellek-ici
+        onbellek (siparisler._sidebar_cache deseni). SADECE okur."""
+        import time as _time
+        anahtar = current_user.id
+        kayit = _alacak_ozet_cache.get(anahtar)
+        if kayit and _time.time() - kayit[0] < 120:
+            return jsonify(kayit[1])
+        try:
+            from app.acik_kalem import tahsilat_listesi as _tl
+            satirlar, _ = _tl()
+            satirlar = [x for x in satirlar if x['customer'].status != 'musteri_degil'
+                        and (current_user.is_admin or x['customer'].owner_user_id == current_user.id)]
+            veri = {
+                'toplam': format_price_tr(round(sum(x['toplam_borc'] for x in satirlar), 2)),
+                'musteri': len(satirlar),
+                'gecen': format_price_tr(round(sum(x['vadesi_gecen'] for x in satirlar), 2)),
+                'gecen_var': any(x['vadesi_gecen'] > 0.01 for x in satirlar),
+                'gecen_musteri': sum(1 for x in satirlar if x['vadesi_gecen'] > 0.01),
+            }
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('alacak ozeti hesaplanamadi')
+            return jsonify({'hata': True}), 200
+        _alacak_ozet_cache[anahtar] = (_time.time(), veri)
+        return jsonify(veri)
 
     def _musteri_acik_kalem_guvenli(customer):
         """Musteri kartindaki 'Açık kalemler' blogu - hata olursa kart BOZULMAZ."""
