@@ -147,7 +147,8 @@
                     <hr>
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" id="on_odeme_alindi" name="on_odeme_alindi">
-                        <label class="form-check-label" for="on_odeme_alindi"><strong>Ön Ödeme Alındı</strong></label>
+                        <label class="form-check-label" for="on_odeme_alindi"><strong>{% if unlinked_payments %}Ek ödeme alındı{% else %}Ön Ödeme Alındı{% endif %}</strong></label>
+                        {% if unlinked_payments %}<div class="form-text mt-0">Sadece bugün yeni alınan parayı girin. Daha önce alınan ödeme aşağıda düşüldü.</div>{% endif %}
                     </div>
                     <div id="on_odeme_box" style="display:none;">
                         <div class="mb-2">
@@ -171,6 +172,12 @@
                         </div>
                     </div>
                     <div class="alert alert-light border mb-3 py-2">
+                        {% if unlinked_payments %}
+                        {# 2026-11-16: sipariste alinan odeme kalan bakiyeden dusulur (cift giris olmasin) #}
+                        <div class="d-flex justify-content-between small"><span class="text-muted">Belge toplamı</span><span id="kb_belge_toplam">{{ deal.value|para_goster(deal.para_birimi) }}</span></div>
+                        <div class="d-flex justify-content-between small"><span class="text-muted">Bu siparişte alınan ödeme</span><span class="text-success" id="kb_alinan">-</span></div>
+                        <hr class="my-1">
+                        {% endif %}
                         <small class="text-muted d-block">Kaydedilince Kalan Bakiye</small>
                         <strong id="kalan_bakiye_preview" class="fs-5">{{ deal.value|para_goster(deal.para_birimi) }}</strong>
                     </div>
@@ -190,7 +197,7 @@
                     <p class="small mb-3">Bu tekliften alınan, henüz bir faturaya bağlanmamış ödemeler bulundu. İşaretlerseniz bu fatura ile ilişkilendirilir ve ödenen tutara dahil olur.</p>
                     {% for p in unlinked_payments %}
                     <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" name="link_payment_{{ p.id }}" id="link_payment_{{ p.id }}" checked>
+                        <input class="form-check-input link-payment-kutu" type="checkbox" name="link_payment_{{ p.id }}" id="link_payment_{{ p.id }}" data-tutar="{{ p.amount }}" checked>
                         <label class="form-check-label small" for="link_payment_{{ p.id }}">
                             {{ p.amount|para_goster(deal.para_birimi) }} - {{ p.payment_date.strftime('%d.%m.%Y') }}{% if p.payment_method %} ({{ p.payment_method }}){% endif %}
                         </label>
@@ -269,7 +276,13 @@ function calcAll() {
 function updateKalanBakiyePreview(grandTotal) {
     var onOdemeChecked = document.getElementById('on_odeme_alindi').checked;
     var onOdemeTutari = onOdemeChecked ? (onOdemeSayi(document.getElementById('on_odeme_tutari').value) || 0) : 0;
-    var kalan = grandTotal - onOdemeTutari;
+    // 2026-11-16: sipariste daha once alinan (bu belgeye baglanacak) odemeler de dusulur
+    var alinan = 0;
+    document.querySelectorAll('.link-payment-kutu').forEach(function (k) { if (k.checked) alinan += parseFloat(k.dataset.tutar) || 0; });
+    var kbA = document.getElementById('kb_alinan'), kbT = document.getElementById('kb_belge_toplam');
+    if (kbA) kbA.textContent = alinan > 0 ? '− ' + fmt(alinan) : fmt(0);
+    if (kbT) kbT.textContent = fmt(grandTotal);
+    var kalan = grandTotal - alinan - onOdemeTutari;
     document.getElementById('kalan_bakiye_preview').textContent = fmt(kalan);
 }
 
@@ -318,6 +331,7 @@ document.getElementById('on_odeme_alindi').addEventListener('change', function (
     calcAll();
 });
 document.getElementById('on_odeme_tutari').addEventListener('input', calcAll);
+document.querySelectorAll('.link-payment-kutu').forEach(function (k) { k.addEventListener('change', calcAll); });
 
 // ===== 2026-10-27 (Veri akisi 2): kalem secimi, kalan, fazla miktar uyarisi =====
 var SECILI_KALEM = {{ (secili_kalem or none)|tojson }};

@@ -191,6 +191,28 @@ def tutar_yaziyla(value):
     return text[0].upper() + text[1:]
 
 
+_YAZI_PARA_BIRIMI = {'USD': ('ABD Doları', 'Sent'), 'EUR': ('Euro', 'Sent')}
+
+
+def tutar_yaziyla_doviz(value, para_birimi):
+    """2026-11-16: dovizli teklifte 'Yalnız:' satiri teklifin KENDI para
+    biriminde yazilir ('Altı bin beş yüz yirmi sekiz ABD Doları'). TRY (ya da
+    taninmayan birim) icin tutar_yaziyla() ile ayni sonucu verir."""
+    if para_birimi not in _YAZI_PARA_BIRIMI:
+        return tutar_yaziyla(value)
+    ana, kusur = _YAZI_PARA_BIRIMI[para_birimi]
+    value = round(float(value), 2)
+    tam = int(value)
+    kalan = round((value - tam) * 100)
+    if kalan >= 100:
+        tam += 1
+        kalan = 0
+    text = _sayi_yaziyla_tam(tam) + ' ' + ana
+    if kalan:
+        text += ' ' + _sayi_yaziyla_tam(kalan) + ' ' + kusur
+    return text[0].upper() + text[1:]
+
+
 def _money_tr(value):
     """Yeni tasarimin GENEL para formati: Turkce ayrac (bin: nokta, ondalik:
     virgul), DAIMA 2 ondalik (87648 -> '87.648,00') - klasigin
@@ -364,16 +386,19 @@ def _kur_notu_yeni(deal, kur_tarihi_str, lang='tr'):
         )
     if not deal.kullanilan_kur:
         return None
+    # 2026-11-16: teklif seviyesi doviz - teklif artik KENDI para biriminde
+    # basiliyor (tutar/toplam $ ya da EUR), TL sadece bilgi satiri. Madde de
+    # buna gore: odeme dovizle ya da odeme gunu kuruyla TL olarak yapilabilir.
     if lang == 'en':
         return (
-            f"The exchange rate is the TCMB {_kur_adi_yeni()} rate dated {kur_tarihi_str} "
-            f"(1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TRY). Foreign-currency items are "
-            f"converted to TRY at the TCMB rate on the payment date."
+            f"This offer is in {deal.para_birimi}. Payment may be made in {deal.para_birimi} or in TRY "
+            f"at the TCMB {_kur_adi_yeni()} rate on the payment date "
+            f"(reference rate {kur_tarihi_str}: 1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TRY)."
         )
     return (
-        f"Döviz kuru {kur_tarihi_str} tarihli TCMB {_kur_adi_yeni()} kurudur "
-        f"(1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TL). Döviz kalemler "
-        f"ödeme günü TCMB kuruyla TL'ye çevrilir."
+        f"Bu teklif {deal.para_birimi} cinsindendir. Ödeme {deal.para_birimi} olarak ya da ödeme günündeki "
+        f"TCMB {_kur_adi_yeni()} kuruyla TL olarak yapılabilir "
+        f"(bilgi: {kur_tarihi_str} kuru 1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} TL)."
     )
 
 
@@ -1169,7 +1194,7 @@ _YENI_PDF_LABELS = {
         'kdv': 'KDV', 'genel_toplam': 'GENEL TOPLAM', 'yalniz': 'Yalnız:',
         'henuz_urun_yok': '<i>Henüz ürün eklenmemiş.</i>', 'teklifi_veren': 'Teklifi veren',
         'musteri_onayi': 'Müşteri onayı', 'kase_imza': 'Kaşe / İmza:', 'ad_soyad': 'Ad Soyad:',
-        'tl': 'TL',
+        'tl': 'TL', 'bilgi_tl': 'Bilgi:',
         'h_termin': 'Termin', 'is_gunu': 'iş günü', 'onaydan_sonra': 'onaydan sonra',
         'termin_maddesi': 'Termin süreleri sipariş ve baskı provası onayından itibaren iş günü olarak hesaplanır.',
     },
@@ -1189,7 +1214,7 @@ _YENI_PDF_LABELS = {
         'kdv': 'VAT', 'genel_toplam': 'GRAND TOTAL', 'yalniz': None,
         'henuz_urun_yok': '<i>No items added yet.</i>', 'teklifi_veren': 'Issued by',
         'musteri_onayi': 'Customer approval', 'kase_imza': 'Stamp / Signature:', 'ad_soyad': 'Name:',
-        'tl': 'TRY',
+        'tl': 'TRY', 'bilgi_tl': 'For reference:',
         'h_termin': 'Lead time', 'is_gunu': 'business days', 'onaydan_sonra': 'after approval',
         'termin_maddesi': 'Lead times are counted in business days from order and print proof approval.',
     },
@@ -1469,10 +1494,8 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
                 urun_lines.append(f"<font color='#666666' size=6.8>{t['kagit_cinsi']} {_escape(item.kagit_cinsi)}</font>")
             if item.renk:
                 urun_lines.append(f"<font color='#666666' size=6.8>{t['baski']} {_escape(item.renk)}</font>")
-            is_doviz = deal.para_birimi != 'TRY' and deal.kullanilan_kur
-            if is_doviz and item.unit == 'adet':
-                adet_basi_tl = item.unit_price * deal.kullanilan_kur
-                urun_lines.append(f"<b>{t['adet_basi']} {money(adet_basi_tl)} {t['tl']}</b>")
+            # 2026-11-16: teklif seviyesi dovizde "Adet başı ≈ ... TL" satiri
+            # KALDIRILDI - dovizli teklif kendi para biriminde basilir.
             urun_flow = [Paragraph('<br/>'.join(urun_lines), table_cell_style)]
             # Olcu satiri: mevcut en/boy/korugu (serbest metin) - bos olan yazilmaz.
             en_txt, en_val = _olcu_degeri(item.en, lang)
@@ -1524,10 +1547,7 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
             elif deal.para_birimi == 'TRY':
                 fiyat_text = f"{price_fmt(item.unit_price)} {t['tl']}/{item_unit_label}"
             else:
-                fiyat_text = f"{price_fmt(item.unit_price)} {para_sym}"
-                if deal.kullanilan_kur:
-                    tl_karsilik = item.unit_price * deal.kullanilan_kur
-                    fiyat_text += f"<br/><font color='#666666' size=6.5>≈ {money(tl_karsilik)} {t['tl']}</font>"
+                fiyat_text = f"{price_fmt(item.unit_price)} {para_sym}/{item_unit_label}"
             fiyat_cell = Paragraph(fiyat_text, table_cell_center_style)
 
             # Termin hucresi (2026-10-22): kalem.termin_gun -> deal.varsayilan_
@@ -1553,9 +1573,8 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
                 tutar_text = f"{money(item.total_price)} {item_doviz_sym}"
             elif deal.para_birimi == 'TRY':
                 tutar_text = f"{money(item.total_price)} {t['tl']}"
-            elif deal.kullanilan_kur:
-                tutar_text = f"{money(item.total_price * deal.kullanilan_kur)} {t['tl']}"
             else:
+                # 2026-11-16: teklif seviyesi doviz -> tutar KENDI para biriminde.
                 tutar_text = f"{money(item.total_price)} {para_sym}"
             tutar_cell = Paragraph(f"<b>{tutar_text}</b>", table_cell_center_style)
 
@@ -1649,13 +1668,11 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
         if deal.para_birimi == 'TRY':
             toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal, deal.vat_amount, deal.value, t['tl']
             tl_for_words = genel_toplam
-        elif deal.kullanilan_kur:
-            k = deal.kullanilan_kur
-            toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal * k, deal.vat_amount * k, deal.value * k, t['tl']
-            tl_for_words = genel_toplam
         else:
+            # 2026-11-16: dovizli teklif KENDI para biriminde toplanir (eskiden
+            # kur varsa TL'ye cevriliyordu - musteriye dolar teklif TL gidiyordu).
             toplam_haric, kdv, genel_toplam, toplam_sym = deal.subtotal, deal.vat_amount, deal.value, para_sym
-            tl_for_words = None
+            tl_for_words = genel_toplam
         # PAKET B Is B5: EN modda tutar-yaziyla HIC BASILMAZ (gorev tanimi
         # geregi) - t['yalniz'] None oldugunda asagida atlaniyor.
         if lang == 'en':
@@ -1683,7 +1700,14 @@ def _generate_deal_pdf_yeni(deal, lang='tr'):
         totals_wrapper = [totals_table]
         if tl_for_words is not None:
             totals_wrapper.append(Spacer(1, 2*mm))
-            totals_wrapper.append(Paragraph(f"{t['yalniz']} {tutar_yaziyla(tl_for_words)}", italic_style))
+            totals_wrapper.append(Paragraph(f"{t['yalniz']} {tutar_yaziyla_doviz(tl_for_words, deal.para_birimi)}", italic_style))
+        if deal.para_birimi != 'TRY' and deal.kullanilan_kur:
+            # Bilgi satiri: TL karsiligi (sadece bilgi - teklif dovizdir).
+            totals_wrapper.append(Spacer(1, 1*mm))
+            totals_wrapper.append(Paragraph(
+                f"{t['bilgi_tl']} ≈ {money(deal.value * deal.kullanilan_kur)} {t['tl']} "
+                f"(1 {deal.para_birimi} = {deal.kullanilan_kur:,.2f} {t['tl']})",
+                ParagraphStyle('YBilgiTL', parent=normal, fontSize=7, textColor=colors.HexColor('#666666'))))
 
         # 2026-10-22: dis tablo eskiden icerikten 6 mm DAR kuruluyordu (sag
         # sutun = toplam_w, ustune 6 mm sol pay) -> ortalaninca toplam kutusu
@@ -3979,7 +4003,7 @@ def generate_statement_pdf(customer, statements, total_debit, total_credit):
     buffer.seek(0)
     return buffer
 
-def generate_cari_ekstre_pdf(customer, ekstre, detay=False, imza=False, donem_metni=''):
+def generate_cari_ekstre_pdf(customer, ekstre, detay=False, imza=False, donem_metni='', acik_kalem=None):
     """2026-10-28: YENI cari hesap ekstresi (kurumsal tasarim - irsaliye ile
     ayni dil). ekstre: app.cari_ekstre.ekstre_olustur() ciktisi. Tarih
     sirasiyla Borc / Alacak / yuruyen Bakiye (B = musteri borclu, A =
@@ -4065,6 +4089,45 @@ def generate_cari_ekstre_pdf(customer, ekstre, detay=False, imza=False, donem_me
                               ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 8),
                               ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 7)]))
     el += [kutu, Spacer(1, 10)]
+
+    # 2026-11-16: acik kalem ozeti (app/acik_kalem.py) - SADECE tum hareketleri
+    # iceren ekstrede (donem/tur filtresi yokken) route tarafindan verilir.
+    if acik_kalem and acik_kalem.get('toplam_borc', 0) > 0.01:
+        ak = acik_kalem
+        so = ak.get('son_odeme')
+        nb = ParagraphStyle('ceAkV', parent=n, leading=15)
+        oz = Table([[
+            [Paragraph('TOPLAM AÇIK BORÇ', h), Paragraph(f"<font name='Vera-Bold' size='11'>{para(ak['toplam_borc'])} TL</font>", nb)],
+            [Paragraph('VADESİ GEÇEN', h),
+             Paragraph(f"<font name='Vera-Bold' size='11' color='{'#B02A37' if ak['vadesi_gecen'] > 0.01 else '#222222'}'>{para(ak['vadesi_gecen'])} TL</font>", nb),
+             Paragraph(f"en eski {ak['en_eski_gecikme']} gün" if ak.get('en_eski_gecikme') else 'gecikme yok', k)],
+            [Paragraph('SON ÖDEME', h),
+             Paragraph(f"<font name='Vera-Bold' size='11'>{para(so['tutar'])} TL</font>" if so else '-', nb),
+             Paragraph(so['tarih'].strftime('%d.%m.%Y') if so else 'ödeme yok', k)],
+        ]], colWidths=[W / 3.0] * 3)
+        oz.setStyle(TableStyle([('BOX', (0, 0), (-1, -1), 0.6, _Y_CIZGI_GRI), ('INNERGRID', (0, 0), (-1, -1), 0.6, _Y_CIZGI_GRI),
+                                ('BACKGROUND', (0, 0), (-1, -1), _Y_BEJ), ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                                ('LEFTPADDING', (0, 0), (-1, -1), 8), ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
+        el += [oz, Spacer(1, 6)]
+        akth = ParagraphStyle('ceAkTh', parent=n, fontName='Vera-Bold', fontSize=7.2, textColor=colors.HexColor('#555555'))
+        akthr = ParagraphStyle('ceAkThR', parent=akth, alignment=2)
+        ak_data = [[Paragraph('AÇIK KALEM', akth), Paragraph('TARİH', akth), Paragraph('VADE', akth),
+                    Paragraph('TUTAR', akthr), Paragraph('ÖDENEN', akthr), Paragraph('KALAN', akthr), Paragraph('DURUM', akth)]]
+        _ek = {'siparis': ' · faturasız teslim', 'eski': ' · muhasebe'}
+        for kl in ak['kalemler']:
+            gec = kl['gecikme'] or 0
+            durum_m = (f"<font color='#B02A37'>{gec} gün gecikti</font>" if gec > 0
+                       else (f"{-gec} gün var" if kl['vade'] else '-'))
+            ak_data.append([Paragraph(t(kl['belge']) + _ek.get(kl['tur'], ''), n),
+                            Paragraph(kl['tarih'].strftime('%d.%m.%Y') if kl['tarih'] else '-', n),
+                            Paragraph(kl['vade'].strftime('%d.%m.%Y') if kl['vade'] else '-', n),
+                            Paragraph(para(kl['tutar']), sag), Paragraph(para(kl['odenen']), sag),
+                            Paragraph(f"<font name='Vera-Bold'>{para(kl['kalan'])}</font>", sag), Paragraph(durum_m, n)])
+        akt = Table(ak_data, colWidths=[W * 0.25, W * 0.11, W * 0.11, W * 0.12, W * 0.12, W * 0.13, W * 0.16], repeatRows=1)
+        akt.setStyle(TableStyle([('LINEBELOW', (0, 0), (-1, -1), 0.4, _Y_CIZGI_GRI), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                 ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                                 ('LEFTPADDING', (0, 0), (-1, -1), 4), ('RIGHTPADDING', (0, 0), (-1, -1), 4)]))
+        el += [akt, Spacer(1, 10)]
 
     # Hareket tablosu
     th = ParagraphStyle('ceTh', parent=n, fontName='Vera-Bold', fontSize=7.4, textColor=_Y_SARI)
@@ -4226,6 +4289,79 @@ def generate_cari_hesap_pdf(rows):
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
+def generate_tahsilat_listesi_pdf(satirlar, ozet):
+    """2026-11-16 Tahsilat Listesi PDF - ekrandaki (filtrelenmis) satirlar +
+    her musterinin acik kalemleri. Veri app/acik_kalem.py'den gelir."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    n = ParagraphStyle('ThN', parent=styles['Normal'], fontName='Vera', fontSize=8)
+    kucuk = ParagraphStyle('ThK', parent=n, fontSize=7, textColor=colors.HexColor('#555555'))
+    title_style = ParagraphStyle('ThT', parent=styles['Title'], fontName='Vera-Bold', fontSize=15)
+    kirmizi = colors.HexColor('#b02a37')
+    m = _money_tr
+
+    elements = [Paragraph("TAHSİLAT LİSTESİ", title_style),
+                Paragraph(f"Rapor Tarihi: {datetime.now().strftime('%d.%m.%Y %H:%M')} · {len(satirlar)} müşteri", n),
+                Spacer(1, 3*mm)]
+    toplam = sum(s['toplam_borc'] for s in satirlar)
+    gecen = sum(s['vadesi_gecen'] for s in satirlar)
+    ozet_t = Table([[Paragraph('Toplam alacak', kucuk), Paragraph('Vadesi geçen', kucuk), Paragraph('Vadesi gelmeyen', kucuk)],
+                    [f"{m(toplam)} TL", f"{m(gecen)} TL", f"{m(toplam - gecen)} TL"]], colWidths=[6.2*cm]*3)
+    ozet_t.setStyle(TableStyle([
+        ('FONTNAME', (0, 1), (-1, 1), 'Vera-Bold'), ('FONTSIZE', (0, 1), (-1, 1), 11),
+        ('TEXTCOLOR', (1, 1), (1, 1), kirmizi),
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f4f4f1')),
+        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey), ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    elements += [ozet_t, Spacer(1, 5*mm)]
+
+    if not satirlar:
+        elements.append(Paragraph("<i>Bu filtreye uyan açık borç bulunmuyor.</i>", n))
+    else:
+        data = [['Müşteri / Belge', 'Tarih', 'Vade', 'Tutar', 'Ödenen', 'Kalan', 'Durum']]
+        stil = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a252f')), ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Vera-Bold'), ('FONTNAME', (0, 1), (-1, -1), 'Vera'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7.5), ('ALIGN', (3, 0), (5, -1), 'RIGHT'),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.3, colors.lightgrey), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]
+        _tur = {'siparis': ' · faturasız teslim', 'eski': ' · muhasebe'}
+        for s in satirlar:
+            r = len(data)
+            c = s['customer']
+            so = s['son_odeme']
+            alt = ' · '.join(x for x in [s.get('city') or '', _clean_for_pdf(c.phone or ''),
+                                         f"son ödeme {so['tarih'].strftime('%d.%m.%Y')} {m(so['tutar'])} TL" if so else 'ödeme yok'] if x)
+            data.append([Paragraph(f"<b>{_clean_for_pdf(c.display_name)}</b><br/><font size=6.5 color='#555555'>{alt}</font>", n),
+                         '', '', '', '', f"{m(s['toplam_borc'])}",
+                         f"{s['en_eski_gecikme']} gün gecikti" if s['en_eski_gecikme'] else 'vadesi gelmedi'])
+            stil += [('BACKGROUND', (0, r), (-1, r), colors.HexColor('#eef0f2')), ('SPAN', (0, r), (4, r)),
+                     ('FONTNAME', (5, r), (6, r), 'Vera-Bold')]
+            if s['en_eski_gecikme']:
+                stil.append(('TEXTCOLOR', (6, r), (6, r), kirmizi))
+            for k in s['kalemler']:
+                rr = len(data)
+                gec = k['gecikme'] or 0
+                data.append([Paragraph(f"&nbsp;&nbsp;&nbsp;{_clean_for_pdf(k['belge'])}{_tur.get(k['tur'], '')}", n),
+                             k['tarih'].strftime('%d.%m.%Y') if k['tarih'] else '-',
+                             k['vade'].strftime('%d.%m.%Y') if k['vade'] else '-',
+                             m(k['tutar']), m(k['odenen']), m(k['kalan']),
+                             f"{gec} gün gecikti" if gec > 0 else (f"{-gec} gün var" if k['vade'] else '-')])
+                if gec > 0:
+                    stil.append(('TEXTCOLOR', (6, rr), (6, rr), kirmizi))
+        t = Table(data, colWidths=[5.3*cm, 1.9*cm, 1.9*cm, 2.1*cm, 2.0*cm, 2.2*cm, 3.2*cm], repeatRows=1)
+        t.setStyle(TableStyle(stil))
+        elements.append(t)
+        elements.append(Spacer(1, 3*mm))
+        elements.append(Paragraph("Tahsilatlar önce bağlı olduğu fatura/siparişten, artan kısım vadesi en eski borçtan düşülür. "
+                                  "Vade: teklifteki bakiye tarihi ya da vade günü; girilmemişse belge tarihi + 30 gün.", kucuk))
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 
 def generate_gunluk_uretim_form_pdf():
     """Is 5: atolyede elle doldurulacak BOS Gunluk Uretim Takip Formu -

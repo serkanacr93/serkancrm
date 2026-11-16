@@ -864,4 +864,30 @@ window.TEKLIF_YARDIMCI_CSRF = {{ csrf_token()|tojson }};
 <script src="{{ asset_url('js/doviz-ile-gir.js') }}"></script>
 <script>window.KESE_OLCU = {{ (kese_olcu or [])|tojson }};</script>
 <script src="{{ asset_url('js/kese-koli.js') }}"></script>
+<script>
+// 2026-11-16: kart gorunumunde "Birim Fiyat (₺)" etiketi sabitti - teklif
+// para birimi USD/EUR secilince kalemlerdeki etiket de o sembolu gostersin.
+(function () {
+    var pb = document.getElementById('para_birimi');
+    if (!pb) return;
+    var SEM = { TRY: '₺', EUR: '€', USD: '$', GBP: '£' };
+    function guncelle() {
+        var s = SEM[pb.value] || pb.value;
+        document.querySelectorAll('.tk-fiyat > .tk-label').forEach(function (l) {
+            var yeni = 'Birim Fiyat (' + s + ')';
+            if (l.textContent !== yeni) l.textContent = yeni;
+        });
+        document.querySelectorAll('input[name^="price_"]').forEach(function (i) {
+            if (i.placeholder && i.placeholder.indexOf('Birim Fiyat') === 0) i.placeholder = 'Birim Fiyat (' + s + ')';
+        });
+    }
+    pb.addEventListener('change', guncelle);
+    if (window.MutationObserver) {
+        new MutationObserver(function (ms) {
+            for (var k = 0; k < ms.length; k++) { if (ms[k].addedNodes.length) { guncelle(); break; } }
+        }).observe(document.body, { childList: true, subtree: true });
+    }
+    guncelle();
+})();
+</script>
 {% endblock %}

@@ -83,7 +83,7 @@
 
     {% set musteri_active = request.endpoint in ['customers','potential_customers','takip_gerekiyor_customers','duplicate_customers'] or 'customer' in request.endpoint %}
     {% set uretim_active = 'production' in request.endpoint or 'shipment' in request.endpoint or 'irsaliye' in request.endpoint or 'product' in request.endpoint or 'tedarik' in request.endpoint or 'gunluk_uretim' in request.endpoint or request.endpoint in ('uretim_planlama', 'is_emirleri') %}
-    {% set finans_active = request.endpoint == 'cari_hesap_ozeti' or 'invoice' in request.endpoint or 'payment' in request.endpoint or 'commission' in request.endpoint %}
+    {% set finans_active = request.endpoint == 'cari_hesap_ozeti' or 'tahsilat_listesi' in request.endpoint or 'invoice' in request.endpoint or 'payment' in request.endpoint or 'commission' in request.endpoint %}
     {% set raporlar_active = request.endpoint == 'reports' or 'daily_report' in request.endpoint or 'calendar' in request.endpoint or 'task' in request.endpoint %}
     <nav class="crm-navbar navbar navbar-expand-lg navbar-dark">
         <div class="container-fluid px-0">
@@ -174,6 +174,10 @@
                             <a class="crm-mega-box" href="{{ url_for('cari_hesap_ozeti') }}">
                                 <i class="bi bi-wallet2"></i>
                                 <div><strong>Cari Hesap Özeti</strong><small>Müşteri bazlı bakiye</small></div>
+                            </a>
+                            <a class="crm-mega-box" href="{{ url_for('tahsilat_listesi_sayfa') }}">
+                                <i class="bi bi-list-check"></i>
+                                <div><strong>Tahsilat Listesi</strong><small>Açık borç, vade ve gecikme</small></div>
                             </a>
                             <a class="crm-mega-box" href="{{ url_for('invoices') }}">
                                 <i class="bi bi-receipt"></i>

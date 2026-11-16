@@ -1,7 +1,7 @@
 from flask import render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Customer, Deal, DealItem, Production, ProductionItem, PRODUCTION_STAGES, TICARET_STAGES, TICARET_STAGE_KEYS, TICARET_STAGE_LABELS, Shipment, ShipmentItem, ManualIrsaliye, ManualIrsaliyeItem, CARRIER_OPTIONS, SHIPMENT_STATUSES, CustomerStatement, Reminder, Product, Task, Commission, Invoice, InvoiceItem, CustomerVisit, DailyReport, Payment, PotentialCustomer, PlacesSearchConfig, PlacesSearchLog, CompanySettings, ManualPlanningEntry, ManualTedarikEntry, DailyProductionOutput, DailyProductionPhoto, CustomerOldName, DailyOutreachCount, PaymentReminder, HistoricalClosureLog, SystemError, TeklifYardimciConfig, KeseGramajKatalog, DoypackKatalog, BaskiFiyatKatalog, ProductionPlanOrder, TakipModuAtla, IrsaliyeDegisiklikLog, format_price_tr, TR_AYLAR, HATIRLATMA_KAPALI
-from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_cari_ekstre_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, is_emri_kalemleri, generate_siparis_dosyasi_pdf, generate_toplu_is_emri_pdf, generate_is_emri_kontrol_listesi_pdf, TOPLU_PARCA, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, _clean_for_pdf
+from app.pdf_utils import generate_deal_pdf, generate_statement_pdf, generate_cari_ekstre_pdf, generate_irsaliye_pdf, generate_manual_irsaliye_pdf, generate_is_emri_pdf, generate_is_emri_pdf_yatay, is_emri_kalem_bilgisi, is_emri_kalemleri, generate_siparis_dosyasi_pdf, generate_toplu_is_emri_pdf, generate_is_emri_kontrol_listesi_pdf, TOPLU_PARCA, generate_invoice_pdf, generate_production_list_pdf, generate_gunluk_uretim_form_pdf, generate_cari_hesap_pdf, generate_tahsilat_listesi_pdf, _clean_for_pdf
 from app.statement_pdf_import import parse_statement_pdf
 from app import db, places_search, siparisler, limiter, csrf
 from app.tcmb import fetch_tcmb_rate
@@ -1458,7 +1458,25 @@ def register_routes(app):
         else:
             greeting = 'İyi akşamlar'
 
-        return render_template('index_komuta.html',
+        # 2026-11-16: ana sayfa alacak kutulari (Tahsilat Listesi ile ayni
+        # hesap, ayni gorunurluk). Hata olursa ana sayfa BOZULMAZ - kutular gizlenir.
+        alacak_ozet = None
+        try:
+            from app.acik_kalem import tahsilat_listesi as _tahsilat_listesi
+            _satirlar, _ = _tahsilat_listesi()
+            _satirlar = [x for x in _satirlar if x['customer'].status != 'musteri_degil'
+                         and (current_user.is_admin or x['customer'].owner_user_id == current_user.id)]
+            alacak_ozet = {
+                'toplam': round(sum(x['toplam_borc'] for x in _satirlar), 2),
+                'musteri': len(_satirlar),
+                'gecen': round(sum(x['vadesi_gecen'] for x in _satirlar), 2),
+                'gecen_musteri': sum(1 for x in _satirlar if x['vadesi_gecen'] > 0.01),
+            }
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('ana sayfa alacak ozeti hesaplanamadi')
+
+        return render_template('index_komuta.html', alacak_ozet=alacak_ozet,
                                 greeting=greeting, today=today,
                                 toplam_teklif=toplam_teklif, siparis_sayisi=siparis_sayisi, donusum_pct=donusum_pct,
                                 siparis_ozet=siparis_ozet, bugun_tahsilat=bugun_tahsilat,
@@ -2770,6 +2788,108 @@ def register_routes(app):
         pdf = generate_cari_hesap_pdf(rows)
         return send_file(pdf, as_attachment=True, download_name=f'cari_hesap_ozeti_{datetime.now().strftime("%Y%m%d")}.pdf')
 
+    def _musteri_acik_kalem_guvenli(customer):
+        """Musteri kartindaki 'Açık kalemler' blogu - hata olursa kart BOZULMAZ."""
+        try:
+            from app.acik_kalem import musteri_acik_kalemleri
+            return musteri_acik_kalemleri(customer)
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('musteri acik kalemleri hesaplanamadi')
+            return None
+
+    def _tahsilat_listesi_satirlari():
+        """2026-11-16 Tahsilat Listesi: acik borcu olan musteriler (app/acik_kalem.py).
+        Gorunurluk Cari Hesap Ozeti ile AYNI: 'musteri_degil' haric, admin
+        olmayan sadece kendi musterilerini gorur. Ekran/Excel/PDF ayni
+        fonksiyonu kullanir. Donus: (satirlar, ozet, filtre, sirala, arama)."""
+        from app.acik_kalem import tahsilat_listesi
+        satirlar, ozet = tahsilat_listesi()
+        satirlar = [s for s in satirlar if s['customer'].status != 'musteri_degil'
+                    and (current_user.is_admin or s['customer'].owner_user_id == current_user.id)]
+        # Ozet kutulari HER ZAMAN gorunen musterilerden hesaplanir (musteri_degil /
+        # baskasinin musterisi kutulara da girmez - liste ile kutular ayni rakam).
+        ozet = dict(ozet)
+        if True:
+            ozet['toplam'] = round(sum(s['toplam_borc'] for s in satirlar), 2)
+            ozet['musteri_sayisi'] = len(satirlar)
+            ozet['vadesi_gecen'] = round(sum(s['vadesi_gecen'] for s in satirlar), 2)
+            ozet['vadesi_gecen_musteri'] = sum(1 for s in satirlar if s['vadesi_gecen'] > 0.01)
+            ozet['yas'] = {k: round(sum(s['yas'][k] for s in satirlar), 2) for k in ozet['yas']}
+            _bugun = date.today()
+            _yakin = [k for s in satirlar for k in s['kalemler']
+                      if k['vade'] and 0 <= (k['vade'] - _bugun).days <= ozet['yakin_gun']]
+            ozet['yakin_tutar'] = round(sum(k['kalan'] for k in _yakin), 2)
+            ozet['yakin_kalem'] = len(_yakin)
+        if not current_user.is_admin:
+            ozet['bu_ay_tahsilat'] = None
+        for s in satirlar:
+            s['city'] = extract_customer_city(s['customer'])
+        filtre = request.args.get('filtre', 'tumu')
+        sirala = request.args.get('sirala', 'gecikme')
+        arama = (request.args.get('q') or '').strip()
+        if filtre == 'gecen':
+            satirlar = [s for s in satirlar if s['vadesi_gecen'] > 0.01]
+        elif filtre == 'yakin':
+            _b = date.today()
+            satirlar = [s for s in satirlar if any(
+                k['vade'] and 0 <= (k['vade'] - _b).days <= ozet['yakin_gun'] for k in s['kalemler'])]
+        if arama:
+            _a = arama.casefold()
+            satirlar = [s for s in satirlar if _a in (s['customer'].display_name or '').casefold()]
+        if sirala == 'borc':
+            satirlar.sort(key=lambda s: -s['toplam_borc'])
+        elif sirala == 'ad':
+            satirlar.sort(key=lambda s: (s['customer'].display_name or '').casefold())
+        else:
+            satirlar.sort(key=lambda s: (-(s['en_eski_gecikme'] or 0), -s['vadesi_gecen'], -s['toplam_borc']))
+        return satirlar, ozet, filtre, sirala, arama
+
+    @app.route('/tahsilat-listesi')
+    @login_required
+    def tahsilat_listesi_sayfa():
+        from app.acik_kalem import YAS_DILIMLERI
+        satirlar, ozet, filtre, sirala, arama = _tahsilat_listesi_satirlari()
+        return render_template('tahsilat_listesi.html', satirlar=satirlar, ozet=ozet, filtre=filtre,
+                               sirala=sirala, arama=arama, yas_dilimleri=YAS_DILIMLERI, today=date.today())
+
+    @app.route('/tahsilat-listesi/export/excel')
+    @login_required
+    def tahsilat_listesi_export_excel():
+        satirlar, ozet, _, _, _ = _tahsilat_listesi_satirlari()
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Tahsilat Listesi'
+        ws.append(['Müşteri', 'Şehir', 'Telefon', 'Açık Borç', 'Vadesi Geçen', 'En Eski Gecikme (gün)',
+                   'Son Ödeme Tarihi', 'Son Ödeme Tutarı'])
+        for s in satirlar:
+            so = s['son_odeme']
+            ws.append([s['customer'].display_name, s['city'] or '-', s['customer'].phone or '-',
+                       s['toplam_borc'], s['vadesi_gecen'], s['en_eski_gecikme'] if s['en_eski_gecikme'] else 0,
+                       so['tarih'].strftime('%d.%m.%Y') if so else '-', so['tutar'] if so else 0])
+        ws2 = wb.create_sheet('Açık Kalemler')
+        ws2.append(['Müşteri', 'Belge', 'Tür', 'Tarih', 'Vade', 'Tutar', 'Ödenen', 'Kalan', 'Gecikme (gün)'])
+        _tur = {'fatura': 'Fatura', 'siparis': 'Faturasız teslim', 'eski': 'Eski borç (muhasebe)'}
+        for s in satirlar:
+            for k in s['kalemler']:
+                ws2.append([s['customer'].display_name, k['belge'], _tur.get(k['tur'], k['tur']),
+                            k['tarih'].strftime('%d.%m.%Y') if k['tarih'] else '-',
+                            k['vade'].strftime('%d.%m.%Y') if k['vade'] else '-',
+                            round(k['tutar'], 2), round(k['odenen'], 2), k['kalan'],
+                            k['gecikme'] if (k['gecikme'] or 0) > 0 else 0])
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        return send_file(buffer, as_attachment=True, download_name=f'tahsilat_listesi_{datetime.now().strftime("%Y%m%d")}.xlsx',
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    @app.route('/tahsilat-listesi/export/pdf')
+    @login_required
+    def tahsilat_listesi_export_pdf():
+        satirlar, ozet, _, _, _ = _tahsilat_listesi_satirlari()
+        pdf = generate_tahsilat_listesi_pdf(satirlar, ozet)
+        return send_file(pdf, as_attachment=True, download_name=f'tahsilat_listesi_{datetime.now().strftime("%Y%m%d")}.pdf')
+
     @app.route('/customers/add', methods=['GET', 'POST'])
     @login_required
     def add_customer():
@@ -3074,7 +3194,7 @@ def register_routes(app):
 
         return render_template('customer_detail.html', customer=customer, deals=deals,
                              statements=statements, total_debit=total_debit, total_credit=total_credit,
-                             balance_info=balance_info,
+                             balance_info=balance_info, acik_kalem=_musteri_acik_kalem_guvenli(customer),
                              daily_reports=daily_reports, pending_productions=pending_productions,
                              last_contact_date=last_contact_date, days_since_contact=days_since_contact,
                              duplicate_siblings=duplicate_siblings,
@@ -3304,7 +3424,19 @@ def register_routes(app):
             donem_metni += ' · sadece eski cari kayıtlar'
         elif not eski:
             donem_metni += ' · sadece sistem hareketleri'
-        pdf = generate_cari_ekstre_pdf(customer, ekstre, detay=acik('detay', False), imza=acik('imza', False), donem_metni=donem_metni)
+        # 2026-11-16: acik kalem ozeti sadece TUM hareketleri iceren ekstrede
+        # (donem ya da tur filtresi yokken) eklenir - filtreli ekstrede bakiye
+        # ile acik kalemler birbirini tutmaz.
+        _acik_kalem = None
+        if not bas and not bit and sistem and eski:
+            try:
+                from app.acik_kalem import musteri_acik_kalemleri
+                _acik_kalem = musteri_acik_kalemleri(customer)
+            except Exception:
+                db.session.rollback()
+                app.logger.exception('ekstre acik kalem ozeti hesaplanamadi')
+        pdf = generate_cari_ekstre_pdf(customer, ekstre, detay=acik('detay', False), imza=acik('imza', False),
+                                       donem_metni=donem_metni, acik_kalem=_acik_kalem)
         ad = re.sub(r'[^A-Za-z0-9]+', '_', unicodedata.normalize('NFKD', customer.display_name or 'musteri').encode('ascii', 'ignore').decode()).strip('_')[:40]
         return send_file(pdf, as_attachment=True, download_name=f'cari_ekstre_{ad}_{bugun.strftime("%Y%m%d")}.pdf')
 

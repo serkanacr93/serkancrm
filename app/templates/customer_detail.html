@@ -102,6 +102,35 @@
                 <div class="small text-muted mt-2 text-center">
                     Faturalanmış + Faturalanmamış Kazanılan Teklif{% if eski_var %} + Eski Borç{% endif %} − Tahsil Edilen = Toplam Bakiye
                 </div>
+                {% if acik_kalem and acik_kalem.toplam_borc > 0.01 %}
+                {# 2026-11-16: acik kalemler (vade / gecikme) - app/acik_kalem.py #}
+                <hr class="my-3">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                    <div class="fw-bold"><i class="bi bi-list-check"></i> Açık kalemler</div>
+                    <div class="small">
+                        <span class="me-3">Vadesi geçen: <strong class="{{ 'text-danger' if acik_kalem.vadesi_gecen > 0.01 else 'text-muted' }}">{{ acik_kalem.vadesi_gecen|para_goster }}</strong>{% if acik_kalem.en_eski_gecikme %} <span class="text-muted">(en eski {{ acik_kalem.en_eski_gecikme }} gün)</span>{% endif %}</span>
+                        <span>Son ödeme: {% if acik_kalem.son_odeme %}<strong>{{ acik_kalem.son_odeme.tutar|para_goster }}</strong> <span class="text-muted">{{ acik_kalem.son_odeme.tarih.strftime('%d.%m.%Y') }}</span>{% else %}<span class="text-muted">yok</span>{% endif %}</span>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                <table class="table table-sm small mb-0">
+                    <thead><tr class="text-muted"><th>Belge</th><th>Tarih</th><th>Vade</th><th class="text-end">Tutar</th><th class="text-end">Ödenen</th><th class="text-end">Kalan</th><th>Durum</th></tr></thead>
+                    <tbody>
+                    {% for k in acik_kalem.kalemler %}
+                    <tr>
+                        <td>{% if k.tur == 'fatura' %}<a href="{{ url_for('invoice_detail', id=k.belge_id) }}">{{ k.belge }}</a>{% elif k.tur == 'siparis' %}<a href="{{ url_for('deal_detail', id=k.belge_id) }}">{{ k.belge }}</a> <span class="text-muted">· faturasız teslim</span>{% else %}{{ k.belge }} <span class="text-muted">· muhasebe</span>{% endif %}</td>
+                        <td>{{ k.tarih.strftime('%d.%m.%Y') if k.tarih else '-' }}</td>
+                        <td>{{ k.vade.strftime('%d.%m.%Y') if k.vade else '-' }}</td>
+                        <td class="text-end">{{ k.tutar|para_goster }}</td>
+                        <td class="text-end text-success">{{ k.odenen|para_goster }}</td>
+                        <td class="text-end fw-bold">{{ k.kalan|para_goster }}</td>
+                        <td>{% if k.gecikme is not none and k.gecikme > 0 %}<span class="text-danger">{{ k.gecikme }} gün gecikti</span>{% elif k.gecikme is not none %}<span class="text-muted">{{ -k.gecikme }} gün var</span>{% else %}-{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>

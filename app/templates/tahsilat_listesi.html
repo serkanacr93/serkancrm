@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}Tahsilat Listesi - CRM Sistemi{% endblock %}
+
+{% block content %}
+<style>
+.th-kutu { background:#fff; border:1px solid #e3e6ea; border-radius:10px; padding:14px 16px; height:100%; }
+.th-kutu .th-etiket { font-size:.82rem; color:#6c757d; }
+.th-kutu .th-deger { font-size:1.45rem; font-weight:600; line-height:1.25; }
+.th-kutu .th-alt { font-size:.8rem; color:#6c757d; }
+.th-yas { display:flex; height:12px; border-radius:6px; overflow:hidden; background:#e9ecef; }
+.th-yas > div { height:100%; }
+.th-renk-gelmedi { background:#9aa0a6; } .th-renk-g1_30 { background:#f0ad4e; } .th-renk-g31_60 { background:#e8743b; }
+.th-renk-g61_90 { background:#dc3545; } .th-renk-g90p { background:#8b1e2b; }
+.th-nokta { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; }
+.th-satir { cursor:pointer; }
+.th-satir .bi-chevron-right { transition:transform .15s; display:inline-block; }
+.th-satir[aria-expanded="true"] .bi-chevron-right { transform:rotate(90deg); }
+.th-detay td { background:#f8f9fa; }
+.th-rozet { font-size:.78rem; padding:.25em .6em; border-radius:6px; white-space:nowrap; font-weight:600; }
+.th-rozet-kirmizi { background:#f8d7da; color:#842029; } .th-rozet-sari { background:#fff3cd; color:#664d03; }
+.th-rozet-gri { background:#e9ecef; color:#495057; }
+.th-son { padding-right:64px !important; }
+@media (max-width: 575.98px) { .th-gizle-m { display:none !important; } }
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h2 class="mb-0"><i class="bi bi-list-check"></i> Tahsilat Listesi <span class="badge bg-secondary">{{ satirlar|length }}</span></h2>
+    <div class="btn-group">
+        <a href="{{ url_for('tahsilat_listesi_export_excel', filtre=filtre, sirala=sirala, q=arama) }}" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
+        <a href="{{ url_for('tahsilat_listesi_export_pdf', filtre=filtre, sirala=sirala, q=arama) }}" class="btn btn-outline-danger"><i class="bi bi-file-earmark-pdf"></i> PDF</a>
+    </div>
+</div>
+
+<div class="row g-2 mb-3">
+    <div class="col-6 col-lg-3"><div class="th-kutu">
+        <div class="th-etiket">Toplam alacak</div>
+        <div class="th-deger">{{ ozet.toplam|para_goster }}</div>
+        <div class="th-alt">{{ ozet.musteri_sayisi }} müşteri</div>
+    </div></div>
+    <div class="col-6 col-lg-3"><div class="th-kutu">
+        <div class="th-etiket">Vadesi geçen</div>
+        <div class="th-deger {{ 'text-danger' if ozet.vadesi_gecen > 0.01 }}">{{ ozet.vadesi_gecen|para_goster }}</div>
+        <div class="th-alt">{{ ozet.vadesi_gecen_musteri }} müşteri</div>
+    </div></div>
+    <div class="col-6 col-lg-3"><div class="th-kutu">
+        <div class="th-etiket">{{ ozet.yakin_gun }} gün içinde vadesi gelen</div>
+        <div class="th-deger">{{ ozet.yakin_tutar|para_goster }}</div>
+        <div class="th-alt">{{ ozet.yakin_kalem }} kalem</div>
+    </div></div>
+    <div class="col-6 col-lg-3"><div class="th-kutu">
+        <div class="th-etiket">Bu ay tahsil edilen</div>
+        {% if ozet.bu_ay_tahsilat is not none %}
+        <div class="th-deger text-success">{{ ozet.bu_ay_tahsilat|para_goster }}</div>
+        <div class="th-alt">{{ ozet.bu_ay_odeme_sayisi }} ödeme</div>
+        {% else %}
+        <div class="th-deger text-muted">-</div>
+        {% endif %}
+    </div></div>
+</div>
+
+{% if ozet.toplam > 0.01 %}
+<div class="card shadow-sm mb-3"><div class="card-body py-3">
+    <div class="th-yas mb-2">
+        {% for anahtar, etiket in yas_dilimleri %}{% if ozet.yas[anahtar] > 0.01 %}
+        <div class="th-renk-{{ anahtar }}" style="width: {{ '%.2f'|format(ozet.yas[anahtar] / ozet.toplam * 100) }}%" title="{{ etiket }}: {{ ozet.yas[anahtar]|para_goster }}"></div>
+        {% endif %}{% endfor %}
+    </div>
+    <div class="d-flex flex-wrap gap-3 small text-muted">
+        {% for anahtar, etiket in yas_dilimleri %}
+        <span><span class="th-nokta th-renk-{{ anahtar }}"></span>{{ etiket }} <strong class="text-dark">{{ ozet.yas[anahtar]|para_goster }}</strong></span>
+        {% endfor %}
+    </div>
+</div></div>
+{% endif %}
+
+<form method="GET" class="card shadow-sm mb-3"><div class="card-body py-2">
+    <div class="row g-2 align-items-center">
+        <div class="col-12 col-md-5"><input type="text" class="form-control" name="q" value="{{ arama }}" placeholder="Müşteri ara..."></div>
+        <div class="col-6 col-md-3">
+            <select class="form-select" name="filtre" onchange="this.form.submit()">
+                <option value="tumu" {{ 'selected' if filtre == 'tumu' }}>Tüm açık borçlar</option>
+                <option value="gecen" {{ 'selected' if filtre == 'gecen' }}>Vadesi geçenler</option>
+                <option value="yakin" {{ 'selected' if filtre == 'yakin' }}>{{ ozet.yakin_gun }} gün içinde vadesi gelen</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-3">
+            <select class="form-select" name="sirala" onchange="this.form.submit()">
+                <option value="gecikme" {{ 'selected' if sirala == 'gecikme' }}>En çok geciken üstte</option>
+                <option value="borc" {{ 'selected' if sirala == 'borc' }}>En yüksek borç üstte</option>
+                <option value="ad" {{ 'selected' if sirala == 'ad' }}>Ada göre</option>
+            </select>
+        </div>
+        <div class="col-12 col-md-1 d-grid"><button class="btn btn-primary" type="submit"><i class="bi bi-search"></i></button></div>
+    </div>
+</div></form>
+
+<div class="card shadow-sm"><div class="card-body p-0">
+{% if satirlar %}
+<div class="table-responsive">
+<table class="table align-middle mb-0">
+    <thead class="table-light">
+        <tr>
+            <th>Müşteri</th>
+            <th class="text-end">Açık borç</th>
+            <th class="text-end d-none d-sm-table-cell">Vadesi geçen</th>
+            <th class="d-none d-sm-table-cell">Gecikme</th>
+            <th class="d-none d-md-table-cell">Son ödeme</th>
+            <th class="text-end d-none d-md-table-cell th-son"></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for s in satirlar %}
+        {% set c = s.customer %}
+        <tr class="th-satir" data-bs-toggle="collapse" data-bs-target="#thd{{ c.id }}" aria-expanded="false">
+            <td>
+                <i class="bi bi-chevron-right small text-muted"></i>
+                <strong>{{ c.display_name }}</strong>
+                {% if s.city %}<div class="small text-muted ms-3">{{ s.city }}</div>{% endif %}
+                <div class="ms-3 mt-1 d-sm-none">
+                    {% if s.en_eski_gecikme %}<span class="th-rozet {{ 'th-rozet-kirmizi' if s.en_eski_gecikme > 30 else 'th-rozet-sari' }}">{{ s.en_eski_gecikme }} gün gecikti</span>
+                    {% elif s.en_yakin_vade %}<span class="th-rozet th-rozet-gri">{{ (s.en_yakin_vade - today).days }} gün var</span>{% endif %}
+                </div>
+            </td>
+            <td class="text-end fw-bold">{{ s.toplam_borc|para_goster }}</td>
+            <td class="text-end d-none d-sm-table-cell {{ 'text-danger fw-bold' if s.vadesi_gecen > 0.01 else 'text-muted' }}">{{ s.vadesi_gecen|para_goster }}</td>
+            <td class="d-none d-sm-table-cell">
+                {% if s.en_eski_gecikme %}
+                <span class="th-rozet {{ 'th-rozet-kirmizi' if s.en_eski_gecikme > 30 else 'th-rozet-sari' }}">{{ s.en_eski_gecikme }} gün</span>
+                {% elif s.en_yakin_vade %}
+                <span class="th-rozet th-rozet-gri">{{ (s.en_yakin_vade - today).days }} gün var</span>
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td class="d-none d-md-table-cell small">
+                {% if s.son_odeme %}{{ s.son_odeme.tarih.strftime('%d.%m.%Y') }}<div class="text-muted">{{ s.son_odeme.tutar|para_goster }}</div>
+                {% else %}<span class="text-muted">ödeme yok</span>{% endif %}
+            </td>
+            <td class="text-end d-none d-md-table-cell th-son">
+                {% if c.phone %}
+                <a href="#" class="btn btn-sm btn-outline-success whatsapp-btn" onclick="event.stopPropagation()" title="WhatsApp hatırlatma"
+                   data-customer-id="{{ c.id }}" data-customer-name="{{ c.display_name }}" data-customer-phone="{{ c.phone }}"
+                   data-message="Merhaba, kolay gelsin. {{ s.toplam_borc|para_goster }} tutarındaki açık bakiyenizi hatırlatmak istedim. Ödeme planınızı paylaşabilir misiniz? Teşekkürler."><i class="bi bi-whatsapp"></i></a>
+                {% endif %}
+            </td>
+        </tr>
+        <tr class="th-detay collapse" id="thd{{ c.id }}">
+            <td colspan="6" class="px-3 py-3">
+                <div class="table-responsive">
+                <table class="table table-sm mb-2 small">
+                    <thead><tr class="text-muted">
+                        <th>Belge</th><th class="th-gizle-m">Tarih</th><th>Vade</th><th class="text-end th-gizle-m">Tutar</th><th class="text-end th-gizle-m">Ödenen</th><th class="text-end">Kalan</th><th>Durum</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for k in s.kalemler %}
+                    <tr>
+                        <td>
+                            {% if k.tur == 'fatura' %}<a href="{{ url_for('invoice_detail', id=k.belge_id) }}">{{ k.belge }}</a>
+                            {% elif k.tur == 'siparis' %}<a href="{{ url_for('deal_detail', id=k.belge_id) }}">{{ k.belge }}</a> <span class="text-muted">· faturasız teslim</span>
+                            {% else %}{{ k.belge }} <span class="text-muted">· muhasebe</span>{% endif %}
+                        </td>
+                        <td class="th-gizle-m">{{ k.tarih.strftime('%d.%m.%Y') if k.tarih else '-' }}</td>
+                        <td>{{ k.vade.strftime('%d.%m.%Y') if k.vade else '-' }}</td>
+                        <td class="text-end th-gizle-m">{{ k.tutar|para_goster }}</td>
+                        <td class="text-end text-success th-gizle-m">{{ k.odenen|para_goster }}</td>
+                        <td class="text-end fw-bold">{{ k.kalan|para_goster }}</td>
+                        <td>
+                            {% if k.gecikme is not none and k.gecikme > 0 %}<span class="text-danger">{{ k.gecikme }} gün gecikti</span>
+                            {% elif k.gecikme is not none %}<span class="text-muted">{{ -k.gecikme }} gün var</span>{% else %}-{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="{{ url_for('add_payment') }}?customer_id={{ c.id }}" class="btn btn-sm btn-success"><i class="bi bi-cash"></i> Ödeme gir</a>
+                    <a href="{{ url_for('customer_statement_pdf', id=c.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-file-pdf"></i> Ekstre PDF</a>
+                    <a href="{{ url_for('customer_detail', id=c.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-person"></i> Müşteri kartı</a>
+                    {% if c.phone %}
+                    <a href="#" class="btn btn-sm btn-outline-success whatsapp-btn d-md-none"
+                       data-customer-id="{{ c.id }}" data-customer-name="{{ c.display_name }}" data-customer-phone="{{ c.phone }}"
+                       data-message="Merhaba, kolay gelsin. {{ s.toplam_borc|para_goster }} tutarındaki açık bakiyenizi hatırlatmak istedim. Ödeme planınızı paylaşabilir misiniz? Teşekkürler."><i class="bi bi-whatsapp"></i> WhatsApp</a>
+                    {% endif %}
+                    {% if s.son_odeme %}<span class="small text-muted align-self-center d-md-none">Son ödeme {{ s.son_odeme.tarih.strftime('%d.%m.%Y') }} · {{ s.son_odeme.tutar|para_goster }}</span>{% endif %}
+                </div>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="p-4 text-center text-muted">Bu filtreye uyan açık borç yok.</div>
+{% endif %}
+</div></div>
+
+<p class="small text-muted mt-3 mb-0">
+    Tahsilatlar önce bağlı olduğu fatura ya da siparişten, artan kısım vadesi en eski borçtan düşülür.
+    Vade: teklifteki bakiye tarihi ya da vade günü; girilmemişse belge tarihi + 30 gün.
+    Toplam, Cari Hesap Özeti'ndeki bakiyelerle aynı kayıtlardan hesaplanır.
+</p>
+{% endblock %}
